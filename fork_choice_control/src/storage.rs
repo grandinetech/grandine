@@ -1047,7 +1047,7 @@ impl<P: Preset> Storage<P> {
         )
     }
 
-    fn pruned_up_to_slot(&self) -> Result<Slot> {
+    pub(crate) fn pruned_up_to_slot(&self) -> Result<Slot> {
         Ok(self.get::<Slot>(PrunedUpToKey)?.unwrap_or(GENESIS_SLOT))
     }
 

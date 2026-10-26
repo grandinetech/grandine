@@ -640,13 +640,25 @@ pub async fn state_root<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<RootResponse>, Error> {
+    let root_without_state = match state_id {
+        StateId::Root(root) => controller
+            .slot_by_state_root(root)?
+            .map(|status| status.map(|_| root)),
+        StateId::Slot(slot) => controller
+            .stored_block_by_slot(slot)?
+            .map(|status| status.map(|block| block.block.message().state_root())),
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => None,
+    };
+
     let WithStatus {
-        value: state,
+        value: root,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
-
-    let root = state.hash_tree_root();
+    } = match root_without_state {
+        Some(root) => root,
+        None => state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?
+            .map(|state| state.hash_tree_root()),
+    };
 
     Ok(EthResponse::json(RootResponse { root })
         .execution_optimistic(status.is_optimistic())
@@ -658,15 +670,30 @@ pub async fn state_root<P: Preset, W: Wait>(
 pub async fn state_fork<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<Fork>, Error> {
+    let fork_without_state = match state_id {
+        StateId::Slot(slot) => controller.status_at_slot(slot)?.map(|status| {
+            status.map(|()| chain_config.fork_at_epoch(misc::compute_epoch_at_slot::<P>(slot)))
+        }),
+        StateId::Root(root) => controller.slot_by_state_root(root)?.map(|status| {
+            status.map(|slot| chain_config.fork_at_epoch(misc::compute_epoch_at_slot::<P>(slot)))
+        }),
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => None,
+    };
+
     let WithStatus {
-        value: state,
+        value: fork,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = match fork_without_state {
+        Some(fork) => fork,
+        None => state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?
+            .map(|state| state.fork()),
+    };
 
-    Ok(EthResponse::json(state.fork())
+    Ok(EthResponse::json(fork)
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }

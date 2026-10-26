@@ -164,6 +164,49 @@ where
         })
     }
 
+    pub fn status_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<()>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        let store = self.store_snapshot();
+
+        if let Some(chain_link) = store.chain_link_before_or_at(slot) {
+            return Ok(Some(WithStatus {
+                value: (),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        if slot < self.storage().pruned_up_to_slot()? {
+            return Ok(None);
+        }
+
+        Ok(self
+            .storage()
+            .block_root_before_or_at_slot(slot)?
+            .map(|_| WithStatus::valid_and_finalized(())))
+    }
+
+    pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {
+        let store = self.store_snapshot();
+
+        if let Some(chain_link) = store.chain_link_by_state_root(state_root) {
+            return Ok(Some(WithStatus {
+                value: chain_link.slot(),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(chain_link.slot()),
+            }));
+        }
+
+        let pruned_up_to_slot = self.storage().pruned_up_to_slot()?;
+
+        Ok(self
+            .storage()
+            .slot_by_state_root(state_root)?
+            .filter(|slot| *slot >= pruned_up_to_slot)
+            .map(|slot| WithStatus::valid(slot, store.is_slot_finalized(slot))))
+    }
+
     #[must_use]
     pub fn last_finalized_block_root(&self) -> WithStatus<H256> {
         let store = self.store_snapshot();
@@ -406,6 +449,11 @@ where
         &self,
         slot: Slot,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        self.ensure_slot_reachable(slot)?;
+        self.state_at_slot_blocking(slot)
+    }
+
+    fn ensure_slot_reachable(&self, slot: Slot) -> Result<()> {
         let store_epoch = self.store_snapshot().current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
         let max_allowed_epoch = store_epoch.saturating_add(P::MinSeedLookahead::U64);
@@ -423,7 +471,7 @@ where
             );
         }
 
-        self.state_at_slot_blocking(slot)
+        Ok(())
     }
 
     pub fn state_before_or_at_slot(
@@ -1983,5 +2031,37 @@ mod tests {
             .state_at_slot_checked_blocking(23)
             .expect("should get state at slot 23");
         assert!(controller.state_at_slot_checked_blocking(24).is_err());
+    }
+
+    #[test]
+    fn status_and_slot_by_state_root_are_read_from_the_store() -> Result<()> {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let genesis_state_root = genesis_block.message().state_root();
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        assert_eq!(
+            controller
+                .slot_by_state_root(genesis_state_root)?
+                .map(|with_status| with_status.value),
+            Some(GENESIS_SLOT),
+        );
+        assert!(
+            controller
+                .slot_by_state_root(H256::repeat_byte(1))?
+                .is_none()
+        );
+
+        assert!(controller.status_at_slot(15)?.is_some());
+        assert!(controller.status_at_slot(16).is_err());
+
+        Ok(())
     }
 }
