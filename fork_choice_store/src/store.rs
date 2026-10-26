@@ -2,7 +2,6 @@ use core::{
     cell::OnceCell,
     cmp::Ordering::{Equal, Greater, Less},
     ops::{Bound, RangeInclusive},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 use std::{
     backtrace::Backtrace,
@@ -309,7 +308,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     delayed_block_at_slot: HashMap<Slot, H256>,
     requested_blobs_from_el: HashMap<H256, Slot>,
-    current_slot_blocks_in_processing: Arc<AtomicUsize>,
+    current_slot_blocks_in_processing: Arc<SccHashMap<H256, Slot>>,
 }
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
@@ -428,7 +427,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             sidecars_construction_started,
             delayed_block_at_slot: HashMap::default(),
             requested_blobs_from_el: HashMap::default(),
-            current_slot_blocks_in_processing: Arc::new(AtomicUsize::new(0)),
+            current_slot_blocks_in_processing: Arc::default(),
         }
     }
 
@@ -2197,7 +2196,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         if block.item.message().slot() == self.slot() {
-            self.inc_current_slot_blocks_in_processing();
+            self.mark_current_slot_block_in_processing(block_root, block.item.message().slot());
         }
 
         let started_at = std::time::Instant::now();
@@ -7167,27 +7166,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn has_current_slot_blocks_in_processing(&self) -> bool {
+        let slot = self.slot();
+
         self.current_slot_blocks_in_processing
-            .load(Ordering::SeqCst)
-            > 0
+            .any_sync(|_, block_slot| *block_slot == slot)
+            .is_some()
     }
 
-    pub fn dec_current_slot_blocks_in_processing(&self) {
-        let _ = self.current_slot_blocks_in_processing.try_update(
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-            |count| count.checked_sub(1),
-        );
+    pub fn unmark_current_slot_block_in_processing(&self, block_root: H256) {
+        self.current_slot_blocks_in_processing
+            .remove_sync(&block_root);
     }
 
-    fn inc_current_slot_blocks_in_processing(&self) {
+    fn mark_current_slot_block_in_processing(&self, block_root: H256, slot: Slot) {
         self.current_slot_blocks_in_processing
-            .fetch_add(1, Ordering::SeqCst);
+            .upsert_sync(block_root, slot);
     }
 
     fn reset_current_slot_blocks_in_processing(&self) {
-        self.current_slot_blocks_in_processing
-            .store(0, Ordering::SeqCst);
+        self.current_slot_blocks_in_processing.clear_sync();
     }
 
     fn storage_mode(&self) -> StorageMode {

@@ -4557,7 +4557,8 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         )
     };
 
-    let payload_present = controller.stored_envelope_by_root(block_root)?.is_some();
+    // Only an envelope seen before `PAYLOAD_DUE_BPS` counts as present.
+    let payload_present = controller.is_payload_present_timely(block_root);
 
     if state.slot() < slot {
         state = tokio::task::spawn_blocking(move || {
