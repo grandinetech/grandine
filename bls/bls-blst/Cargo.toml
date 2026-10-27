@@ -23,3 +23,6 @@ zeroize = { workspace = true }
 [dev-dependencies]
 std_ext = { workspace = true }
 tap = { workspace = true }
+[lints.rust]
+# `fixed_hash::construct_fixed_hash!` checks `feature = "dev"` in the crates that invoke it.
+unexpected_cfgs = { level = 'warn', check-cfg = ['cfg(feature, values("dev"))'] }

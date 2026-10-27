@@ -71,7 +71,6 @@ mod tests {
         nonstandard::smallvec,
         phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator},
         preset::Mainnet,
-        traits::SszValidatorList as _,
     };
 
     use crate::slot_report::RealSlotReport;

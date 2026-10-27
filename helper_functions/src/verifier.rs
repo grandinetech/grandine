@@ -477,7 +477,7 @@ pub enum VerifierOption {
 mod tests {
     use bls::{SecretKey, SecretKeyBytes, traits::SecretKey as _};
     use std_ext::CopyExt as _;
-    use tap::{Conv as _, TryConv as _};
+    use tap::Conv as _;
 
     use super::*;
 

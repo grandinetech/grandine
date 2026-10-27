@@ -222,8 +222,10 @@ fn read_variable_elements<'all, C, T: SszRead<C>>(
     first_offset: usize,
 ) -> Result<impl Iterator<Item = Result<T, ReadError>> + 'all, ReadError> {
     let results = subslice(bytes, 0..first_offset)?
-        .chunks_exact(BYTES_PER_LENGTH_OFFSET.get())
-        .map(read_offset_unchecked)
+        .as_chunks::<{ BYTES_PER_LENGTH_OFFSET.get() }>()
+        .0
+        .iter()
+        .map(|chunk| read_offset_unchecked(chunk))
         .chain(core::iter::once(Ok(bytes.len())))
         .tuple_windows()
         .map(move |(start_result, end_result)| {

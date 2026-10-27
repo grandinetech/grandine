@@ -171,8 +171,10 @@ impl Sha256State {
     fn output(self) -> H256 {
         let mut output = H256::default();
 
-        for (o, s) in output.as_bytes_mut().chunks_exact_mut(4).zip(self.0) {
-            o.copy_from_slice(&s.to_be_bytes());
+        let (chunks, _) = output.as_bytes_mut().as_chunks_mut();
+
+        for (o, s) in chunks.iter_mut().zip(self.0) {
+            *o = s.to_be_bytes();
         }
 
         output

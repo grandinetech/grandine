@@ -92,8 +92,8 @@ fn swap_around_mirror<T: Send>(
     offset: usize,
     worker_count: usize,
 ) {
-    // `[T]::chunks_exact_mut` and `[T]::rchunks_exact_mut` are needed for full performance.
-    // `[T]::as_chunks_mut` and `[T]::as_rchunks_mut` could simplify this when stabilized.
+    // Fixed-size chunks from `[T]::as_chunks_mut` and `[T]::as_rchunks_mut` are needed for full
+    // performance.
 
     let mirror = slice.len() / 2;
     let offset_mirror = offset.saturating_add(mirror);
@@ -166,8 +166,8 @@ fn swap_around_mirror<T: Send>(
 fn swap_chunk_range<T>(seed: H256, round: u8, low: &mut [T], high: &mut [T], offset: usize) {
     for (offset_chunk_index, low_chunk, high_chunk) in izip!(
         (0..offset / BITS_PER_HASH).rev(),
-        low.chunks_exact_mut(BITS_PER_HASH),
-        high.rchunks_exact_mut(BITS_PER_HASH)
+        low.as_chunks_mut::<BITS_PER_HASH>().0,
+        high.as_rchunks_mut::<BITS_PER_HASH>().1.iter_mut().rev(),
     ) {
         let source = compute_source(seed, round, offset_chunk_index);
         let bit_indices = 0..BITS_PER_HASH;

@@ -2515,14 +2515,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let index = self.next_graffiti_index;
 
-        if let Some(next_graffiti_index) = index
+        self.next_graffiti_index = index
             .saturating_add(1)
-            .checked_rem(self.validator_config.graffiti.len())
-        {
-            self.next_graffiti_index = next_graffiti_index;
-        } else {
-            return None;
-        }
+            .checked_rem(self.validator_config.graffiti.len())?;
 
         Some(self.validator_config.graffiti[index])
     }
