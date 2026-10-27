@@ -133,7 +133,8 @@ pub mod gloas {
 }
 
 pub use collections::{
-    PayloadExpectedWithdrawals, PendingDeposits, ProposerLookahead, Ptc, PtcWindow, Validators,
+    PayloadExpectedWithdrawals, PendingDeposits, ProposerLookahead, Ptc, PtcWindow, RandaoMixes,
+    Validators,
 };
 
 mod collections;

@@ -6,12 +6,14 @@ use helper_functions::misc;
 use ssz::{Compressed, Hc};
 use std_ext::ArcExt as _;
 use types::{
-    ProposerLookahead,
+    ProposerLookahead, RandaoMixes,
     altair::containers::SyncCommittee,
     combined::BeaconState,
+    nonstandard::{EffectiveBalanceList, PartialValidatorList},
     phase0::{
         containers::Checkpoint,
-        primitives::{Slot, ValidatorIndex},
+        primitives::{H256, Slot, ValidatorIndex},
+        validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
     storage::{BeaconStateFrameCursor, BeaconStatePatchCursor},
@@ -429,5 +431,344 @@ impl<P: Preset> StateProposerLookahead<P> {
         };
 
         Ok(Some(patches))
+    }
+}
+
+pub struct CommitteeFields<P: Preset> {
+    pub slot: Slot,
+    pub validators: ValidatorColumns,
+    pub randao_mixes: RandaoMixes<P>,
+}
+
+impl<P: Preset> StateField<P> for CommitteeFields<P> {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        Self {
+            slot: state.slot(),
+            validators: ValidatorColumns::from_state(state),
+            randao_mixes: state.randao_mixes().clone(),
+        }
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        if misc::compute_epoch_at_slot::<P>(rows.state_slot())
+            != misc::compute_epoch_at_slot::<P>(slot)
+        {
+            return Ok(None);
+        }
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let base = match row {
+                StateRow::Delta(patch) => {
+                    patches.push(Self::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => Self::from_frame(&frame)?,
+                StateRow::State(state) => Self::from_state(&state),
+            };
+
+            let mut columns = (
+                base.validators.partial_validators,
+                base.validators.effective_balances,
+            );
+            let mut randao_mixes = base.randao_mixes;
+
+            for (validators_patch, randao_mixes_patch) in patches.into_iter().rev() {
+                validators_patch.apply(&mut columns)?;
+                randao_mixes_patch.apply(&mut randao_mixes)?;
+            }
+
+            let (partial_validators, effective_balances) = columns;
+
+            return Ok(Some(Self {
+                slot,
+                validators: ValidatorColumns {
+                    partial_validators,
+                    effective_balances,
+                },
+                randao_mixes,
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+impl<P: Preset> CommitteeFields<P> {
+    fn from_frame(frame: &BeaconStateFrameCursor<P>) -> Result<Self> {
+        let (slot, randao_mixes) = match frame {
+            BeaconStateFrameCursor::Phase0(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+            BeaconStateFrameCursor::Altair(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+            BeaconStateFrameCursor::Bellatrix(frame) => {
+                (frame.get_slot()?, frame.get_randao_mixes()?)
+            }
+            BeaconStateFrameCursor::Capella(frame) => {
+                (frame.get_slot()?, frame.get_randao_mixes()?)
+            }
+            BeaconStateFrameCursor::Deneb(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+            BeaconStateFrameCursor::Electra(frame) => {
+                (frame.get_slot()?, frame.get_randao_mixes()?)
+            }
+            BeaconStateFrameCursor::Fulu(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+            BeaconStateFrameCursor::Gloas(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+        };
+
+        Ok(Self {
+            slot,
+            validators: ValidatorColumns::from_frame(frame)?,
+            randao_mixes,
+        })
+    }
+
+    fn patches(
+        patch: &BeaconStatePatchCursor<P>,
+    ) -> Result<(Compressed<ValidatorListPatch>, VectorPatch<H256>)> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Altair(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Bellatrix(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Capella(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Deneb(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Electra(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Fulu(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+            BeaconStatePatchCursor::Gloas(patch) => {
+                (patch.get_validators()?, patch.get_randao_mixes()?)
+            }
+        };
+
+        Ok(patches)
+    }
+}
+
+pub struct ValidatorColumns {
+    pub partial_validators: PartialValidatorList,
+    pub effective_balances: EffectiveBalanceList,
+}
+
+impl<P: Preset> StateField<P> for ValidatorColumns {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        let (_, effective_balances, partial_validators) = match state {
+            BeaconState::Phase0(state) => state.validators.clone().into_columns(),
+            BeaconState::Altair(state) => state.validators.clone().into_columns(),
+            BeaconState::Bellatrix(state) => state.validators.clone().into_columns(),
+            BeaconState::Capella(state) => state.validators.clone().into_columns(),
+            BeaconState::Deneb(state) => state.validators.clone().into_columns(),
+            BeaconState::Electra(state) => state.validators.clone().into_columns(),
+            BeaconState::Fulu(state) => state.validators.clone().into_columns(),
+            BeaconState::Gloas(state) => state.validators.clone().into_columns(),
+        };
+
+        Self {
+            partial_validators,
+            effective_balances,
+        }
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        if misc::compute_epoch_at_slot::<P>(rows.state_slot())
+            != misc::compute_epoch_at_slot::<P>(slot)
+        {
+            return Ok(None);
+        }
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let base = match row {
+                StateRow::Delta(patch) => {
+                    patches.push(Self::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => Self::from_frame(&frame)?,
+                StateRow::State(state) => Self::from_state(&state),
+            };
+
+            let mut columns = (base.partial_validators, base.effective_balances);
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut columns)?;
+            }
+
+            let (partial_validators, effective_balances) = columns;
+
+            return Ok(Some(Self {
+                partial_validators,
+                effective_balances,
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+impl ValidatorColumns {
+    #[expect(clippy::too_many_lines)]
+    fn from_frame<P: Preset>(frame: &BeaconStateFrameCursor<P>) -> Result<Self> {
+        let columns = match frame {
+            BeaconStateFrameCursor::Phase0(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Altair(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Bellatrix(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Capella(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Deneb(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Electra(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Fulu(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+            BeaconStateFrameCursor::Gloas(frame) => {
+                let validators = frame.get_validators()?;
+
+                Self {
+                    partial_validators: validators
+                        .get_partial_validators()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                    effective_balances: validators
+                        .get_effective_balances()?
+                        .into_inner()
+                        .into_iter()
+                        .collect(),
+                }
+            }
+        };
+
+        Ok(columns)
+    }
+
+    fn patches<P: Preset>(
+        patch: &BeaconStatePatchCursor<P>,
+    ) -> Result<Compressed<ValidatorListPatch>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Altair(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Bellatrix(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Capella(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Deneb(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Electra(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_validators()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_validators()?,
+        };
+
+        Ok(patches)
     }
 }

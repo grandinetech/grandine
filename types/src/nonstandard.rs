@@ -1055,6 +1055,10 @@ impl From<&Validator> for PartialValidator {
     }
 }
 
+pub type PartialValidatorList = Vector<PartialValidator>;
+
+pub type EffectiveBalanceList = Vector<Gwei>;
+
 #[expect(clippy::too_long_first_doc_paragraph)]
 /// Low-level validator list implementation, containing only in-memory list
 /// representation and methods for correctly operating on it. This allows
@@ -1071,10 +1075,10 @@ pub struct RawValidatorList {
     /// Validator effective balances change very frequently, comparing to other
     /// fields, so we keep them separately, so that we don't have to clone every
     /// other field when only balance changes.
-    effective_balances: Vector<Gwei>,
+    effective_balances: EffectiveBalanceList,
 
     /// Rest validator fields. These change rarely, so kept separately.
-    items: Vector<PartialValidator>,
+    items: PartialValidatorList,
 }
 
 impl RawValidatorList {
@@ -1082,8 +1086,8 @@ impl RawValidatorList {
     #[must_use]
     pub fn from_columns(
         pubkeys: PubkeyList,
-        effective_balances: Vector<Gwei>,
-        items: Vector<PartialValidator>,
+        effective_balances: EffectiveBalanceList,
+        items: PartialValidatorList,
     ) -> Self {
         assert_eq!(pubkeys.len(), effective_balances.len());
         assert_eq!(pubkeys.len(), items.len());
@@ -1093,6 +1097,17 @@ impl RawValidatorList {
             effective_balances,
             items,
         }
+    }
+
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        let Self {
+            pubkeys,
+            effective_balances,
+            items,
+        } = self;
+
+        (pubkeys, effective_balances, items)
     }
 
     pub fn get(&self, index: u64) -> Result<Validator, IndexError> {

@@ -23,7 +23,10 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
-    nonstandard::{PartialValidator, PubkeyList, RawValidatorList, ValidatorListIter},
+    nonstandard::{
+        EffectiveBalanceList, PartialValidator, PartialValidatorList, PubkeyList, RawValidatorList,
+        ValidatorListIter,
+    },
     phase0::{
         containers::Validator,
         primitives::Gwei,
@@ -195,6 +198,11 @@ impl ProgressiveValidatorList {
             cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize(), 0)),
             buf,
         }
+    }
+
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        self.buf.into_columns()
     }
 
     fn invalidate_index(&mut self, index: usize) {

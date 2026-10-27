@@ -3018,7 +3018,7 @@ mod tests {
         preset::Mainnet,
     };
 
-    use crate::state_field::{FinalityCheckpoints, StateField as _};
+    use crate::state_field::{CommitteeFields, FinalityCheckpoints, StateField as _};
 
     use super::*;
 
@@ -4381,6 +4381,82 @@ mod tests {
             read(547)?,
             Some(FinalityCheckpoints::from_state(&child_state)),
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn committee_fields_are_read_through_a_delta_chain() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        let validator_source = state_with_validators(0, 8, 0);
+        let finalized_validators = validator_source.validators();
+
+        let anchor_root = H256::repeat_byte(1);
+        let parent_root = H256::repeat_byte(2);
+        let child_root = H256::repeat_byte(3);
+
+        storage.database.put_batch_raw(
+            [(0, anchor_root), (512, parent_root), (544, child_root)]
+                .into_iter()
+                .map(|(slot, root)| {
+                    serialize(BlockRootBySlot(slot), BlockRootBySlotValue::Block(root))
+                })
+                .collect::<Result<_>>()?,
+        )?;
+
+        let with_mix = |mut state: Arc<BeaconState<Mainnet>>, epoch, byte| {
+            *state.make_mut().randao_mixes_mut().mod_index_mut(epoch) = H256::repeat_byte(byte);
+            state
+        };
+
+        let anchor_state = state_with_validators(0, 6, 0);
+        let parent_state = with_mix(state_with_validators(512, 7, 1), 16, 7);
+        let child_state = with_mix(with_mix(state_with_validators(544, 8, 2), 16, 7), 17, 8);
+
+        storage.append_finalized_states(
+            [
+                (0, Some(anchor_root), anchor_state),
+                (512, Some(parent_root), parent_state.clone_arc()),
+                (544, Some(child_root), child_state.clone_arc()),
+            ],
+            0,
+            finalized_validators,
+        )?;
+
+        let read = |slot| -> Result<_> {
+            let Some(rows) = storage.state_rows_before_or_at(slot)? else {
+                return Ok(None);
+            };
+
+            Ok(CommitteeFields::reconstruct(slot, rows)?.map(|fields| {
+                (
+                    fields.slot,
+                    fields.validators.partial_validators,
+                    fields.validators.effective_balances,
+                    fields.randao_mixes.hash_tree_root(),
+                )
+            }))
+        };
+
+        let expected = |slot, state: &BeaconState<Mainnet>| {
+            Some((
+                slot,
+                state.validators().partial_validators().copied().collect(),
+                state.validators().effective_balances().copied().collect(),
+                state.randao_mixes().hash_tree_root(),
+            ))
+        };
+
+        for clear_caches in [false, true] {
+            if clear_caches {
+                storage.clear_caches();
+            }
+
+            assert_eq!(read(547)?, expected(547, &child_state));
+            assert_eq!(read(543)?, expected(543, &parent_state));
+            assert_eq!(read(576)?, None);
+        }
 
         Ok(())
     }

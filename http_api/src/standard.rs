@@ -36,8 +36,8 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
-    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StateProposerLookahead,
-    StoredBlock, SyncCommittees, Topic, Wait,
+    CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
+    StateField as _, StateProposerLookahead, StoredBlock, SyncCommittees, Topic, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -987,12 +987,13 @@ pub async fn state_committees<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
     let WithStatus {
-        value: mut state,
+        value: mut fields,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<CommitteeFields<P>> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+    let state_epoch = misc::compute_epoch_at_slot::<P>(fields.slot);
     let epoch = query.epoch.unwrap_or(state_epoch);
 
     let slots = match query.slot {
@@ -1006,15 +1007,15 @@ pub async fn state_committees<P: Preset, W: Wait>(
     };
 
     // TODO(Grandine Team): Optimize state lookup.
-    //                      The state is looked up twice, first in `StateId::state` above,
+    //                      The state is looked up twice, first in `state_id::field` above,
     //                      then in `Controller::state_at_slot`.
     //                      That means twice the amount of database lookups and state transitions.
-    if epoch == accessors::get_next_epoch(&state)?
+    if epoch == state_epoch.saturating_add(1)
         || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()).saturating_add(1)
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        state = tokio::task::spawn_blocking(move || {
+        let state = tokio::task::spawn_blocking(move || {
             controller
                 .state_at_slot_blocking(start_slot)?
                 .ok_or(Error::StateNotFound)?
@@ -1022,21 +1023,37 @@ pub async fn state_committees<P: Preset, W: Wait>(
                 .pipe(Ok::<_, AnyhowError>)
         })
         .await??;
+
+        fields = CommitteeFields::from_state(&state);
     }
 
-    let relative_epoch = accessors::relative_epoch(&state, epoch)?;
-    let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
+    accessors::compute_relative_epoch(misc::compute_epoch_at_slot::<P>(fields.slot), epoch)?;
 
-    let indices = query
+    let indices = accessors::compute_shuffled_active_validator_indices::<P>(
+        &fields.validators.partial_validators,
+        &fields.randao_mixes,
+        epoch,
+    )?;
+
+    let committee_count_per_slot = misc::committee_count_from_active_validator_count::<P>(
+        u64::try_from(indices.len()).map_err(AnyhowError::new)?,
+    );
+
+    let committee_indices = query
         .index
         .map(core::iter::once)
         .map(Either::Left)
         .unwrap_or_else(|| Either::Right(0..committee_count_per_slot));
 
     let responses = slots
-        .cartesian_product(indices)
+        .cartesian_product(committee_indices)
         .map(|(slot, index)| {
-            let committee = accessors::beacon_committee(&state, slot, index)?;
+            let committee = accessors::compute_beacon_committee::<P>(
+                &indices,
+                committee_count_per_slot,
+                slot,
+                index,
+            )?;
 
             Ok(StateCommitteeResponse {
                 index,

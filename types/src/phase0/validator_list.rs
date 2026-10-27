@@ -23,7 +23,10 @@ use try_from_iterator::TryFromIterator;
 use typenum::Unsigned;
 
 use crate::{
-    nonstandard::{PartialValidator, PubkeyList, RawValidatorList, ValidatorListIter},
+    nonstandard::{
+        EffectiveBalanceList, PartialValidator, PartialValidatorList, PubkeyList, RawValidatorList,
+        ValidatorListIter,
+    },
     phase0::{containers::Validator, primitives::Gwei},
     traits::SszValidatorList,
 };
@@ -208,6 +211,11 @@ impl<N: Unsigned> ValidatorList<N> {
             buf,
             phantom: PhantomData,
         }
+    }
+
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        self.buf.into_columns()
     }
 
     fn depth(&self) -> u8 {
