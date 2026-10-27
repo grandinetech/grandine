@@ -36,7 +36,8 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
-    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
+    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StateProposerLookahead,
+    StoredBlock, SyncCommittees, Topic, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -133,7 +134,7 @@ use types::{
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         self, BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        BlockBodyWithPayloadBid, PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
+        BlockBodyWithPayloadBid, PostGloasBeaconState, SignedBeaconBlock as _,
     },
 };
 use validator::{
@@ -1059,35 +1060,38 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateSyncCommitteesQuery>,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: state,
+        value: committees,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<Option<SyncCommittees<P>>> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let Some(state) = state.post_altair() else {
+    let Some(committees) = committees else {
         return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
             .into_response());
     };
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+    let state_epoch = misc::compute_epoch_at_slot::<P>(committees.slot);
     let state_period = misc::sync_committee_period::<P>(state_epoch);
     let requested_epoch = query.epoch.unwrap_or(state_epoch);
     let requested_period = misc::sync_committee_period::<P>(requested_epoch);
 
     let committee = if requested_period == state_period {
-        state.current_sync_committee()
+        committees.current
     } else if requested_period == state_period.saturating_add(1) {
-        state.next_sync_committee()
+        committees.next
     } else {
         return Err(Error::EpochNotInSyncCommitteePeriod);
     };
 
+    let head_state = controller.head_state().value;
+
     let validator_indices = committee
         .pubkeys
         .iter()
-        .filter_map(|pubkey| accessors::index_of_public_key(state, pubkey))
+        .filter_map(|pubkey| accessors::index_of_public_key(&*head_state, pubkey))
         .collect_vec();
 
     let validators = validator_indices.clone();
@@ -1112,25 +1116,26 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: state,
+        value: lookahead,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<Option<StateProposerLookahead<P>>> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let version = state.phase();
-    let proposer_lookahead = state
-        .post_fulu()
-        .map(PostFuluBeaconState::proposer_lookahead)
-        .ok_or(Error::StatePreFulu)?;
+    let StateProposerLookahead {
+        slot,
+        proposer_lookahead,
+    } = lookahead.ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
-        .version(version)
+        .version(chain_config.phase_at_slot::<P>(slot))
         .into_response())
 }
 
@@ -3610,34 +3615,45 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     let requested_period = misc::sync_committee_period::<P>(epoch);
     let head_state = controller.head_state();
 
-    let (
+    let WithStatus {
+        value: committee,
+        status,
+        // `duties` responses are not supposed to contain a `finalized` field.
+        finalized: _,
+    } = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
         WithStatus {
-            value: state,
-            status,
-            // `duties` responses are not supposed to contain a `finalized` field.
-            finalized: _,
-        },
-        committee,
-    ) = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
-        (head_state, committee)
+            value: committee,
+            status: head_state.status,
+            finalized: head_state.finalized,
+        }
     } else {
         // A committee is known a period ahead, so the state at the current epoch serves the next
         // period even while fork choice is still finishing the previous one.
         let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
-        let state = state_id::state(
+        let WithStatus {
+            value: committees,
+            status,
+            finalized,
+        }: WithStatus<Option<SyncCommittees<P>>> = state_id::field(
             &StateId::Slot(start_slot),
             &controller,
             &anchor_checkpoint_provider,
         )?;
 
-        if let Some(committee) = state_sync_committee(&state.value, requested_period) {
-            (state, committee)
+        if let Some(committees) = committees {
+            WithStatus {
+                value: committees.current,
+                status,
+                finalized,
+            }
         } else {
             return Err(Error::EpochNotInSyncCommitteePeriod);
         }
     };
+
+    let state = head_state.value;
 
     let duties = validator_indices
         .into_iter()

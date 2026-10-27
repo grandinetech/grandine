@@ -26,7 +26,7 @@ pub use crate::{
     },
     queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
-    state_field::{FinalityCheckpoints, StateField},
+    state_field::{FinalityCheckpoints, StateField, StateProposerLookahead, SyncCommittees},
     state_storage_config::StateStorageConfig,
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ZSTD_COMPRESSION_LEVEL,
