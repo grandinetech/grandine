@@ -1,3 +1,4 @@
+use arithmetic::U64Ext as _;
 use diff::{Error, Patch, PatchConfig, PositionalPatch, ReplacePatch, VectorPatch};
 use ssz::{BitVector, Compressed, ReadError, Ssz};
 
@@ -284,5 +285,22 @@ impl<P: Preset> BeaconStateFrame<P> {
             finalized_checkpoint,
             cache: Cache::default(),
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct SlotDiff {
+    pub randao_mix: H256,
+}
+
+impl SlotDiff {
+    #[must_use]
+    pub fn diff<P: Preset>(_base: &BeaconState<P>, changed: &BeaconState<P>) -> Self {
+        Self {
+            randao_mix: *changed
+                .randao_mixes
+                .mod_index(changed.slot.div_typenum::<P::SlotsPerEpoch>()),
+        }
     }
 }

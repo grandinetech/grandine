@@ -46,7 +46,10 @@ use types::{
     },
     preset::Preset,
     redacting_url::RedactingUrl,
-    storage::{BeaconStateFrame, BeaconStateFrameCursor, BeaconStatePatch, BeaconStatePatchCursor},
+    storage::{
+        BeaconStateFrame, BeaconStateFrameCursor, BeaconStatePatch, BeaconStatePatchCursor,
+        SlotDiff, SlotDiffs,
+    },
     traits::{self, BeaconBlock, BeaconState as _, SignedBeaconBlock as _, SszValidatorList},
 };
 
@@ -459,7 +462,7 @@ impl<P: Preset> Storage<P> {
     }
 
     #[inline]
-    #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     pub(crate) fn append_finalized_state(
         &self,
         state: Arc<BeaconState<P>>,
@@ -471,6 +474,83 @@ impl<P: Preset> Storage<P> {
         batch: &mut Vec<(String, Vec<u8>)>,
         update_finalized_validators: &mut bool,
     ) -> Result<Option<StateByBlockRoot>> {
+        let previous_slot = self.hierarchy.node_before_or_at::<P>(
+            &self.config,
+            anchor_slot,
+            slot.saturating_sub(1),
+        );
+
+        let intermediate_slots = previous_slot.saturating_add(1)..slot;
+
+        if !self.prune_storage_enabled()
+            && !intermediate_slots.is_empty()
+            && misc::compute_epoch_at_slot::<P>(previous_slot)
+                == misc::compute_epoch_at_slot::<P>(slot.saturating_sub(1))
+            && intermediate_slots.start >= self.pruned_up_to_slot()?
+            && !self.contains_key(SlotDiffsBySlot(previous_slot))?
+        {
+            let previous_state = match spine.get(previous_slot) {
+                Some((_, previous_state)) => Some(previous_state),
+                None => match self.block_root_by_slot_value(previous_slot)? {
+                    Some(value) => self
+                        .state_with_key_by_block_root(
+                            value.state_key_root(),
+                            Some(finalized_validators),
+                        )?
+                        .map(|(_, previous_state)| previous_state),
+                    None => None,
+                },
+            };
+
+            if let Some(mut intermediate_state) = previous_state {
+                let mut slot_diffs = vec![];
+                let mut previous_root = accessors::get_block_root_at_slot(&*state, previous_slot)?;
+
+                for intermediate_slot in intermediate_slots {
+                    let base_state = intermediate_state.clone_arc();
+                    let block_root = accessors::get_block_root_at_slot(&*state, intermediate_slot)?;
+
+                    if block_root == previous_root {
+                        combined::process_slots(
+                            &self.config,
+                            &self.pubkey_cache,
+                            intermediate_state.make_mut(),
+                            intermediate_slot,
+                        )?;
+                    } else {
+                        match self
+                            .finalized_block_by_root(block_root)?
+                            .ok_or(Error::BlockNotFound { block_root })?
+                        {
+                            StoredBlock::Full(block) => combined::trusted_state_transition(
+                                &self.config,
+                                &self.pubkey_cache,
+                                intermediate_state.make_mut(),
+                                &block,
+                            )?,
+                            StoredBlock::Blinded(block) => {
+                                combined::trusted_blinded_state_transition(
+                                    &self.config,
+                                    &self.pubkey_cache,
+                                    intermediate_state.make_mut(),
+                                    &block,
+                                )?
+                            }
+                        }
+                    }
+
+                    previous_root = block_root;
+
+                    slot_diffs.push(SlotDiff::diff(&base_state, &intermediate_state)?);
+                }
+
+                batch.push(serialize_raw(
+                    SlotDiffsBySlot(previous_slot),
+                    SlotDiffs::with_level(slot_diffs.try_into()?, self.zstd_compression_level),
+                )?);
+            }
+        }
+
         let stored_key = self.state_key_by_block_root(block_root)?;
 
         // We have to check, if state was already persisted, and if so, how:
@@ -1019,6 +1099,7 @@ impl<P: Preset> Storage<P> {
             }
 
             keys_to_remove.push(key_bytes);
+            keys_to_remove.push(SlotDiffsBySlot(slot).to_string().into());
 
             let state_prefix = StateByBlockRoot::prefix(value.state_key_root());
             let state_keys = self.database.keys_ascending(state_prefix.as_bytes()..)?;
@@ -2249,6 +2330,27 @@ impl<P: Preset> StateRows<'_, P> {
         self.state_slot
     }
 
+    pub fn slot_diff(&self, slot: Slot) -> Result<Option<SlotDiff>> {
+        let Some(position) = slot.checked_sub(self.state_slot.saturating_add(1)) else {
+            return Ok(None);
+        };
+
+        let key = SlotDiffsBySlot(self.state_slot).to_string();
+
+        let Some((full_key, row)) = self.view.next_raw(&key)? else {
+            return Ok(None);
+        };
+
+        if full_key != key.as_bytes() {
+            return Ok(None);
+        }
+
+        Ok(SlotDiffs::from_ssz(&self.storage.config, row)?
+            .into_inner()
+            .into_iter()
+            .nth(usize::try_from(position)?))
+    }
+
     pub fn next(&mut self) -> Result<Option<StateRow<'_, P>>> {
         let Some(block_root) = self.next_block_root.take() else {
             return Ok(None);
@@ -2584,6 +2686,14 @@ impl fmt::Display for FinalizedBlockByRoot {
 
         Ok(())
     }
+}
+
+#[derive(Display)]
+#[display("{}{_0:020}", Self::PREFIX)]
+pub struct SlotDiffsBySlot(pub Slot);
+
+impl PrefixableKey for SlotDiffsBySlot {
+    const PREFIX: &'static str = "u";
 }
 
 #[derive(Display)]
@@ -3018,7 +3128,9 @@ mod tests {
         preset::Mainnet,
     };
 
-    use crate::state_field::{CommitteeFields, FinalityCheckpoints, StateField as _};
+    use crate::state_field::{
+        CommitteeFields, FinalityCheckpoints, StateField as _, StateRandaoMixes,
+    };
 
     use super::*;
 
@@ -3806,8 +3918,13 @@ mod tests {
 
         assert!(to_delete.is_none());
 
-        let [(key, _)] = batch.as_slice() else {
-            panic!("exactly one state must have been written, got {batch:?}");
+        let states = batch
+            .iter()
+            .filter(|(key, _)| key.starts_with(StateByBlockRoot::PREFIX))
+            .collect_vec();
+
+        let [(key, _)] = states.as_slice() else {
+            panic!("exactly one state must have been written, got {states:?}");
         };
 
         let key = StateByBlockRoot::try_from(key.as_bytes())?;
@@ -4138,6 +4255,118 @@ mod tests {
         assert_eq!(partial_key.to_string(), cold_key.to_string());
         assert_eq!(warm_state.to_ssz()?, cold_state.to_ssz()?);
         assert_eq!(partial_state.to_ssz()?, cold_state.to_ssz()?);
+
+        Ok(())
+    }
+
+    fn append_states_with_randao_reveals(
+        storage: &Storage<Mainnet>,
+        node_slot: Slot,
+    ) -> Result<Vec<Arc<BeaconState<Mainnet>>>> {
+        let config = Config {
+            min_genesis_active_validator_count: Config::minimal()
+                .min_genesis_active_validator_count,
+            ..Config::mainnet()
+        };
+
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, _) = factory::min_genesis_state::<Mainnet>(&config, &pubkey_cache)?;
+        let genesis_root = H256::repeat_byte(1);
+
+        let mut state = genesis_state.clone_arc();
+        let mut states = vec![];
+        let mut batch = vec![serialize(
+            BlockRootBySlot(0),
+            BlockRootBySlotValue::Block(genesis_root),
+        )?];
+        let mut node_root = genesis_root;
+
+        for slot in [1, 3, node_slot] {
+            states.resize(usize::try_from(slot)?, state.clone_arc());
+
+            let (block, post_state) =
+                factory::empty_block(&config, &pubkey_cache, state, slot, H256::zero())?;
+
+            node_root = block.message().hash_tree_root();
+
+            batch.push(serialize(
+                BlockRootBySlot(slot),
+                BlockRootBySlotValue::Block(node_root),
+            )?);
+            batch.push(serialize(
+                FinalizedBlockByRoot::full(node_root),
+                block.as_ref(),
+            )?);
+
+            state = post_state;
+        }
+
+        states.push(state.clone_arc());
+
+        storage.database.put_batch_raw(batch)?;
+
+        storage.append_finalized_states(
+            [
+                (0, Some(genesis_root), genesis_state.clone_arc()),
+                (node_slot, Some(node_root), state),
+            ],
+            0,
+            genesis_state.validators(),
+        )?;
+
+        storage.clear_caches();
+
+        Ok(states)
+    }
+
+    #[test]
+    fn stored_randao_mixes_read_slot_diffs_between_stored_states() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, 32)?;
+
+        for (slot, state) in (0..).zip(&states) {
+            let rows = storage
+                .state_rows_before_or_at(slot)?
+                .expect("the anchor state is stored");
+
+            let StateRandaoMixes { randao_mixes, .. } =
+                StateRandaoMixes::reconstruct(slot, rows)?.expect("every slot has a stored mix");
+
+            let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
+
+            assert_eq!(
+                *randao_mixes.mod_index(epoch),
+                accessors::get_randao_mix(state, accessors::get_current_epoch(state)),
+                "RANDAO mix in slot {slot}",
+            );
+        }
+
+        let rows = storage
+            .state_rows_before_or_at(32)?
+            .expect("the node state is stored");
+
+        let StateRandaoMixes { randao_mixes, .. } =
+            StateRandaoMixes::reconstruct(32, rows)?.expect("the node state has mixes");
+
+        assert_eq!(
+            *randao_mixes.mod_index(0),
+            accessors::get_randao_mix(&states[31], 0),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn slot_diffs_are_not_stored_without_a_state_in_every_epoch() -> Result<()> {
+        let directory = TempDir::new()?;
+        let storage = storage_with_hierarchy(&directory, [9, 6])?;
+
+        append_states_with_randao_reveals(&storage, 64)?;
+
+        assert!(
+            !storage.contains_key(SlotDiffsBySlot(0))?,
+            "the diffs between slots 0 and 64 would hold an epoch transition",
+        );
 
         Ok(())
     }

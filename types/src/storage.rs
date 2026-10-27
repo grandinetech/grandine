@@ -1,28 +1,31 @@
 use std::sync::Arc;
 
-use diff::{Error as PatchError, Patch, PatchConfig};
+use diff::{Error as PatchError, Patch, PatchConfig, Unlimited};
 use enum_iterator::Sequence as _;
-use ssz::{Hc, ReadError, Size, Ssz, SszCursor, SszRead, SszSize, SszWrite, WriteError};
+use ssz::{
+    Compressed, ContiguousList, Hc, ReadError, Size, Ssz, SszCursor, SszRead, SszSize, SszWrite,
+    WriteError,
+};
 
 use crate::{
     altair::storage::{
         BeaconStateFrame as AltairBeaconStateFrame,
         BeaconStateFrameCursor as AltairBeaconStateFrameCursor,
         BeaconStatePatch as AltairBeaconStatePatch,
-        BeaconStatePatchCursor as AltairBeaconStatePatchCursor,
+        BeaconStatePatchCursor as AltairBeaconStatePatchCursor, SlotDiff as AltairSlotDiff,
     },
     bellatrix::storage::{
         BeaconStateFrame as BellatrixBeaconStateFrame,
         BeaconStateFrameCursor as BellatrixBeaconStateFrameCursor,
         BeaconStatePatch as BellatrixBeaconStatePatch,
-        BeaconStatePatchCursor as BellatrixBeaconStatePatchCursor,
+        BeaconStatePatchCursor as BellatrixBeaconStatePatchCursor, SlotDiff as BellatrixSlotDiff,
     },
     cache::Cache,
     capella::storage::{
         BeaconStateFrame as CapellaBeaconStateFrame,
         BeaconStateFrameCursor as CapellaBeaconStateFrameCursor,
         BeaconStatePatch as CapellaBeaconStatePatch,
-        BeaconStatePatchCursor as CapellaBeaconStatePatchCursor,
+        BeaconStatePatchCursor as CapellaBeaconStatePatchCursor, SlotDiff as CapellaSlotDiff,
     },
     combined::BeaconState,
     config::Config,
@@ -30,32 +33,35 @@ use crate::{
         BeaconStateFrame as DenebBeaconStateFrame,
         BeaconStateFrameCursor as DenebBeaconStateFrameCursor,
         BeaconStatePatch as DenebBeaconStatePatch,
-        BeaconStatePatchCursor as DenebBeaconStatePatchCursor,
+        BeaconStatePatchCursor as DenebBeaconStatePatchCursor, SlotDiff as DenebSlotDiff,
     },
     electra::storage::{
         BeaconStateFrame as ElectraBeaconStateFrame,
         BeaconStateFrameCursor as ElectraBeaconStateFrameCursor,
         BeaconStatePatch as ElectraBeaconStatePatch,
-        BeaconStatePatchCursor as ElectraBeaconStatePatchCursor,
+        BeaconStatePatchCursor as ElectraBeaconStatePatchCursor, SlotDiff as ElectraSlotDiff,
     },
     fulu::storage::{
         BeaconStateFrame as FuluBeaconStateFrame,
         BeaconStateFrameCursor as FuluBeaconStateFrameCursor,
         BeaconStatePatch as FuluBeaconStatePatch,
-        BeaconStatePatchCursor as FuluBeaconStatePatchCursor,
+        BeaconStatePatchCursor as FuluBeaconStatePatchCursor, SlotDiff as FuluSlotDiff,
     },
     gloas::storage::{
         BeaconStateFrame as GloasBeaconStateFrame,
         BeaconStateFrameCursor as GloasBeaconStateFrameCursor,
         BeaconStatePatch as GloasBeaconStatePatch,
-        BeaconStatePatchCursor as GloasBeaconStatePatchCursor,
+        BeaconStatePatchCursor as GloasBeaconStatePatchCursor, SlotDiff as GloasSlotDiff,
     },
     nonstandard::{Phase, PubkeyList},
-    phase0::storage::{
-        BeaconStateFrame as Phase0BeaconStateFrame,
-        BeaconStateFrameCursor as Phase0BeaconStateFrameCursor,
-        BeaconStatePatch as Phase0BeaconStatePatch,
-        BeaconStatePatchCursor as Phase0BeaconStatePatchCursor,
+    phase0::{
+        primitives::H256,
+        storage::{
+            BeaconStateFrame as Phase0BeaconStateFrame,
+            BeaconStateFrameCursor as Phase0BeaconStateFrameCursor,
+            BeaconStatePatch as Phase0BeaconStatePatch,
+            BeaconStatePatchCursor as Phase0BeaconStatePatchCursor, SlotDiff as Phase0SlotDiff,
+        },
     },
     preset::Preset,
     traits::BeaconState as BeaconStateTrait,
@@ -454,6 +460,136 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum SlotDiff {
+    Phase0(Phase0SlotDiff),
+    Altair(AltairSlotDiff),
+    Bellatrix(BellatrixSlotDiff),
+    Capella(CapellaSlotDiff),
+    Deneb(DenebSlotDiff),
+    Electra(ElectraSlotDiff),
+    Fulu(FuluSlotDiff),
+    Gloas(GloasSlotDiff),
+}
+
+impl SlotDiff {
+    pub fn diff<P: Preset>(
+        base: &BeaconState<P>,
+        changed: &BeaconState<P>,
+    ) -> Result<Self, PatchError> {
+        match (base, changed) {
+            (BeaconState::Phase0(base), BeaconState::Phase0(changed)) => Ok(Self::Phase0(
+                Phase0SlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Altair(base), BeaconState::Altair(changed)) => Ok(Self::Altair(
+                AltairSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Bellatrix(base), BeaconState::Bellatrix(changed)) => Ok(Self::Bellatrix(
+                BellatrixSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Capella(base), BeaconState::Capella(changed)) => Ok(Self::Capella(
+                CapellaSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Deneb(base), BeaconState::Deneb(changed)) => Ok(Self::Deneb(
+                DenebSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Electra(base), BeaconState::Electra(changed)) => Ok(Self::Electra(
+                ElectraSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Fulu(base), BeaconState::Fulu(changed)) => Ok(Self::Fulu(
+                FuluSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (BeaconState::Gloas(base), BeaconState::Gloas(changed)) => Ok(Self::Gloas(
+                GloasSlotDiff::diff(base.as_ref(), changed.as_ref()),
+            )),
+            (_, _) => Err(PatchError::CrossPhaseDiff),
+        }
+    }
+
+    #[must_use]
+    pub const fn randao_mix(&self) -> H256 {
+        match self {
+            Self::Phase0(diff) => diff.randao_mix,
+            Self::Altair(diff) => diff.randao_mix,
+            Self::Bellatrix(diff) => diff.randao_mix,
+            Self::Capella(diff) => diff.randao_mix,
+            Self::Deneb(diff) => diff.randao_mix,
+            Self::Electra(diff) => diff.randao_mix,
+            Self::Fulu(diff) => diff.randao_mix,
+            Self::Gloas(diff) => diff.randao_mix,
+        }
+    }
+}
+
+impl SszSize for SlotDiff {
+    const SIZE: Size = Size::Variable { minimum_size: 1 };
+}
+
+impl SszWrite for SlotDiff {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Phase0(diff) => {
+                bytes.push(1);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Altair(diff) => {
+                bytes.push(2);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Bellatrix(diff) => {
+                bytes.push(3);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Capella(diff) => {
+                bytes.push(4);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Deneb(diff) => {
+                bytes.push(5);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Electra(diff) => {
+                bytes.push(6);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Fulu(diff) => {
+                bytes.push(7);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+            Self::Gloas(diff) => {
+                bytes.push(8);
+                bytes.extend_from_slice(&diff.to_ssz()?);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<C> SszRead<C> for SlotDiff {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let (selector, payload) = bytes.split_first().ok_or(ReadError::Custom {
+            message: "slot diff is empty",
+        })?;
+
+        match *selector {
+            1 => SszRead::from_ssz(context, payload).map(Self::Phase0),
+            2 => SszRead::from_ssz(context, payload).map(Self::Altair),
+            3 => SszRead::from_ssz(context, payload).map(Self::Bellatrix),
+            4 => SszRead::from_ssz(context, payload).map(Self::Capella),
+            5 => SszRead::from_ssz(context, payload).map(Self::Deneb),
+            6 => SszRead::from_ssz(context, payload).map(Self::Electra),
+            7 => SszRead::from_ssz(context, payload).map(Self::Fulu),
+            8 => SszRead::from_ssz(context, payload).map(Self::Gloas),
+            _ => Err(ReadError::Custom {
+                message: "unsupported slot diff selector",
+            }),
+        }
+    }
+}
+
+pub type SlotDiffs = Compressed<ContiguousList<SlotDiff, Unlimited>>;
 
 #[cfg(test)]
 mod tests {

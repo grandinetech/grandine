@@ -37,8 +37,8 @@ use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
     CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
-    StateField as _, StateProposerLookahead, StoredBlock, SyncCommittees, Topic, ValidatorColumns,
-    Wait,
+    StateField as _, StateProposerLookahead, StateRandaoMixes, StoredBlock, SyncCommittees, Topic,
+    ValidatorColumns, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -1362,15 +1362,15 @@ pub async fn state_randao<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateRandaoQuery>,
 ) -> Result<EthResponse<StateRandaoResponse>, Error> {
     let WithStatus {
-        value: state,
+        value: StateRandaoMixes { slot, randao_mixes },
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     // If `epoch` is in the future, return the RANDAO mix for the current epoch.
     // This matches how RANDAO mixes are updated during epoch transitions.
     // RANDAO mixes for future epochs are unstable, but so is the one for the current epoch.
-    let state_epoch = accessors::get_current_epoch(&state);
+    let state_epoch = misc::compute_epoch_at_slot::<P>(slot);
     let epoch = query.epoch.unwrap_or(state_epoch).min(state_epoch);
     let difference = state_epoch.saturating_sub(epoch);
 
@@ -1378,7 +1378,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
         return Err(Error::EpochOutOfRangeForStateRandao);
     }
 
-    let randao = accessors::get_randao_mix(&state, epoch);
+    let randao = *randao_mixes.mod_index(epoch);
     let response = StateRandaoResponse { randao };
 
     Ok(EthResponse::json(response)

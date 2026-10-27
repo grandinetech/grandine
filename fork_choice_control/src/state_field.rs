@@ -772,3 +772,93 @@ impl ValidatorColumns {
         Ok(patches)
     }
 }
+
+pub struct StateRandaoMixes<P: Preset> {
+    pub slot: Slot,
+    pub randao_mixes: RandaoMixes<P>,
+}
+
+impl<P: Preset> StateField<P> for StateRandaoMixes<P> {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        Self {
+            slot: state.slot(),
+            randao_mixes: state.randao_mixes().clone(),
+        }
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if misc::compute_epoch_at_slot::<P>(rows.state_slot()) != epoch {
+            return Ok(None);
+        }
+
+        let current_mix = if rows.state_slot() == slot {
+            None
+        } else {
+            let Some(slot_diff) = rows.slot_diff(slot)? else {
+                return Ok(None);
+            };
+
+            Some(slot_diff.randao_mix())
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let mut randao_mixes = match row {
+                StateRow::Delta(patch) => {
+                    patches.push(Self::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => Self::from_frame(&frame)?,
+                StateRow::State(state) => state.randao_mixes().clone(),
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut randao_mixes)?;
+            }
+
+            if let Some(current_mix) = current_mix {
+                *randao_mixes.mod_index_mut(epoch) = current_mix;
+            }
+
+            return Ok(Some(Self { slot, randao_mixes }));
+        }
+
+        Ok(None)
+    }
+}
+
+impl<P: Preset> StateRandaoMixes<P> {
+    fn from_frame(frame: &BeaconStateFrameCursor<P>) -> Result<RandaoMixes<P>> {
+        let randao_mixes = match frame {
+            BeaconStateFrameCursor::Phase0(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Altair(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Bellatrix(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Capella(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Deneb(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Electra(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Fulu(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Gloas(frame) => frame.get_randao_mixes()?,
+        };
+
+        Ok(randao_mixes)
+    }
+
+    fn patches(patch: &BeaconStatePatchCursor<P>) -> Result<VectorPatch<H256>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Altair(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Bellatrix(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Capella(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Deneb(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Electra(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_randao_mixes()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_randao_mixes()?,
+        };
+
+        Ok(patches)
+    }
+}
