@@ -653,19 +653,28 @@ pub fn get_or_init_total_active_balance<P: Preset>(
                 }
             }
 
-            let current_epoch = get_current_epoch(state);
-            state
-                .validators()
-                .partial_validators()
-                .zip(state.validators().effective_balances())
-                .filter(|&(validator, _)| predicates::is_active_validator(validator, current_epoch))
-                .map(|(_, effective_balance)| *effective_balance)
-                .sum::<Gwei>()
-                .max(P::EFFECTIVE_BALANCE_INCREMENT.get())
-                .try_into()
-                .expect("the value is at least P::EFFECTIVE_BALANCE_INCREMENT, which is nonzero")
+            compute_total_active_balance::<P>(
+                state.validators().partial_validators(),
+                state.validators().effective_balances(),
+                get_current_epoch(state),
+            )
+            .try_into()
+            .expect("the value is at least P::EFFECTIVE_BALANCE_INCREMENT, which is nonzero")
         })
         .get()
+}
+
+pub fn compute_total_active_balance<'a, P: Preset>(
+    partial_validators: impl Iterator<Item = &'a PartialValidator>,
+    effective_balances: impl Iterator<Item = &'a Gwei>,
+    epoch: Epoch,
+) -> Gwei {
+    partial_validators
+        .zip(effective_balances)
+        .filter(|&(validator, _)| predicates::is_active_validator(validator, epoch))
+        .map(|(_, effective_balance)| *effective_balance)
+        .sum::<Gwei>()
+        .max(P::EFFECTIVE_BALANCE_INCREMENT.get())
 }
 
 fn get_next_sync_committee_indices<P: Preset>(
@@ -860,10 +869,14 @@ pub fn compute_base_reward<P: Preset>(
 }
 
 pub fn get_base_reward_per_increment<P: Preset>(state: &impl BeaconState<P>) -> Result<Gwei> {
+    compute_base_reward_per_increment::<P>(total_active_balance(state))
+}
+
+pub fn compute_base_reward_per_increment<P: Preset>(total_active_balance: Gwei) -> Result<Gwei> {
     P::EFFECTIVE_BALANCE_INCREMENT
         .get()
         .try_mul(P::BASE_REWARD_FACTOR)?
-        .try_div(total_active_balance(state).sqrt())
+        .try_div(total_active_balance.sqrt())
         .map_err(Into::into)
 }
 

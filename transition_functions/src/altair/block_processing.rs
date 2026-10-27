@@ -3,9 +3,10 @@ use arithmetic::{U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
-        self, attestation_epoch, compute_base_reward, get_attestation_participation_flags,
-        get_base_reward_per_increment, get_beacon_proposer_index, get_block_root_at_slot,
-        index_of_public_key, initialize_shuffled_indices, total_active_balance,
+        self, attestation_epoch, compute_base_reward, compute_base_reward_per_increment,
+        get_attestation_participation_flags, get_base_reward_per_increment,
+        get_beacon_proposer_index, get_block_root_at_slot, index_of_public_key,
+        initialize_shuffled_indices, total_active_balance,
     },
     altair::slash_validator,
     error::SignatureKind,
@@ -529,6 +530,23 @@ pub fn apply_deposits<P: Preset>(
     Ok(())
 }
 
+pub fn sync_committee_rewards<P: Preset>(total_active_balance: Gwei) -> Result<(Gwei, Gwei)> {
+    let total_active_increments = total_active_balance / P::EFFECTIVE_BALANCE_INCREMENT;
+    let total_base_rewards = compute_base_reward_per_increment::<P>(total_active_balance)?
+        .try_mul(total_active_increments)?;
+
+    let max_participant_rewards = (total_base_rewards.try_mul(SYNC_REWARD_WEIGHT)?
+        / WEIGHT_DENOMINATOR)
+        .div_typenum::<P::SlotsPerEpoch>();
+
+    let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
+    let proposer_reward = participant_reward
+        .try_mul(PROPOSER_WEIGHT.get())?
+        .try_div(WEIGHT_DENOMINATOR.get().try_sub(PROPOSER_WEIGHT.get())?)?;
+
+    Ok((participant_reward, proposer_reward))
+}
+
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_sync_aggregate<P: Preset>(
     config: &Config,
@@ -542,18 +560,8 @@ pub fn process_sync_aggregate<P: Preset>(
     verify_sync_aggregate_signature(config, pubkey_cache, state, sync_aggregate, verifier)?;
 
     // > Compute participant and proposer rewards
-    let total_active_increments = total_active_balance(state) / P::EFFECTIVE_BALANCE_INCREMENT;
-    let total_base_rewards =
-        get_base_reward_per_increment(state)?.try_mul(total_active_increments)?;
-
-    let max_participant_rewards = (total_base_rewards.try_mul(SYNC_REWARD_WEIGHT)?
-        / WEIGHT_DENOMINATOR)
-        .div_typenum::<P::SlotsPerEpoch>();
-
-    let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
-    let proposer_reward = participant_reward
-        .try_mul(PROPOSER_WEIGHT.get())?
-        .try_div(WEIGHT_DENOMINATOR.get().try_sub(PROPOSER_WEIGHT.get())?)?;
+    let (participant_reward, proposer_reward) =
+        sync_committee_rewards::<P>(total_active_balance(state))?;
 
     // > Apply participant and proposer rewards
     let proposer_index = get_beacon_proposer_index(config, state)?;

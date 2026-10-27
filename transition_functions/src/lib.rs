@@ -100,6 +100,7 @@ pub mod phase0 {
 }
 
 pub mod altair {
+    pub use block_processing::sync_committee_rewards;
     pub use epoch_intermediates::{
         AltairValidatorSummary as ValidatorSummary, EpochDeltasForReport, Statistics,
     };

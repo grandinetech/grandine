@@ -37,7 +37,8 @@ use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
     CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
-    StateField as _, StateProposerLookahead, StoredBlock, SyncCommittees, Topic, Wait,
+    StateField as _, StateProposerLookahead, StoredBlock, SyncCommittees, Topic, ValidatorColumns,
+    Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -47,7 +48,12 @@ use futures::{
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, error::Error as AccessorError, misc};
+use helper_functions::{
+    accessors,
+    error::Error as AccessorError,
+    misc,
+    slot_report::{Delta, RealSlotReport, SlotReport as _},
+};
 use http_api_utils::{
     BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz,
     StateId, ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
@@ -134,7 +140,8 @@ use types::{
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         self, BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        BlockBodyWithPayloadBid, PostGloasBeaconState, SignedBeaconBlock as _,
+        BlockBodyWithPayloadBid, BlockBodyWithSyncAggregate, PostGloasBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 use validator::{
@@ -2478,7 +2485,6 @@ fn attestation_rewards_response<P: Preset>(
 /// `POST /eth/v1/beacon/rewards/sync_committee/{block_id}`
 #[instrument(skip_all, level = "debug", name = "http_api::sync_committee_rewards")]
 pub async fn sync_committee_rewards<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
@@ -2498,36 +2504,62 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
             .finalized(finalized));
     }
 
-    let parent_root = block.message().parent_root();
+    let sync_aggregate = block
+        .message()
+        .body()
+        .with_sync_aggregate()
+        .map(BlockBodyWithSyncAggregate::sync_aggregate)
+        .expect("post-Altair blocks have a sync aggregate");
 
-    let (state, sync_committee_deltas) = tokio::task::spawn_blocking(move || {
-        let mut state =
-            controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
+    let WithStatus {
+        value: validators, ..
+    }: WithStatus<ValidatorColumns> = state_id::field(
+        &StateId::Slot(block_slot),
+        &controller,
+        &anchor_checkpoint_provider,
+    )?;
 
-        let slot_report = match block {
-            StoredBlock::Full(block) => {
-                transition_functions::combined::state_transition_for_report(
-                    &chain_config,
-                    controller.pubkey_cache(),
-                    state.make_mut(),
-                    &block,
-                )?
-            }
-            StoredBlock::Blinded(block) => {
-                transition_functions::combined::blinded_state_transition_for_report(
-                    &chain_config,
-                    controller.pubkey_cache(),
-                    state.make_mut(),
-                    &block,
-                )?
-            }
+    let WithStatus {
+        value: committees, ..
+    }: WithStatus<Option<SyncCommittees<P>>> = state_id::field(
+        &StateId::Slot(block_slot),
+        &controller,
+        &anchor_checkpoint_provider,
+    )?;
+
+    let committees = committees.expect("post-Altair states have sync committees");
+
+    let total_active_balance = accessors::compute_total_active_balance::<P>(
+        validators.partial_validators.iter(),
+        validators.effective_balances.iter(),
+        misc::compute_epoch_at_slot::<P>(block_slot),
+    );
+
+    let (participant_reward, _) =
+        transition_functions::altair::sync_committee_rewards::<P>(total_active_balance)?;
+
+    let state = controller.head_state().value;
+    let mut slot_report = RealSlotReport::default();
+
+    for (pubkey, participated) in committees
+        .current
+        .pubkeys
+        .iter()
+        .zip(sync_aggregate.sync_committee_bits)
+    {
+        let validator_index = accessors::index_of_public_key(&*state, pubkey)
+            .ok_or_else(|| anyhow!("sync committee member {pubkey:?} is not a validator"))?;
+
+        let delta = if participated {
+            Delta::Reward(participant_reward)
+        } else {
+            Delta::Penalty(participant_reward)
         };
 
-        let sync_committee_deltas = slot_report.sync_committee_deltas;
+        slot_report.set_sync_committee_delta(validator_index, delta)?;
+    }
 
-        Ok::<_, AnyhowError>((state, sync_committee_deltas))
-    })
-    .await??;
+    let sync_committee_deltas = slot_report.sync_committee_deltas;
 
     let response = if validator_ids.is_empty() {
         sync_committee_deltas.into_iter().pipe(Either::Left)
