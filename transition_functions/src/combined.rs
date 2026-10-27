@@ -1222,10 +1222,7 @@ mod spec_tests {
     use duplicate::duplicate_item;
     use spec_test_utils::Case;
     use test_generator::test_resources;
-    use types::{
-        preset::{Mainnet, Minimal},
-        traits::BeaconBlock as _,
-    };
+    use types::preset::{Mainnet, Minimal};
 
     use super::*;
 

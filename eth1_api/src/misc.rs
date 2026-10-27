@@ -246,11 +246,8 @@ mod tests {
     #[test]
     fn test_client_code() -> Result<()> {
         // conversion to string
-        assert_eq!(format!("{}", ClientCode::Grandine.as_str()), "GR");
-        assert_eq!(
-            format!("{}", ClientCode::Unknown("other".to_owned()).as_str()),
-            "other"
-        );
+        assert_eq!(ClientCode::Grandine.as_str(), "GR");
+        assert_eq!(ClientCode::Unknown("other".to_owned()).as_str(), "other");
 
         // serialization
         assert_eq!(json!("GR"), serde_json::to_value(ClientCode::Grandine)?);

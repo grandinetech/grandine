@@ -739,7 +739,7 @@ impl<P: Preset> Context<P> {
 
         match next_message {
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root)
+                assert_eq!(actual_block_root, expected_block_root)
             }
             message => {
                 assert!(matches!(
@@ -769,18 +769,18 @@ impl<P: Preset> Context<P> {
 
         match next_message {
             Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root);
+                assert_eq!(actual_block_root, expected_block_root);
 
                 // When the referenced block is unknown, `BlockNeeded` is emitted
                 // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
                 // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
                 if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
                 {
-                    assert!(actual_block_root == expected_block_root);
+                    assert_eq!(actual_block_root, expected_block_root);
                 }
             }
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root)
+                assert_eq!(actual_block_root, expected_block_root)
             }
             message => {
                 assert!(matches!(
@@ -910,18 +910,18 @@ impl<P: Preset> Context<P> {
 
         match next_message {
             Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root);
+                assert_eq!(actual_block_root, expected_block_root);
 
                 // When the referenced block is unknown, `BlockNeeded` is emitted
                 // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
                 // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
                 if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
                 {
-                    assert!(actual_block_root == expected_block_root);
+                    assert_eq!(actual_block_root, expected_block_root);
                 }
             }
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root)
+                assert_eq!(actual_block_root, expected_block_root)
             }
             // Current-slot attestations pass gossip validation and return Accept, but their
             // fork-choice effect is deferred to the next slot. The compliance test marks them
@@ -965,18 +965,18 @@ impl<P: Preset> Context<P> {
 
         match next_message {
             Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root);
+                assert_eq!(actual_block_root, expected_block_root);
 
                 // When the referenced block is unknown, `BlockNeeded` is emitted
                 // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
                 // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
                 if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
                 {
-                    assert!(actual_block_root == expected_block_root);
+                    assert_eq!(actual_block_root, expected_block_root);
                 }
             }
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
-                assert!(actual_block_root == expected_block_root)
+                assert_eq!(actual_block_root, expected_block_root)
             }
             message => {
                 assert!(matches!(

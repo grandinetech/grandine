@@ -6,7 +6,7 @@ build with extra features, or to check exactly what you run.
 ## Requirements
 
 - **Rust**, installed with [rustup](https://rustup.rs/). The repository pins its toolchain in
-  `rust-toolchain.toml` (Rust 1.95.0 at the time of writing). rustup reads this file and installs
+  `rust-toolchain.toml` (Rust 1.99.1 at the time of writing). rustup reads this file and installs
   the right version on the first build, so you do not need to pick a version yourself.
 - **System packages**: a C compiler toolchain, Clang, CMake, the Protocol Buffers compiler, and the
   OpenSSL and zlib development files.

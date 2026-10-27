@@ -350,7 +350,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
 #[cfg(test)]
 mod tests {
     use test_case::test_case;
-    use types::{preset::Mainnet, traits::BeaconState as _};
+    use types::preset::Mainnet;
 
     use super::*;
 

@@ -186,7 +186,9 @@ impl<C> SszRead<C> for Uint256 {
     fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         let mut raw = RawUint256::default();
 
-        for (chunk, limb) in bytes.chunks_exact(size_of::<u64>()).zip(raw.0.iter_mut()) {
+        let (chunks, _) = bytes.as_chunks::<{ size_of::<u64>() }>();
+
+        for (chunk, limb) in chunks.iter().zip(raw.0.iter_mut()) {
             *limb = Endianness::read_u64(chunk);
         }
 
@@ -197,10 +199,9 @@ impl<C> SszRead<C> for Uint256 {
 impl SszWrite for Uint256 {
     #[inline]
     fn write_fixed(&self, bytes: &mut [u8]) {
-        for (chunk, limb) in bytes
-            .chunks_exact_mut(size_of::<u64>())
-            .zip(self.into_raw().0)
-        {
+        let (chunks, _) = bytes.as_chunks_mut::<{ size_of::<u64>() }>();
+
+        for (chunk, limb) in chunks.iter_mut().zip(self.into_raw().0) {
             Endianness::write_u64(chunk, limb);
         }
     }
