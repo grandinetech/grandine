@@ -360,7 +360,7 @@ httpmock = '0.8'
 igd-next = '0.17'
 # Possible optimization: fork `im` and make it use `triomphe`.
 # It's easy to do, but the amount of memory it saves is negligible.
-im = '15'
+im = { package = 'imbl', version = '7' }
 impl-serde = '0.5'
 integer-sqrt = '0.1'
 instant = '0.1'
@@ -427,7 +427,7 @@ serde_repr = '0.1'
 serde_with = '3'
 # TODO: replace serde_yaml with alternative, since it is deprecated:
 # https://users.rust-lang.org/t/serde-yaml-deprecation-alternatives/108868/18
-serde_yaml = '0.9'
+serde_yaml = { package = 'serde_norway', version = '0.9' }
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 sha2 = { version = '0.10.9', features = ['compress'] }

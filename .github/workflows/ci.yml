@@ -58,13 +58,6 @@ jobs:
       - name: Disable autocrlf (Windows)
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
-      - name: Setup nim for constantine backend
-        if: runner.os != 'Macos'
-        uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: "2.0.2"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: ${{ runner.temp }}
       - name: Install dependencies for constantine backend
         if: runner.os == 'Linux'
         run: |
@@ -75,6 +68,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Setup nim for constantine backend
+        if: runner.os != 'Macos'
+        shell: bash
+        run: scripts/ci/install-nim.bash
       - name: Run cargo build
         run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude c_grandine --exclude csharp_grandine
       - name: Check if code is formatted (Linux)
@@ -196,12 +193,6 @@ jobs:
             protobuf-compiler \
             libprotobuf-dev \
             libz-dev
-      - name: Setup nim for constantine backend
-        uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: "2.0.2"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: ${{ runner.temp }}
       - name: Install dependencies for constantine backend
         shell: bash
         run: |
@@ -213,6 +204,9 @@ jobs:
         with:
           submodules: false
           lfs: true
+      - name: Setup nim for constantine backend
+        shell: bash
+        run: scripts/ci/install-nim.bash
       - name: Check out necessary submodules only
         shell: bash
         run: |
