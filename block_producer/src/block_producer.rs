@@ -1525,12 +1525,26 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .map(|envelope| envelope.message.execution_requests.clone())
                 },
             )?;
-            block.body.attestations = self
+            // Attestation packing is optional; parent processing above and final block
+            // validation below must still succeed.
+            block.body.attestations = match self
                 .producer_context
                 .attestation_agg_pool
                 .gloas_proposable_attestations(Arc::new(BeaconState::Gloas(scoring_state)))
-                .await?
-                .try_into()?;
+                .await
+                .and_then(|attestations| attestations.try_into().map_err(AnyhowError::from))
+            {
+                Ok(attestations) => attestations,
+                Err(error) => {
+                    warn_with_peers!(
+                        "unable to prepare Gloas attestations for slot {} with parent {:?}; \
+                         proposing without attestations: {error:?}",
+                        block.slot,
+                        block.parent_root,
+                    );
+                    ProgressiveList::default()
+                }
+            };
             info_with_peers!(
                 "Gloas proposal parent processing and packing elapsed {} us",
                 started_at.elapsed().as_micros()
@@ -3124,15 +3138,34 @@ mod gloas_scoring_tests {
 
     use super::*;
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ProposalScenario {
+        ProducerPaths,
+        PackingFailure,
+        Measure,
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn self_build_and_builder_run_pool_packing_and_block_processing() -> Result<()> {
-        proposal_fixture::<Minimal>(ChainConfig::minimal(), 64, true).await
+        proposal_fixture::<Minimal>(ChainConfig::minimal(), 64, ProposalScenario::ProducerPaths)
+            .await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn packing_failure_still_proposes_a_valid_block_without_attestations() -> Result<()> {
+        proposal_fixture::<Minimal>(ChainConfig::minimal(), 64, ProposalScenario::PackingFailure)
+            .await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "manual release Mainnet-scale synthetic proposal latency measurement"]
     async fn measure_mainnet_scale_gloas_proposal() -> Result<()> {
-        proposal_fixture::<types::preset::Mainnet>(ChainConfig::mainnet(), 0x0010_0000, false).await
+        proposal_fixture::<types::preset::Mainnet>(
+            ChainConfig::mainnet(),
+            0x0010_0000,
+            ProposalScenario::Measure,
+        )
+        .await
     }
 
     #[expect(
@@ -3144,7 +3177,7 @@ mod gloas_scoring_tests {
     async fn proposal_fixture<P: Preset>(
         config: ChainConfig,
         validator_count: usize,
-        exercise_builder: bool,
+        scenario: ProposalScenario,
     ) -> Result<()> {
         use bls::{SecretKey, SecretKeyBytes, traits::SecretKey as _};
         use crossbeam_utils::sync::WaitGroup;
@@ -3253,8 +3286,23 @@ mod gloas_scoring_tests {
             Some(2),
         )?;
         let executor = Arc::new(DedicatedExecutor::new("gloas integration", 2, None, None));
-        let pool =
-            AttestationAggPool::new(controller.clone_arc(), executor.clone_arc(), None, None);
+        // Only the attestation task fails; the producer and other pools must keep running.
+        let attestation_executor = if scenario == ProposalScenario::PackingFailure {
+            Arc::new(DedicatedExecutor::new(
+                "failing attestation pool",
+                2,
+                None,
+                None,
+            ))
+        } else {
+            executor.clone_arc()
+        };
+        let pool = AttestationAggPool::new(
+            controller.clone_arc(),
+            attestation_executor.clone_arc(),
+            None,
+            None,
+        );
         let (pool_tx, _) = futures::channel::mpsc::unbounded();
         let sync_pool = SyncCommitteeAggPool::new(
             executor.clone_arc(),
@@ -3381,6 +3429,18 @@ mod gloas_scoring_tests {
         let randao = helper_functions::signing::RandaoEpoch::from(2)
             .sign(&config, &proposal_state, &keys[0])
             .into();
+        if scenario == ProposalScenario::PackingFailure {
+            assert!(
+                !pool
+                    .gloas_proposable_attestations(proposal_state.clone_arc())
+                    .await?
+                    .is_empty()
+            );
+            attestation_executor.shutdown();
+            pool.gloas_proposable_attestations(proposal_state.clone_arc())
+                .await
+                .expect_err("packing task must fail after its executor shuts down");
+        }
         let started = std::time::Instant::now();
         let result = context
             .build_blinded_beacon_block(
@@ -3396,6 +3456,22 @@ mod gloas_scoring_tests {
         let ValidatorBlindedBlock::BeaconBlock(BeaconBlock::Gloas(block)) = result.0.value else {
             panic!("expected Gloas block")
         };
+        if scenario == ProposalScenario::PackingFailure {
+            assert!(block.body.attestations.is_empty());
+            assert_eq!(
+                block
+                    .body
+                    .signed_execution_payload_bid
+                    .message
+                    .builder_index,
+                BUILDER_INDEX_SELF_BUILD
+            );
+            assert_ne!(block.state_root, H256::zero());
+            assert_eq!(proposal_state.hash_tree_root(), before);
+            service.abort();
+            executor.shutdown();
+            return Ok(());
+        }
         assert_eq!(
             block.body.attestations.len(),
             usize::try_from(proposal_slot - anchor_slot)?.min(P::MaxAttestationsElectra::USIZE)
@@ -3424,7 +3500,7 @@ mod gloas_scoring_tests {
             block.body.attestations.len(),
             elapsed.as_micros()
         );
-        if !exercise_builder {
+        if scenario == ProposalScenario::Measure {
             let BeaconState::Gloas(state) = &*proposal_state else {
                 unreachable!()
             };
