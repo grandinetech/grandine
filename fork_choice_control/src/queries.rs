@@ -34,13 +34,15 @@ use types::{
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{
-        ExecutionPayloadBody, PayloadStatus, Phase, PubkeyList, RelativeEpoch, WithStatus,
+        BlockRewards, ExecutionPayloadBody, PayloadStatus, Phase, PubkeyList, RelativeEpoch,
+        WithStatus,
     },
     phase0::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
+    storage::ProposerRewards,
     traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
@@ -236,6 +238,37 @@ where
         Ok(self
             .state_at_slot_blocking(slot)?
             .map(|state| state.map(|state| F::from_state(&state))))
+    }
+
+    pub fn stored_block_rewards(&self, slot: Slot) -> Result<Option<BlockRewards>> {
+        let Some(rows) = self
+            .storage()
+            .state_rows_before_or_at(slot.saturating_sub(1))?
+        else {
+            return Ok(None);
+        };
+
+        let rewards = rows.slot_diff(slot)?.map(|slot_diff| {
+            let ProposerRewards {
+                attestations,
+                sync_aggregate,
+                proposer_slashings,
+                attester_slashings,
+            } = slot_diff.rewards();
+
+            BlockRewards {
+                total: attestations
+                    .saturating_add(sync_aggregate)
+                    .saturating_add(proposer_slashings)
+                    .saturating_add(attester_slashings),
+                attestations,
+                sync_aggregate,
+                proposer_slashings,
+                attester_slashings,
+            }
+        });
+
+        Ok(rewards)
     }
 
     #[must_use]

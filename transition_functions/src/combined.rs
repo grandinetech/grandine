@@ -20,7 +20,7 @@ use types::{
         BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config,
-    nonstandard::{Phase, Toption},
+    nonstandard::{BlockRewards, Phase, Toption},
     phase0::{
         consts::DOMAIN_BEACON_PROPOSER,
         containers::DepositData,
@@ -126,6 +126,52 @@ pub fn trusted_blinded_state_transition<P: Preset>(
         NullVerifier,
         NullSlotReport,
     )
+}
+
+#[expect(clippy::needless_borrows_for_generic_args)]
+pub fn trusted_state_transition_for_rewards<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBeaconBlock<P>,
+) -> Result<BlockRewards> {
+    let mut rewards = BlockRewards::default();
+
+    custom_state_transition(
+        config,
+        pubkey_cache,
+        state,
+        signed_block,
+        ProcessSlots::Always,
+        StateRootPolicy::Trust,
+        NullExecutionEngine,
+        NullVerifier,
+        &mut rewards,
+    )?;
+
+    Ok(rewards)
+}
+
+pub fn trusted_blinded_state_transition_for_rewards<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBlindedBeaconBlock<P>,
+) -> Result<BlockRewards> {
+    let mut rewards = BlockRewards::default();
+
+    custom_blinded_state_transition(
+        config,
+        pubkey_cache,
+        state,
+        signed_block,
+        ProcessSlots::Always,
+        StateRootPolicy::Trust,
+        NullVerifier,
+        &mut rewards,
+    )?;
+
+    Ok(rewards)
 }
 
 pub fn blinded_state_transition_for_report<P: Preset>(

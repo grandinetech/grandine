@@ -24,6 +24,7 @@ use crate::{
         validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
+    storage::ProposerRewards,
 };
 
 #[derive(Debug, Clone, Ssz)]
@@ -401,6 +402,7 @@ impl<P: Preset> BeaconStateFrame<P> {
 #[ssz(derive_hash = false)]
 pub struct SlotDiff {
     pub randao_mix: H256,
+    pub rewards: ProposerRewards,
     pub validators: ValidatorListPatch,
     pub balances: BalancesPatch,
 }
@@ -410,11 +412,13 @@ impl SlotDiff {
         config: PatchConfig,
         base: &BeaconState<P>,
         changed: &BeaconState<P>,
+        rewards: ProposerRewards,
     ) -> Result<Self, Error> {
         Ok(Self {
             randao_mix: *changed
                 .randao_mixes
                 .mod_index(changed.slot.div_typenum::<P::SlotsPerEpoch>()),
+            rewards,
             validators: Patch::diff(config, &base.validators, &changed.validators)?,
             balances: Patch::diff(config, &base.balances, &changed.balances)?,
         })

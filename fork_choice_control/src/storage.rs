@@ -36,8 +36,8 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::{SignedBlindedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope},
     nonstandard::{
-        BlobSidecarWithId, DataColumnSidecarWithId, ExecutionPayloadBody, FinalizedCheckpoint,
-        Phase, PubkeyList, StorageMode,
+        BlobSidecarWithId, BlockRewards, DataColumnSidecarWithId, ExecutionPayloadBody,
+        FinalizedCheckpoint, Phase, PubkeyList, StorageMode,
     },
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -480,13 +480,13 @@ impl<P: Preset> Storage<P> {
             slot.saturating_sub(1),
         );
 
-        let intermediate_slots = previous_slot.saturating_add(1)..slot;
+        let intermediate_slots = previous_slot.saturating_add(1)..=slot;
 
         if !self.prune_storage_enabled()
             && !intermediate_slots.is_empty()
             && misc::compute_epoch_at_slot::<P>(previous_slot)
                 == misc::compute_epoch_at_slot::<P>(slot.saturating_sub(1))
-            && intermediate_slots.start >= self.pruned_up_to_slot()?
+            && *intermediate_slots.start() >= self.pruned_up_to_slot()?
             && !self.contains_key(SlotDiffsBySlot(previous_slot))?
         {
             let previous_state = match spine.get(previous_slot) {
@@ -512,28 +512,37 @@ impl<P: Preset> Storage<P> {
 
                 for intermediate_slot in intermediate_slots {
                     let base_state = intermediate_state.clone_arc();
-                    let block_root = accessors::get_block_root_at_slot(&*state, intermediate_slot)?;
 
-                    if block_root == previous_root {
+                    let block_root = if intermediate_slot == slot {
+                        accessors::latest_block_root(&*state)
+                    } else {
+                        accessors::get_block_root_at_slot(&*state, intermediate_slot)?
+                    };
+
+                    let rewards = if block_root == previous_root {
                         combined::process_slots(
                             &self.config,
                             &self.pubkey_cache,
                             intermediate_state.make_mut(),
                             intermediate_slot,
                         )?;
+
+                        BlockRewards::default()
                     } else {
                         match self
                             .finalized_block_by_root(block_root)?
                             .ok_or(Error::BlockNotFound { block_root })?
                         {
-                            StoredBlock::Full(block) => combined::trusted_state_transition(
-                                &self.config,
-                                &self.pubkey_cache,
-                                intermediate_state.make_mut(),
-                                &block,
-                            )?,
+                            StoredBlock::Full(block) => {
+                                combined::trusted_state_transition_for_rewards(
+                                    &self.config,
+                                    &self.pubkey_cache,
+                                    intermediate_state.make_mut(),
+                                    &block,
+                                )?
+                            }
                             StoredBlock::Blinded(block) => {
-                                combined::trusted_blinded_state_transition(
+                                combined::trusted_blinded_state_transition_for_rewards(
                                     &self.config,
                                     &self.pubkey_cache,
                                     intermediate_state.make_mut(),
@@ -541,14 +550,21 @@ impl<P: Preset> Storage<P> {
                                 )?
                             }
                         }
-                    }
+                    };
 
                     previous_root = block_root;
 
+                    let base_state = if intermediate_slot == slot {
+                        &intermediate_state
+                    } else {
+                        &base_state
+                    };
+
                     slot_diffs.push(SlotDiff::diff(
                         patch_config,
-                        &base_state,
+                        base_state,
                         &intermediate_state,
+                        rewards.into(),
                     )?);
                 }
 
@@ -3133,6 +3149,7 @@ mod tests {
     use bls::PublicKeyBytes;
     use bytesize::ByteSize;
     use database::DatabaseMode;
+    use ssz::{PersistentList, PersistentVector};
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
@@ -3140,8 +3157,8 @@ mod tests {
         phase0::{
             beacon_state::BeaconState as Phase0BeaconState,
             containers::{
-                BeaconBlock as Phase0BeaconBlock, SignedBeaconBlock as Phase0SignedBeaconBlock,
-                Validator,
+                BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader,
+                SignedBeaconBlock as Phase0SignedBeaconBlock, Validator,
             },
         },
         preset::Mainnet,
@@ -3852,13 +3869,21 @@ mod tests {
     }
 
     fn state_with_slot(slot: Slot) -> Arc<BeaconState<Mainnet>> {
-        Arc::new(BeaconState::Phase0(
-            Phase0BeaconState {
-                slot,
-                ..Phase0BeaconState::default()
-            }
-            .into(),
-        ))
+        Arc::new(BeaconState::Phase0(blockless_state(slot).into()))
+    }
+
+    fn blockless_state(slot: Slot) -> Phase0BeaconState<Mainnet> {
+        let latest_block_header = BeaconBlockHeader {
+            state_root: H256::repeat_byte(0xff),
+            ..BeaconBlockHeader::default()
+        };
+
+        Phase0BeaconState {
+            slot,
+            block_roots: PersistentVector::repeat_element(latest_block_header.hash_tree_root()),
+            latest_block_header,
+            ..Phase0BeaconState::default()
+        }
     }
 
     #[test]
@@ -4424,6 +4449,14 @@ mod tests {
             );
         }
 
+        for slot in 1..=32 {
+            let rows = storage
+                .state_rows_before_or_at(slot - 1)?
+                .expect("the anchor state is stored");
+
+            assert!(rows.slot_diff(slot)?.is_some(), "rewards in slot {slot}");
+        }
+
         Ok(())
     }
 
@@ -4463,10 +4496,13 @@ mod tests {
 
         Arc::new(BeaconState::Phase0(
             Phase0BeaconState {
-                slot,
                 validators: Validators::<Mainnet>::try_from_iter((0..count).map(validator))
                     .expect("the registry limit is far above the test validator count"),
-                ..Phase0BeaconState::default()
+                balances: PersistentList::try_from_iter(
+                    (0..count).map(|_| 32_000_000_000_u64.saturating_add(balance_offset)),
+                )
+                .expect("the registry limit is far above the test validator count"),
+                ..blockless_state(slot)
             }
             .into(),
         ))
@@ -5381,9 +5417,8 @@ mod tests {
     ) -> Arc<BeaconState<Mainnet>> {
         Arc::new(BeaconState::Phase0(
             Phase0BeaconState {
-                slot,
                 eth1_deposit_index,
-                ..Phase0BeaconState::default()
+                ..blockless_state(slot)
             }
             .into(),
         ))

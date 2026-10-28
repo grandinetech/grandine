@@ -53,10 +53,10 @@ use crate::{
         BeaconStatePatch as GloasBeaconStatePatch,
         BeaconStatePatchCursor as GloasBeaconStatePatchCursor, SlotDiff as GloasSlotDiff,
     },
-    nonstandard::{Phase, PubkeyList},
+    nonstandard::{BlockRewards, Phase, PubkeyList},
     phase0::{
         balances_patch::BalancesPatch,
-        primitives::H256,
+        primitives::{Gwei, H256},
         storage::{
             BeaconStateFrame as Phase0BeaconStateFrame,
             BeaconStateFrameCursor as Phase0BeaconStateFrameCursor,
@@ -463,6 +463,34 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
     }
 }
 
+#[derive(Clone, Copy, Default, Debug, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct ProposerRewards {
+    pub attestations: Gwei,
+    pub sync_aggregate: Gwei,
+    pub proposer_slashings: Gwei,
+    pub attester_slashings: Gwei,
+}
+
+impl From<BlockRewards> for ProposerRewards {
+    fn from(rewards: BlockRewards) -> Self {
+        let BlockRewards {
+            attestations,
+            sync_aggregate,
+            proposer_slashings,
+            attester_slashings,
+            ..
+        } = rewards;
+
+        Self {
+            attestations,
+            sync_aggregate,
+            proposer_slashings,
+            attester_slashings,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum SlotDiff {
     Phase0(Phase0SlotDiff),
@@ -480,31 +508,32 @@ impl SlotDiff {
         config: PatchConfig,
         base: &BeaconState<P>,
         changed: &BeaconState<P>,
+        rewards: ProposerRewards,
     ) -> Result<Self, PatchError> {
         match (base, changed) {
             (BeaconState::Phase0(base), BeaconState::Phase0(changed)) => Ok(Self::Phase0(
-                Phase0SlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                Phase0SlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Altair(base), BeaconState::Altair(changed)) => Ok(Self::Altair(
-                AltairSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                AltairSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Bellatrix(base), BeaconState::Bellatrix(changed)) => Ok(Self::Bellatrix(
-                BellatrixSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                BellatrixSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Capella(base), BeaconState::Capella(changed)) => Ok(Self::Capella(
-                CapellaSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                CapellaSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Deneb(base), BeaconState::Deneb(changed)) => Ok(Self::Deneb(
-                DenebSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                DenebSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Electra(base), BeaconState::Electra(changed)) => Ok(Self::Electra(
-                ElectraSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                ElectraSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Fulu(base), BeaconState::Fulu(changed)) => Ok(Self::Fulu(
-                FuluSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                FuluSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (BeaconState::Gloas(base), BeaconState::Gloas(changed)) => Ok(Self::Gloas(
-                GloasSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
+                GloasSlotDiff::diff(config, base.as_ref(), changed.as_ref(), rewards)?,
             )),
             (_, _) => Err(PatchError::CrossPhaseDiff),
         }
@@ -521,6 +550,20 @@ impl SlotDiff {
             Self::Electra(diff) => diff.randao_mix,
             Self::Fulu(diff) => diff.randao_mix,
             Self::Gloas(diff) => diff.randao_mix,
+        }
+    }
+
+    #[must_use]
+    pub const fn rewards(&self) -> ProposerRewards {
+        match self {
+            Self::Phase0(diff) => diff.rewards,
+            Self::Altair(diff) => diff.rewards,
+            Self::Bellatrix(diff) => diff.rewards,
+            Self::Capella(diff) => diff.rewards,
+            Self::Deneb(diff) => diff.rewards,
+            Self::Electra(diff) => diff.rewards,
+            Self::Fulu(diff) => diff.rewards,
+            Self::Gloas(diff) => diff.rewards,
         }
     }
 

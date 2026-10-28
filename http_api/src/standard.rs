@@ -2272,30 +2272,41 @@ pub async fn block_rewards<P: Preset, W: Wait>(
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
     let WithStatus {
-        value: signed_block,
+        value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    let block: BeaconBlock<P> = Arc::unwrap_or_clone(signed_block).into();
-    let block_slot = block.slot();
+    let block_slot = block.message().slot();
+    let parent_root = block.message().parent_root();
+    let proposer_index = block.message().proposer_index();
 
-    let block_rewards = (block_slot > GENESIS_SLOT)
-        .then(|| {
-            tokio::task::block_in_place(|| {
-                let parent_root = block.parent_root();
+    let block_rewards = tokio::task::block_in_place(|| -> Result<_> {
+        if finalized && let Some(rewards) = controller.stored_block_rewards(block_slot)? {
+            return Ok(rewards);
+        }
 
-                let state =
-                    controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
+        if block_slot == GENESIS_SLOT {
+            return Ok(BlockRewards::default());
+        }
+
+        let state = controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
+
+        let (_, rewards) = match block {
+            StoredBlock::Full(block) => controller
+                .block_processor()
+                .process_trusted_block_with_report(state, &Arc::unwrap_or_clone(block).into())?,
+            StoredBlock::Blinded(block) => {
+                let (block, _) = Arc::unwrap_or_clone(block).split();
 
                 controller
                     .block_processor()
-                    .process_trusted_block_with_report(state, &block)
-            })
-        })
-        .transpose()?
-        .and_then(|(_, rewards)| rewards)
-        .unwrap_or_default();
+                    .process_trusted_blinded_block_with_report(state, &block)?
+            }
+        };
+
+        Ok(rewards.unwrap_or_default())
+    })?;
 
     let BlockRewards {
         total,
@@ -2306,7 +2317,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
     } = block_rewards;
 
     let rewards_response = BlockRewardsResponse {
-        proposer_index: block.proposer_index(),
+        proposer_index,
         total,
         attestations,
         sync_aggregate,
