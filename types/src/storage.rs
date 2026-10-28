@@ -55,6 +55,7 @@ use crate::{
     },
     nonstandard::{Phase, PubkeyList},
     phase0::{
+        balances_patch::BalancesPatch,
         primitives::H256,
         storage::{
             BeaconStateFrame as Phase0BeaconStateFrame,
@@ -461,7 +462,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SlotDiff {
     Phase0(Phase0SlotDiff),
     Altair(AltairSlotDiff),
@@ -475,33 +476,34 @@ pub enum SlotDiff {
 
 impl SlotDiff {
     pub fn diff<P: Preset>(
+        config: PatchConfig,
         base: &BeaconState<P>,
         changed: &BeaconState<P>,
     ) -> Result<Self, PatchError> {
         match (base, changed) {
             (BeaconState::Phase0(base), BeaconState::Phase0(changed)) => Ok(Self::Phase0(
-                Phase0SlotDiff::diff(base.as_ref(), changed.as_ref()),
+                Phase0SlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Altair(base), BeaconState::Altair(changed)) => Ok(Self::Altair(
-                AltairSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                AltairSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Bellatrix(base), BeaconState::Bellatrix(changed)) => Ok(Self::Bellatrix(
-                BellatrixSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                BellatrixSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Capella(base), BeaconState::Capella(changed)) => Ok(Self::Capella(
-                CapellaSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                CapellaSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Deneb(base), BeaconState::Deneb(changed)) => Ok(Self::Deneb(
-                DenebSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                DenebSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Electra(base), BeaconState::Electra(changed)) => Ok(Self::Electra(
-                ElectraSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                ElectraSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Fulu(base), BeaconState::Fulu(changed)) => Ok(Self::Fulu(
-                FuluSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                FuluSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (BeaconState::Gloas(base), BeaconState::Gloas(changed)) => Ok(Self::Gloas(
-                GloasSlotDiff::diff(base.as_ref(), changed.as_ref()),
+                GloasSlotDiff::diff(config, base.as_ref(), changed.as_ref())?,
             )),
             (_, _) => Err(PatchError::CrossPhaseDiff),
         }
@@ -518,6 +520,20 @@ impl SlotDiff {
             Self::Electra(diff) => diff.randao_mix,
             Self::Fulu(diff) => diff.randao_mix,
             Self::Gloas(diff) => diff.randao_mix,
+        }
+    }
+
+    #[must_use]
+    pub fn into_balances(self) -> BalancesPatch {
+        match self {
+            Self::Phase0(diff) => diff.balances,
+            Self::Altair(diff) => diff.balances,
+            Self::Bellatrix(diff) => diff.balances,
+            Self::Capella(diff) => diff.balances,
+            Self::Deneb(diff) => diff.balances,
+            Self::Electra(diff) => diff.balances,
+            Self::Fulu(diff) => diff.balances,
+            Self::Gloas(diff) => diff.balances,
         }
     }
 }

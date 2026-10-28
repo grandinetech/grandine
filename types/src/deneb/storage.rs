@@ -397,19 +397,24 @@ impl<P: Preset> BeaconStateFrame<P> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Ssz)]
+#[derive(Clone, Debug, Ssz)]
 #[ssz(derive_hash = false)]
 pub struct SlotDiff {
     pub randao_mix: H256,
+    pub balances: BalancesPatch,
 }
 
 impl SlotDiff {
-    #[must_use]
-    pub fn diff<P: Preset>(_base: &BeaconState<P>, changed: &BeaconState<P>) -> Self {
-        Self {
+    pub fn diff<P: Preset>(
+        config: PatchConfig,
+        base: &BeaconState<P>,
+        changed: &BeaconState<P>,
+    ) -> Result<Self, Error> {
+        Ok(Self {
             randao_mix: *changed
                 .randao_mixes
                 .mod_index(changed.slot.div_typenum::<P::SlotsPerEpoch>()),
-        }
+            balances: Patch::diff(config, &base.balances, &changed.balances)?,
+        })
     }
 }

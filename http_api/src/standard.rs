@@ -37,8 +37,8 @@ use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
     CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
-    StateField as _, StateProposerLookahead, StateRandaoMixes, StoredBlock, SyncCommittees, Topic,
-    ValidatorColumns, Wait,
+    StateBalances, StateField as _, StateProposerLookahead, StateRandaoMixes, StoredBlock,
+    SyncCommittees, Topic, ValidatorColumns, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -855,7 +855,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let validator_index = validator_id
-        .validator_index(&state)
+        .validator_index(state.validators().pubkeys())
         .ok_or(Error::ValidatorNotFound)?;
 
     let validator = state
@@ -958,26 +958,31 @@ fn state_validator_balances<P: Preset, W: Wait>(
     Error,
 > {
     let WithStatus {
-        value: state,
+        value: (_, StateBalances { pubkeys, balances }),
         status,
         finalized,
-    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+    } = state_id::field(&state_id, controller, anchor_checkpoint_provider)?;
 
-    let balances = ContiguousList::try_from_iter(
-        izip!(
-            0..,
-            state.validators().iter(),
-            state.balances().into_iter().copied(),
+    let balances = if validator_ids.is_empty() {
+        ContiguousList::try_from_iter(
+            izip!(0.., balances.iter().copied())
+                .map(|(index, balance)| StateValidatorBalanceResponse { index, balance }),
         )
-        .filter(|(index, validator, _)| {
-            validator_ids.is_empty()
-                || validator_ids.iter().any(|validator_id| match validator_id {
-                    ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                    ValidatorId::PublicKey(pubkey) => &validator.pubkey == pubkey,
-                })
-        })
-        .map(|(index, _, balance)| StateValidatorBalanceResponse { index, balance }),
-    )
+    } else {
+        let pubkeys = pubkeys.unwrap_or_else(|| controller.finalized_pubkeys());
+
+        ContiguousList::try_from_iter(
+            validator_ids
+                .iter()
+                .filter_map(|validator_id| validator_id.validator_index(&pubkeys))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|index| {
+                    let balance = balances.get(index).copied().ok()?;
+                    Some(StateValidatorBalanceResponse { index, balance })
+                }),
+        )
+    }
     .map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(balances, headers)?
@@ -2397,7 +2402,7 @@ fn attestation_rewards_response<P: Preset>(
     } else {
         validator_ids
             .into_iter()
-            .filter_map(|validator_id| validator_id.validator_index(state))
+            .filter_map(|validator_id| validator_id.validator_index(state.validators().pubkeys()))
             .filter(|validator_index| {
                 usize::try_from(*validator_index).is_ok_and(|index| index < validators.len())
             })
@@ -2567,7 +2572,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         validator_ids
             .into_iter()
             .filter_map(|validator_id| {
-                let validator_index = validator_id.validator_index(&state)?;
+                let validator_index = validator_id.validator_index(state.validators().pubkeys())?;
                 let delta = *sync_committee_deltas.get(&validator_index)?;
                 Some((validator_index, delta))
             })

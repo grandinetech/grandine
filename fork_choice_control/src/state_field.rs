@@ -3,16 +3,17 @@ use std::sync::Arc;
 use anyhow::Result;
 use diff::{Patch as _, ReplacePatch, VectorPatch};
 use helper_functions::misc;
-use ssz::{Compressed, Hc};
+use ssz::{Compressed, Hc, SszListMut};
 use std_ext::ArcExt as _;
 use types::{
     ProposerLookahead, RandaoMixes,
     altair::containers::SyncCommittee,
     combined::BeaconState,
-    nonstandard::{EffectiveBalanceList, PartialValidatorList},
+    nonstandard::{EffectiveBalanceList, PartialValidatorList, PubkeyList},
     phase0::{
+        balances_patch::BalancesPatch,
         containers::Checkpoint,
-        primitives::{H256, Slot, ValidatorIndex},
+        primitives::{Gwei, H256, Slot, ValidatorIndex},
         validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
@@ -830,6 +831,104 @@ impl<P: Preset> StateRandaoMixes<P> {
             BeaconStatePatchCursor::Electra(patch) => patch.get_randao_mixes()?,
             BeaconStatePatchCursor::Fulu(patch) => patch.get_randao_mixes()?,
             BeaconStatePatchCursor::Gloas(patch) => patch.get_randao_mixes()?,
+        };
+
+        Ok(patches)
+    }
+}
+
+pub struct StateBalances {
+    pub pubkeys: Option<PubkeyList>,
+    pub balances: Box<dyn SszListMut<Gwei>>,
+}
+
+impl<P: Preset> StateField<P> for StateBalances {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        Self {
+            pubkeys: Some(state.validators().pubkeys().clone()),
+            balances: Self::balances_from_state(state),
+        }
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let Some(slot_diffs) = rows.slot_diffs(slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let mut balances = match row {
+                StateRow::Delta(patch) => {
+                    patches.push(Self::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => Self::from_frame(&frame)?,
+                StateRow::State(state) => Self::balances_from_state(&state),
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut *balances)?;
+            }
+
+            for slot_diff in slot_diffs {
+                slot_diff.into_balances().apply(&mut *balances)?;
+            }
+
+            return Ok(Some(Self {
+                pubkeys: None,
+                balances,
+            }));
+        }
+
+        Ok(None)
+    }
+}
+
+impl StateBalances {
+    fn balances_from_state<P: Preset>(state: &BeaconState<P>) -> Box<dyn SszListMut<Gwei>> {
+        match state {
+            BeaconState::Phase0(state) => Box::new(state.balances.clone()),
+            BeaconState::Altair(state) => Box::new(state.balances.clone()),
+            BeaconState::Bellatrix(state) => Box::new(state.balances.clone()),
+            BeaconState::Capella(state) => Box::new(state.balances.clone()),
+            BeaconState::Deneb(state) => Box::new(state.balances.clone()),
+            BeaconState::Electra(state) => Box::new(state.balances.clone()),
+            BeaconState::Fulu(state) => Box::new(state.balances.clone()),
+            BeaconState::Gloas(state) => Box::new(state.balances.clone()),
+        }
+    }
+
+    fn from_frame<P: Preset>(
+        frame: &BeaconStateFrameCursor<P>,
+    ) -> Result<Box<dyn SszListMut<Gwei>>> {
+        let balances: Box<dyn SszListMut<Gwei>> = match frame {
+            BeaconStateFrameCursor::Phase0(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Altair(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Bellatrix(frame) => {
+                Box::new(frame.get_balances()?.into_inner())
+            }
+            BeaconStateFrameCursor::Capella(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Deneb(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Electra(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Fulu(frame) => Box::new(frame.get_balances()?.into_inner()),
+            BeaconStateFrameCursor::Gloas(frame) => Box::new(frame.get_balances()?.into_inner()),
+        };
+
+        Ok(balances)
+    }
+
+    fn patches<P: Preset>(patch: &BeaconStatePatchCursor<P>) -> Result<Compressed<BalancesPatch>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Altair(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Bellatrix(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Capella(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Deneb(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Electra(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_balances()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_balances()?,
         };
 
         Ok(patches)

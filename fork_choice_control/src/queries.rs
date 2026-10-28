@@ -33,7 +33,9 @@ use types::{
         },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
-    nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{
+        ExecutionPayloadBody, PayloadStatus, Phase, PubkeyList, RelativeEpoch, WithStatus,
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
@@ -234,6 +236,14 @@ where
         Ok(self
             .state_at_slot_blocking(slot)?
             .map(|state| state.map(|state| F::from_state(&state))))
+    }
+
+    #[must_use]
+    pub fn finalized_pubkeys(&self) -> PubkeyList {
+        self.store_snapshot()
+            .finalized_validators()
+            .pubkeys()
+            .clone()
     }
 
     pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {

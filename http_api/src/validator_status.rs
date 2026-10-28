@@ -1,10 +1,11 @@
 use bls::PublicKeyBytes;
-use helper_functions::{accessors, misc};
+use helper_functions::misc;
 use parse_display::{Display, FromStr};
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
     combined::BeaconState,
+    nonstandard::PubkeyList,
     phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator, primitives::ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
@@ -80,10 +81,10 @@ pub enum ValidatorId {
 }
 
 impl ValidatorId {
-    pub fn validator_index<P: Preset>(self, state: &BeaconState<P>) -> Option<ValidatorIndex> {
+    pub fn validator_index(self, pubkeys: &PubkeyList) -> Option<ValidatorIndex> {
         match self {
             Self::ValidatorIndex(validator_index) => Some(validator_index),
-            Self::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey),
+            Self::PublicKey(pubkey) => pubkeys.index_of(&pubkey),
         }
     }
 }

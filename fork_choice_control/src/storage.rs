@@ -503,6 +503,10 @@ impl<P: Preset> Storage<P> {
             };
 
             if let Some(mut intermediate_state) = previous_state {
+                let patch_config = PatchConfig {
+                    compression_level: self.zstd_compression_level,
+                };
+
                 let mut slot_diffs = vec![];
                 let mut previous_root = accessors::get_block_root_at_slot(&*state, previous_slot)?;
 
@@ -541,7 +545,11 @@ impl<P: Preset> Storage<P> {
 
                     previous_root = block_root;
 
-                    slot_diffs.push(SlotDiff::diff(&base_state, &intermediate_state)?);
+                    slot_diffs.push(SlotDiff::diff(
+                        patch_config,
+                        &base_state,
+                        &intermediate_state,
+                    )?);
                 }
 
                 batch.push(serialize_raw(
@@ -2331,9 +2339,17 @@ impl<P: Preset> StateRows<'_, P> {
     }
 
     pub fn slot_diff(&self, slot: Slot) -> Result<Option<SlotDiff>> {
-        let Some(position) = slot.checked_sub(self.state_slot.saturating_add(1)) else {
-            return Ok(None);
-        };
+        Ok(self
+            .slot_diffs(slot)?
+            .and_then(|mut slot_diffs| slot_diffs.pop()))
+    }
+
+    pub fn slot_diffs(&self, slot: Slot) -> Result<Option<Vec<SlotDiff>>> {
+        let count = usize::try_from(slot.saturating_sub(self.state_slot))?;
+
+        if count == 0 {
+            return Ok(Some(vec![]));
+        }
 
         let key = SlotDiffsBySlot(self.state_slot).to_string();
 
@@ -2345,10 +2361,13 @@ impl<P: Preset> StateRows<'_, P> {
             return Ok(None);
         }
 
-        Ok(SlotDiffs::from_ssz(&self.storage.config, row)?
+        let slot_diffs = SlotDiffs::from_ssz(&self.storage.config, row)?
             .into_inner()
             .into_iter()
-            .nth(usize::try_from(position)?))
+            .take(count)
+            .collect_vec();
+
+        Ok((slot_diffs.len() == count).then_some(slot_diffs))
     }
 
     pub fn next(&mut self) -> Result<Option<StateRow<'_, P>>> {
@@ -3129,7 +3148,7 @@ mod tests {
     };
 
     use crate::state_field::{
-        CommitteeFields, FinalityCheckpoints, StateField as _, StateRandaoMixes,
+        CommitteeFields, FinalityCheckpoints, StateBalances, StateField as _, StateRandaoMixes,
     };
 
     use super::*;
@@ -4367,6 +4386,29 @@ mod tests {
             !storage.contains_key(SlotDiffsBySlot(0))?,
             "the diffs between slots 0 and 64 would hold an epoch transition",
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn slot_diffs_give_the_balances_between_stored_states() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, 32)?;
+
+        for (slot, state) in (0..).zip(&states) {
+            let rows = storage
+                .state_rows_before_or_at(slot)?
+                .expect("the anchor state is stored");
+
+            let StateBalances { balances, .. } =
+                StateBalances::reconstruct(slot, rows)?.expect("every slot has stored diffs");
+
+            assert_eq!(
+                balances.iter().collect_vec(),
+                state.balances().iter().collect_vec(),
+                "balances in slot {slot}",
+            );
+        }
 
         Ok(())
     }
