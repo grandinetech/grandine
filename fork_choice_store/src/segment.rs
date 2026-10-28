@@ -8,7 +8,6 @@ use derive_more::Debug;
 #[cfg(not(target_os = "zkvm"))]
 use im::{
     Vector,
-    shared_ptr::DefaultSharedPtr,
     vector::{Iter, IterMut},
 };
 #[cfg(target_os = "zkvm")]
@@ -54,7 +53,7 @@ impl<P: Preset> IndexMut<Position> for Segment<P> {
 #[expect(clippy::into_iter_without_iter)]
 impl<'segment, P: Preset> IntoIterator for &'segment Segment<P> {
     type Item = &'segment UnfinalizedBlock<P>;
-    type IntoIter = Iter<'segment, UnfinalizedBlock<P>, DefaultSharedPtr>;
+    type IntoIter = Iter<'segment, UnfinalizedBlock<P>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.blocks.iter()
@@ -64,7 +63,7 @@ impl<'segment, P: Preset> IntoIterator for &'segment Segment<P> {
 #[expect(clippy::into_iter_without_iter)]
 impl<'segment, P: Preset> IntoIterator for &'segment mut Segment<P> {
     type Item = &'segment mut UnfinalizedBlock<P>;
-    type IntoIter = IterMut<'segment, UnfinalizedBlock<P>, DefaultSharedPtr>;
+    type IntoIter = IterMut<'segment, UnfinalizedBlock<P>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.blocks.iter_mut()

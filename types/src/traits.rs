@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use duplicate::duplicate_item;
 #[cfg(not(target_os = "zkvm"))]
-type VectorIter<'a, T> = im::vector::Iter<'a, T, im::shared_ptr::DefaultSharedPtr>;
+use im::vector::Iter as VectorIter;
 use ssz::{
     BitVector, ContiguousList, Hc, IndexError, ProgressiveList, PushError, SszBitList, SszHash,
     SszList, SszListMut,

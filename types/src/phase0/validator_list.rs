@@ -8,7 +8,7 @@ use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bls::PublicKeyBytes;
 use derivative::Derivative;
 #[cfg(not(target_os = "zkvm"))]
-type VectorIter<'a, T> = im::vector::Iter<'a, T, im::shared_ptr::DefaultSharedPtr>;
+use im::vector::Iter as VectorIter;
 use once_cell::race::OnceBox;
 use serde::{
     Deserialize, Serialize,
