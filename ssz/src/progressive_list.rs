@@ -199,6 +199,10 @@ where
         Box::new(self.0.as_ref().iter())
     }
 
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a> {
+        Box::new(core::iter::once(self.0.as_ref()))
+    }
+
     fn clone_boxed(&self) -> Box<dyn SszList<T>>
     where
         T: Clone + 'static,

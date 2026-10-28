@@ -1110,6 +1110,11 @@ impl RawValidatorList {
         (pubkeys, effective_balances, items)
     }
 
+    #[must_use]
+    pub const fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList) {
+        (&self.pubkeys, &self.effective_balances, &self.items)
+    }
+
     pub fn get(&self, index: u64) -> Result<Validator, IndexError> {
         let index = self.validate_index(index)?;
 

@@ -1,9 +1,6 @@
 use bls::PublicKeyBytes;
-use diff::{
-    EditAccumulator, Error, GweiDeltas, Patch, PatchConfig, PositionalEdit, PositionalPatch,
-    Unlimited,
-};
-use ssz::{ContiguousList, H256, IndexError, Ssz};
+use diff::{Error, GweiDeltas, Patch, PatchConfig, PositionalEdit, PositionalPatch, Unlimited};
+use ssz::{ContiguousList, H256, Ssz};
 use try_from_iterator::TryFromIterator as _;
 
 use crate::{
@@ -119,62 +116,74 @@ impl From<&PartialValidator> for OtherValidatorEdits {
     }
 }
 
-impl<C: SszValidatorList + ?Sized> Patch<C> for ValidatorListPatch {
-    fn diff(_config: PatchConfig, base: &C, changed: &C) -> Result<Self, Error> {
-        let common_len = base.len_usize();
+impl ValidatorListPatch {
+    fn diff_columns(
+        (base_partial_validators, base_effective_balances): (
+            &PartialValidatorList,
+            &EffectiveBalanceList,
+        ),
+        (changed_partial_validators, changed_effective_balances): (
+            &PartialValidatorList,
+            &EffectiveBalanceList,
+        ),
+    ) -> Result<Self, Error> {
+        let common_len = base_partial_validators.len();
 
         // Validators are never removed from the registry and `ValidatorList` has
         // no way to shrink, so a shorter `changed` cannot be represented.
-        if changed.len_usize() < common_len {
+        if changed_partial_validators.len() < common_len {
             return Err(Error::UnsupportedDiff);
         }
 
-        let effective_balances = GweiDeltas::diff(common_len, || {
-            base.effective_balances()
-                .zip(changed.effective_balances())
-                .map(|(&before, &after)| (before, after))
-        })?;
-
-        let mut withdrawal_credentials = EditAccumulator::new();
-        let mut others = EditAccumulator::new();
-
-        for (index, (base_item, changed_item)) in base
-            .partial_validators()
-            .zip(changed.partial_validators())
-            .enumerate()
-        {
-            withdrawal_credentials.push(
-                index,
-                &base_item.withdrawal_credentials,
-                &changed_item.withdrawal_credentials,
-            );
-
-            others.push(
-                index,
-                &OtherValidatorEdits::from(base_item),
-                &OtherValidatorEdits::from(changed_item),
-            );
-        }
-
         let appended = itertools::process_results(
-            (base.len_u64()..changed.len_u64()).map(|index| {
-                let partial_validator = changed.partial_validator(index)?;
-                let effective_balance = changed.effective_balance(index)?;
+            (common_len..changed_partial_validators.len()).map(|index| {
+                let partial_validator = changed_partial_validators
+                    .get(index)
+                    .ok_or(Error::PatchIndexOutOfBounds)?;
 
-                Ok(AppendedValidator::new(partial_validator, effective_balance))
+                let effective_balance = changed_effective_balances
+                    .get(index)
+                    .ok_or(Error::PatchIndexOutOfBounds)?;
+
+                Ok(AppendedValidator::new(
+                    partial_validator,
+                    *effective_balance,
+                ))
             }),
             |appended| ContiguousList::try_from_iter(appended),
-        )
-        .map_err(|_: IndexError| Error::PatchIndexOutOfBounds)?
+        )?
         .expect("validator list patch appended items should fit in the SSZ list");
 
         Ok(Self {
             base_len: u32::try_from(common_len).map_err(|_| Error::PatchListLimitExceeded)?,
-            effective_balances,
-            withdrawal_credentials_edits: withdrawal_credentials.finish(),
-            other_edits: others.finish(),
+            effective_balances: GweiDeltas::diff_vectors(
+                base_effective_balances,
+                changed_effective_balances,
+            )?,
+            withdrawal_credentials_edits: PositionalPatch::diff_vector_edits(
+                base_partial_validators,
+                changed_partial_validators,
+                |validator| validator.withdrawal_credentials,
+            ),
+            other_edits: PositionalPatch::diff_vector_edits(
+                base_partial_validators,
+                changed_partial_validators,
+                |validator| OtherValidatorEdits::from(validator),
+            ),
             appended,
         })
+    }
+}
+
+impl<C: SszValidatorList + ?Sized> Patch<C> for ValidatorListPatch {
+    fn diff(_config: PatchConfig, base: &C, changed: &C) -> Result<Self, Error> {
+        let (_, base_effective_balances, base_partial_validators) = base.columns();
+        let (_, changed_effective_balances, changed_partial_validators) = changed.columns();
+
+        Self::diff_columns(
+            (base_partial_validators, base_effective_balances),
+            (changed_partial_validators, changed_effective_balances),
+        )
     }
 
     fn apply(self, base: &mut C) -> Result<(), Error> {
@@ -250,61 +259,7 @@ impl Patch<(PartialValidatorList, EffectiveBalanceList)> for ValidatorListPatch 
         base: &(PartialValidatorList, EffectiveBalanceList),
         changed: &(PartialValidatorList, EffectiveBalanceList),
     ) -> Result<Self, Error> {
-        let (base_partial_validators, base_effective_balances) = base;
-        let (changed_partial_validators, changed_effective_balances) = changed;
-
-        let common_len = base_partial_validators.len();
-
-        if changed_partial_validators.len() < common_len {
-            return Err(Error::UnsupportedDiff);
-        }
-
-        let effective_balances = GweiDeltas::diff(common_len, || {
-            base_effective_balances
-                .iter()
-                .zip(changed_effective_balances)
-                .map(|(&before, &after)| (before, after))
-        })?;
-
-        let mut withdrawal_credentials = EditAccumulator::new();
-        let mut others = EditAccumulator::new();
-
-        for (index, (base_item, changed_item)) in base_partial_validators
-            .iter()
-            .zip(changed_partial_validators)
-            .enumerate()
-        {
-            withdrawal_credentials.push(
-                index,
-                &base_item.withdrawal_credentials,
-                &changed_item.withdrawal_credentials,
-            );
-
-            others.push(
-                index,
-                &OtherValidatorEdits::from(base_item),
-                &OtherValidatorEdits::from(changed_item),
-            );
-        }
-
-        let appended = ContiguousList::try_from_iter(
-            changed_partial_validators
-                .iter()
-                .zip(changed_effective_balances)
-                .skip(common_len)
-                .map(|(partial_validator, &effective_balance)| {
-                    AppendedValidator::new(partial_validator, effective_balance)
-                }),
-        )
-        .expect("validator list patch appended items should fit in the SSZ list");
-
-        Ok(Self {
-            base_len: u32::try_from(common_len).map_err(|_| Error::PatchListLimitExceeded)?,
-            effective_balances,
-            withdrawal_credentials_edits: withdrawal_credentials.finish(),
-            other_edits: others.finish(),
-            appended,
-        })
+        Self::diff_columns((&base.0, &base.1), (&changed.0, &changed.1))
     }
 
     fn apply(self, base: &mut (PartialValidatorList, EffectiveBalanceList)) -> Result<(), Error> {

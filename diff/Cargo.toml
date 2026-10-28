@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bitvec = { workspace = true }
+im = { workspace = true }
 ssz = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }

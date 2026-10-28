@@ -19,6 +19,8 @@ pub trait SszList<T>: SszHash<PackingFactor = U1> + Send + Sync + Debug {
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
 
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a>;
+
     fn clone_boxed(&self) -> Box<dyn SszList<T>>
     where
         T: Clone + 'static;

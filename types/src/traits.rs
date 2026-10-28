@@ -111,7 +111,9 @@ use crate::{
         },
         primitives::BuilderIndex,
     },
-    nonstandard::{PartialValidator, Phase, PubkeyList},
+    nonstandard::{
+        EffectiveBalanceList, PartialValidator, PartialValidatorList, Phase, PubkeyList,
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::JustificationBitsLength,
@@ -2250,6 +2252,8 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator>;
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei>;
+
+    fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList);
 
     fn update_effective_balances(
         &mut self,

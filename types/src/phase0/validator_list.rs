@@ -321,6 +321,10 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
         self.buf.effective_balances()
     }
 
+    fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList) {
+        self.buf.columns()
+    }
+
     fn update_effective_balances(
         &mut self,
         updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,

@@ -20,11 +20,7 @@ impl<C: SszListMut<Gwei> + ?Sized> Patch<C> for BalancesPatch {
 
         Ok(Self {
             base_len: u32::try_from(base.len_usize()).map_err(|_| Error::PatchListLimitExceeded)?,
-            balances: GweiDeltas::diff(base.len_usize(), || {
-                base.iter()
-                    .zip(changed.iter())
-                    .map(|(&before, &after)| (before, after))
-            })?,
+            balances: GweiDeltas::diff_lists(base, changed)?,
             appended: ContiguousList::try_from_iter(changed.iter().skip(base.len_usize()).copied())
                 .expect("appended balances should fit in the SSZ list"),
         })
@@ -50,7 +46,7 @@ impl<C: SszListMut<Gwei> + ?Sized> Patch<C> for BalancesPatch {
 
 #[cfg(test)]
 mod tests {
-    use ssz::PersistentList;
+    use ssz::{PersistentList, PersistentProgressiveList};
     use typenum::U64;
 
     use super::*;
@@ -90,6 +86,29 @@ mod tests {
 
             assert_eq!(applied, changed);
         }
+    }
+
+    #[test]
+    fn round_trips_over_persistent_progressive_list() {
+        type List = PersistentProgressiveList<Gwei>;
+
+        let base = List::try_from_iter((0..100).map(|index| 32_000_000_000 + index))
+            .expect("progressive lists have no maximum length");
+
+        let mut changed = base.clone();
+
+        *changed.get_mut(70).expect("index is within bounds") = 31_000_000_000;
+        changed
+            .push(32_000_000_000)
+            .expect("progressive lists have no maximum length");
+
+        let patch = BalancesPatch::diff(PatchConfig::default(), &base, &changed)
+            .expect("balances patch should represent the change");
+
+        let mut applied = base;
+        patch.apply(&mut applied).expect("patch should apply");
+
+        assert_eq!(applied, changed);
     }
 
     #[test]
