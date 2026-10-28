@@ -37,8 +37,8 @@ use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
     CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
-    StateBalances, StateField as _, StateProposerLookahead, StateRandaoMixes, StoredBlock,
-    SyncCommittees, Topic, ValidatorColumns, Wait,
+    StateBalances, StateField as _, StateProposerLookahead, StateRandaoMixes, StateValidators,
+    StoredBlock, SyncCommittees, Topic, ValidatorColumns, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -77,7 +77,7 @@ use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, ProgressiveList, Ssz,
-    SszHash as _, SszRead,
+    SszHash as _, SszListMut, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -123,8 +123,8 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        BlockRewards, KzgProofs, PayloadStatus, Phase, RelativeEpoch, ValidationOutcome,
-        ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
+        BlockRewards, KzgProofs, PayloadStatus, Phase, RawValidatorList, RelativeEpoch,
+        ValidationOutcome, ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -805,34 +805,31 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
     Error,
 > {
     let WithStatus {
-        value: state,
+        value: (_, validators, _),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let ids = ids.into_iter().collect::<HashSet<_>>();
 
-    let validators = (0..)
-        .zip(state.validators().iter())
-        .filter_map(|(index, validator)| {
-            if !ids.is_empty() {
-                let validator_index = ValidatorId::ValidatorIndex(index);
-                let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
+    let validators = (0..).zip(&validators).filter_map(|(index, validator)| {
+        if !ids.is_empty() {
+            let validator_index = ValidatorId::ValidatorIndex(index);
+            let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
 
-                let allowed_by_id =
-                    ids.contains(&validator_index) || ids.contains(&validator_pubkey);
+            let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
 
-                if !allowed_by_id {
-                    return None;
-                }
+            if !allowed_by_id {
+                return None;
             }
+        }
 
-            Some(StateValidatorIdentityResponse {
-                index,
-                pubkey: validator.pubkey,
-                activation_epoch: validator.activation_epoch,
-            })
-        });
+        Some(StateValidatorIdentityResponse {
+            index,
+            pubkey: validator.pubkey,
+            activation_epoch: validator.activation_epoch,
+        })
+    });
 
     let validators = ContiguousList::try_from_iter(validators).map_err(AnyhowError::new)?;
 
@@ -849,22 +846,18 @@ pub async fn state_validator<P: Preset, W: Wait>(
     EthPath((state_id, validator_id)): EthPath<(StateId, ValidatorId)>,
 ) -> Result<EthResponse<StateValidatorResponse>, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, validators, balances),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let validator_index = validator_id
-        .validator_index(state.validators().pubkeys())
+        .validator_index(validators.pubkeys())
         .ok_or(Error::ValidatorNotFound)?;
 
-    let validator = state
-        .validators()
-        .get(validator_index)
-        .map_err(AnyhowError::new)?;
+    let validator = validators.get(validator_index).map_err(AnyhowError::new)?;
 
-    let balance = state
-        .balances()
+    let balance = balances
         .get(validator_index)
         .copied()
         .expect("list of validators and list of balances should have the same length");
@@ -872,7 +865,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     let response = StateValidatorResponse {
         balance,
         index: validator_index,
-        status: ValidatorStatus::new(&validator, &state),
+        status: ValidatorStatus::new(&validator, misc::compute_epoch_at_slot::<P>(slot)),
         validator: validator.clone(),
     };
 
@@ -5025,6 +5018,47 @@ pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
 }
 
+#[expect(clippy::type_complexity)]
+fn validators_and_balances<P: Preset, W: Wait>(
+    state_id: &StateId,
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+) -> Result<WithStatus<(Slot, RawValidatorList, Box<dyn SszListMut<Gwei>>)>, Error> {
+    let WithStatus {
+        value:
+            (
+                slot,
+                StateValidators {
+                    pubkeys,
+                    validators,
+                    balances,
+                },
+            ),
+        status,
+        finalized,
+    } = state_id::field(state_id, controller, anchor_checkpoint_provider)?;
+
+    let ValidatorColumns {
+        partial_validators,
+        effective_balances,
+    } = validators;
+
+    let pubkeys = pubkeys.unwrap_or_else(|| {
+        controller
+            .finalized_pubkeys()
+            .prefix(partial_validators.len())
+    });
+
+    let validators =
+        RawValidatorList::from_columns(pubkeys, effective_balances, partial_validators);
+
+    Ok(WithStatus {
+        value: (slot, validators, balances),
+        status,
+        finalized,
+    })
+}
+
 fn state_validators<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
@@ -5032,57 +5066,48 @@ fn state_validators<P: Preset, W: Wait>(
     ids_and_statuses: &impl ValidatorIdsAndStatuses,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, validators, balances),
         status,
         finalized,
-    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, controller, anchor_checkpoint_provider)?;
 
-    let ids = ids_and_statuses
-        .ids()
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let statuses = ids_and_statuses.statuses();
 
-    let validators = izip!(
-        0..,
-        state.validators().iter(),
-        state.balances().into_iter().copied(),
-    )
-    .filter(|(index, validator, _)| {
-        if !ids.is_empty() {
-            let validator_index = ValidatorId::ValidatorIndex(*index);
-            let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
+    let response = |index, validator: Validator, balance| {
+        let validator_status = ValidatorStatus::new(&validator, epoch);
 
-            let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
-
-            if !allowed_by_id {
-                return false;
-            }
-        }
-
-        if !statuses.is_empty() {
-            let validator_status = ValidatorStatus::new(validator, &state);
-
-            let allowed_by_status = statuses
+        let allowed_by_status = statuses.is_empty()
+            || statuses
                 .iter()
                 .any(|status| status.matches(validator_status));
 
-            if !allowed_by_status {
-                return false;
-            }
-        }
+        allowed_by_status.then_some(StateValidatorResponse {
+            index,
+            balance,
+            status: validator_status,
+            validator,
+        })
+    };
 
-        true
-    })
-    .map(|(index, validator, balance)| StateValidatorResponse {
-        index,
-        balance,
-        status: ValidatorStatus::new(&validator, &state),
-        validator: validator.clone(),
-    })
-    .collect();
+    let validators = if ids_and_statuses.ids().is_empty() {
+        izip!(0.., &validators, balances.iter().copied())
+            .filter_map(|(index, validator, balance)| response(index, validator, balance))
+            .collect()
+    } else {
+        ids_and_statuses
+            .ids()
+            .iter()
+            .filter_map(|validator_id| validator_id.validator_index(validators.pubkeys()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|index| {
+                let validator = validators.get(index).ok()?;
+                let balance = balances.get(index).copied().ok()?;
+                response(index, validator, balance)
+            })
+            .collect()
+    };
 
     Ok(EthResponse::json(validators)
         .execution_optimistic(status.is_optimistic())

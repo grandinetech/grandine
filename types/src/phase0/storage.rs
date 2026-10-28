@@ -292,6 +292,7 @@ impl<P: Preset> BeaconStateFrame<P> {
 #[ssz(derive_hash = false)]
 pub struct SlotDiff {
     pub randao_mix: H256,
+    pub validators: ValidatorListPatch,
     pub balances: BalancesPatch,
 }
 
@@ -305,6 +306,7 @@ impl SlotDiff {
             randao_mix: *changed
                 .randao_mixes
                 .mod_index(changed.slot.div_typenum::<P::SlotsPerEpoch>()),
+            validators: Patch::diff(config, &base.validators, &changed.validators)?,
             balances: Patch::diff(config, &base.balances, &changed.balances)?,
         })
     }

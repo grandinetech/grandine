@@ -1,14 +1,14 @@
 use bls::PublicKeyBytes;
-use helper_functions::misc;
 use parse_display::{Display, FromStr};
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
-    combined::BeaconState,
     nonstandard::PubkeyList,
-    phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator, primitives::ValidatorIndex},
-    preset::Preset,
-    traits::BeaconState as _,
+    phase0::{
+        consts::FAR_FUTURE_EPOCH,
+        containers::Validator,
+        primitives::{Epoch, ValidatorIndex},
+    },
 };
 
 pub trait ValidatorIdsAndStatuses {
@@ -109,9 +109,7 @@ pub enum ValidatorStatus {
 }
 
 impl ValidatorStatus {
-    pub fn new<P: Preset>(validator: &Validator, state: &BeaconState<P>) -> Self {
-        let current_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
-
+    pub const fn new(validator: &Validator, current_epoch: Epoch) -> Self {
         if validator.activation_epoch > current_epoch {
             if validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH {
                 return Self::PendingInitialized;

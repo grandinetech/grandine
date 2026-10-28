@@ -28,7 +28,7 @@ pub use crate::{
     specialized::{AdHocBenchController, BenchController},
     state_field::{
         CommitteeFields, FinalityCheckpoints, StateBalances, StateField, StateProposerLookahead,
-        StateRandaoMixes, SyncCommittees, ValidatorColumns,
+        StateRandaoMixes, StateValidators, SyncCommittees, ValidatorColumns,
     },
     state_storage_config::StateStorageConfig,
     storage::{

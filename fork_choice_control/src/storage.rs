@@ -3148,7 +3148,8 @@ mod tests {
     };
 
     use crate::state_field::{
-        CommitteeFields, FinalityCheckpoints, StateBalances, StateField as _, StateRandaoMixes,
+        CommitteeFields, FinalityCheckpoints, StateField as _, StateRandaoMixes, StateValidators,
+        ValidatorColumns,
     };
 
     use super::*;
@@ -4391,7 +4392,7 @@ mod tests {
     }
 
     #[test]
-    fn slot_diffs_give_the_balances_between_stored_states() -> Result<()> {
+    fn slot_diffs_give_the_registry_and_balances_between_stored_states() -> Result<()> {
         let storage = storage_for_chain_reads();
         let states = append_states_with_randao_reveals(&storage, 32)?;
 
@@ -4400,9 +4401,22 @@ mod tests {
                 .state_rows_before_or_at(slot)?
                 .expect("the anchor state is stored");
 
-            let StateBalances { balances, .. } =
-                StateBalances::reconstruct(slot, rows)?.expect("every slot has stored diffs");
+            let StateValidators {
+                validators,
+                balances,
+                ..
+            } = StateValidators::reconstruct(slot, rows)?.expect("every slot has stored diffs");
 
+            let expected = ValidatorColumns::from_state(state);
+
+            assert_eq!(
+                validators.partial_validators, expected.partial_validators,
+                "registry in slot {slot}",
+            );
+            assert_eq!(
+                validators.effective_balances, expected.effective_balances,
+                "effective balances in slot {slot}",
+            );
             assert_eq!(
                 balances.iter().collect_vec(),
                 state.balances().iter().collect_vec(),

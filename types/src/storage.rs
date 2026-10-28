@@ -63,6 +63,7 @@ use crate::{
             BeaconStatePatch as Phase0BeaconStatePatch,
             BeaconStatePatchCursor as Phase0BeaconStatePatchCursor, SlotDiff as Phase0SlotDiff,
         },
+        validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
     traits::BeaconState as BeaconStateTrait,
@@ -524,16 +525,16 @@ impl SlotDiff {
     }
 
     #[must_use]
-    pub fn into_balances(self) -> BalancesPatch {
+    pub fn into_registry(self) -> (ValidatorListPatch, BalancesPatch) {
         match self {
-            Self::Phase0(diff) => diff.balances,
-            Self::Altair(diff) => diff.balances,
-            Self::Bellatrix(diff) => diff.balances,
-            Self::Capella(diff) => diff.balances,
-            Self::Deneb(diff) => diff.balances,
-            Self::Electra(diff) => diff.balances,
-            Self::Fulu(diff) => diff.balances,
-            Self::Gloas(diff) => diff.balances,
+            Self::Phase0(diff) => (diff.validators, diff.balances),
+            Self::Altair(diff) => (diff.validators, diff.balances),
+            Self::Bellatrix(diff) => (diff.validators, diff.balances),
+            Self::Capella(diff) => (diff.validators, diff.balances),
+            Self::Deneb(diff) => (diff.validators, diff.balances),
+            Self::Electra(diff) => (diff.validators, diff.balances),
+            Self::Fulu(diff) => (diff.validators, diff.balances),
+            Self::Gloas(diff) => (diff.validators, diff.balances),
         }
     }
 }

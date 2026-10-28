@@ -873,7 +873,9 @@ impl<P: Preset> StateField<P> for StateBalances {
             }
 
             for slot_diff in slot_diffs {
-                slot_diff.into_balances().apply(&mut *balances)?;
+                let (_, patch) = slot_diff.into_registry();
+
+                patch.apply(&mut *balances)?;
             }
 
             return Ok(Some(Self {
@@ -932,5 +934,77 @@ impl StateBalances {
         };
 
         Ok(patches)
+    }
+}
+
+pub struct StateValidators {
+    pub pubkeys: Option<PubkeyList>,
+    pub validators: ValidatorColumns,
+    pub balances: Box<dyn SszListMut<Gwei>>,
+}
+
+impl<P: Preset> StateField<P> for StateValidators {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        Self {
+            pubkeys: Some(state.validators().pubkeys().clone()),
+            validators: ValidatorColumns::from_state(state),
+            balances: StateBalances::balances_from_state(state),
+        }
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let Some(slot_diffs) = rows.slot_diffs(slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let (validators, mut balances) = match row {
+                StateRow::Delta(patch) => {
+                    patches.push((
+                        ValidatorColumns::patches(&patch)?,
+                        StateBalances::patches(&patch)?,
+                    ));
+
+                    continue;
+                }
+                StateRow::Frame(frame) => (
+                    ValidatorColumns::from_frame(&frame)?,
+                    StateBalances::from_frame(&frame)?,
+                ),
+                StateRow::State(state) => (
+                    ValidatorColumns::from_state(&state),
+                    StateBalances::balances_from_state(&state),
+                ),
+            };
+
+            let mut columns = (validators.partial_validators, validators.effective_balances);
+
+            for (validators_patch, balances_patch) in patches.into_iter().rev() {
+                validators_patch.apply(&mut columns)?;
+                balances_patch.apply(&mut *balances)?;
+            }
+
+            for slot_diff in slot_diffs {
+                let (validators_patch, balances_patch) = slot_diff.into_registry();
+
+                validators_patch.apply(&mut columns)?;
+                balances_patch.apply(&mut *balances)?;
+            }
+
+            let (partial_validators, effective_balances) = columns;
+
+            return Ok(Some(Self {
+                pubkeys: None,
+                validators: ValidatorColumns {
+                    partial_validators,
+                    effective_balances,
+                },
+                balances,
+            }));
+        }
+
+        Ok(None)
     }
 }
