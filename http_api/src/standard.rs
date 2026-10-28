@@ -718,10 +718,10 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<StateFinalityCheckpointsResponse>, Error> {
     let WithStatus {
-        value: checkpoints,
+        value: (_, checkpoints),
         status,
         finalized,
-    }: WithStatus<FinalityCheckpoints> =
+    }: WithStatus<(Slot, FinalityCheckpoints)> =
         state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let response = StateFinalityCheckpointsResponse {
@@ -994,13 +994,13 @@ pub async fn state_committees<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
     let WithStatus {
-        value: mut fields,
+        value: (mut state_slot, mut fields),
         status,
         finalized,
-    }: WithStatus<CommitteeFields<P>> =
+    }: WithStatus<(Slot, CommitteeFields<P>)> =
         state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(fields.slot);
+    let state_epoch = misc::compute_epoch_at_slot::<P>(state_slot);
     let epoch = query.epoch.unwrap_or(state_epoch);
 
     let slots = match query.slot {
@@ -1031,10 +1031,11 @@ pub async fn state_committees<P: Preset, W: Wait>(
         })
         .await??;
 
+        state_slot = state.slot();
         fields = CommitteeFields::from_state(&state);
     }
 
-    accessors::compute_relative_epoch(misc::compute_epoch_at_slot::<P>(fields.slot), epoch)?;
+    accessors::compute_relative_epoch(misc::compute_epoch_at_slot::<P>(state_slot), epoch)?;
 
     let indices = accessors::compute_shuffled_active_validator_indices::<P>(
         &fields.validators.partial_validators,
@@ -1084,10 +1085,10 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateSyncCommitteesQuery>,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: committees,
+        value: (slot, committees),
         status,
         finalized,
-    }: WithStatus<Option<SyncCommittees<P>>> =
+    }: WithStatus<(Slot, Option<SyncCommittees<P>>)> =
         state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let Some(committees) = committees else {
@@ -1097,7 +1098,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
             .into_response());
     };
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(committees.slot);
+    let state_epoch = misc::compute_epoch_at_slot::<P>(slot);
     let state_period = misc::sync_committee_period::<P>(state_epoch);
     let requested_epoch = query.epoch.unwrap_or(state_epoch);
     let requested_period = misc::sync_committee_period::<P>(requested_epoch);
@@ -1145,16 +1146,13 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: lookahead,
+        value: (slot, lookahead),
         status,
         finalized,
-    }: WithStatus<Option<StateProposerLookahead<P>>> =
+    }: WithStatus<(Slot, Option<StateProposerLookahead<P>>)> =
         state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let StateProposerLookahead {
-        slot,
-        proposer_lookahead,
-    } = lookahead.ok_or(Error::StatePreFulu)?;
+    let StateProposerLookahead { proposer_lookahead } = lookahead.ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
         .execution_optimistic(status.is_optimistic())
@@ -1362,7 +1360,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StateRandaoQuery>,
 ) -> Result<EthResponse<StateRandaoResponse>, Error> {
     let WithStatus {
-        value: StateRandaoMixes { slot, randao_mixes },
+        value: (slot, StateRandaoMixes { randao_mixes }),
         status,
         finalized,
     } = state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
@@ -2512,16 +2510,18 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         .expect("post-Altair blocks have a sync aggregate");
 
     let WithStatus {
-        value: validators, ..
-    }: WithStatus<ValidatorColumns> = state_id::field(
+        value: (_, validators),
+        ..
+    }: WithStatus<(Slot, ValidatorColumns)> = state_id::field(
         &StateId::Slot(block_slot),
         &controller,
         &anchor_checkpoint_provider,
     )?;
 
     let WithStatus {
-        value: committees, ..
-    }: WithStatus<Option<SyncCommittees<P>>> = state_id::field(
+        value: (_, committees),
+        ..
+    }: WithStatus<(Slot, Option<SyncCommittees<P>>)> = state_id::field(
         &StateId::Slot(block_slot),
         &controller,
         &anchor_checkpoint_provider,
@@ -3682,10 +3682,10 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
         let WithStatus {
-            value: committees,
+            value: (_, committees),
             status,
             finalized,
-        }: WithStatus<Option<SyncCommittees<P>>> = state_id::field(
+        }: WithStatus<(Slot, Option<SyncCommittees<P>>)> = state_id::field(
             &StateId::Slot(start_slot),
             &controller,
             &anchor_checkpoint_provider,

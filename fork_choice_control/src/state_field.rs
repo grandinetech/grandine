@@ -193,7 +193,6 @@ impl FinalityCheckpoints {
 }
 
 pub struct SyncCommittees<P: Preset> {
-    pub slot: Slot,
     pub current: Arc<Hc<SyncCommittee<P>>>,
     pub next: Arc<Hc<SyncCommittee<P>>>,
 }
@@ -203,7 +202,6 @@ impl<P: Preset> StateField<P> for Option<SyncCommittees<P>> {
         let post_altair = state.post_altair()?;
 
         Some(SyncCommittees {
-            slot: state.slot(),
             current: post_altair.current_sync_committee().clone_arc(),
             next: post_altair.next_sync_committee().clone_arc(),
         })
@@ -231,7 +229,6 @@ impl<P: Preset> StateField<P> for Option<SyncCommittees<P>> {
 
                     if let [Some(current), Some(next)] = &changed {
                         return Ok(Some(Some(SyncCommittees {
-                            slot,
                             current: current.clone_arc(),
                             next: next.clone_arc(),
                         })));
@@ -250,7 +247,6 @@ impl<P: Preset> StateField<P> for Option<SyncCommittees<P>> {
             let [current, next] = changed;
 
             return Ok(Some(Some(SyncCommittees {
-                slot,
                 current: current.unwrap_or(base.current),
                 next: next.unwrap_or(base.next),
             })));
@@ -265,37 +261,30 @@ impl<P: Preset> SyncCommittees<P> {
         let committees = match frame {
             BeaconStateFrameCursor::Phase0(_) => return Ok(None),
             BeaconStateFrameCursor::Altair(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Bellatrix(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Capella(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Deneb(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Electra(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Fulu(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
             BeaconStateFrameCursor::Gloas(frame) => Self {
-                slot: frame.get_slot()?,
                 current: Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
                 next: Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             },
@@ -345,7 +334,6 @@ impl<P: Preset> SyncCommittees<P> {
 }
 
 pub struct StateProposerLookahead<P: Preset> {
-    pub slot: Slot,
     pub proposer_lookahead: ProposerLookahead<P>,
 }
 
@@ -354,7 +342,6 @@ impl<P: Preset> StateField<P> for Option<StateProposerLookahead<P>> {
         let post_fulu = state.post_fulu()?;
 
         Some(StateProposerLookahead {
-            slot: state.slot(),
             proposer_lookahead: post_fulu.proposer_lookahead().clone(),
         })
     }
@@ -387,7 +374,7 @@ impl<P: Preset> StateField<P> for Option<StateProposerLookahead<P>> {
                 patch.apply(&mut base.proposer_lookahead)?;
             }
 
-            return Ok(Some(Some(StateProposerLookahead { slot, ..base })));
+            return Ok(Some(Some(base)));
         }
 
         Ok(None)
@@ -404,11 +391,9 @@ impl<P: Preset> StateProposerLookahead<P> {
             | BeaconStateFrameCursor::Deneb(_)
             | BeaconStateFrameCursor::Electra(_) => return Ok(None),
             BeaconStateFrameCursor::Fulu(frame) => Self {
-                slot: frame.get_slot()?,
                 proposer_lookahead: frame.get_proposer_lookahead()?.into_inner(),
             },
             BeaconStateFrameCursor::Gloas(frame) => Self {
-                slot: frame.get_slot()?,
                 proposer_lookahead: frame.get_proposer_lookahead()?.into_inner(),
             },
         };
@@ -435,7 +420,6 @@ impl<P: Preset> StateProposerLookahead<P> {
 }
 
 pub struct CommitteeFields<P: Preset> {
-    pub slot: Slot,
     pub validators: ValidatorColumns,
     pub randao_mixes: RandaoMixes<P>,
 }
@@ -443,7 +427,6 @@ pub struct CommitteeFields<P: Preset> {
 impl<P: Preset> StateField<P> for CommitteeFields<P> {
     fn from_state(state: &BeaconState<P>) -> Self {
         Self {
-            slot: state.slot(),
             validators: ValidatorColumns::from_state(state),
             randao_mixes: state.randao_mixes().clone(),
         }
@@ -483,7 +466,6 @@ impl<P: Preset> StateField<P> for CommitteeFields<P> {
             let (partial_validators, effective_balances) = columns;
 
             return Ok(Some(Self {
-                slot,
                 validators: ValidatorColumns {
                     partial_validators,
                     effective_balances,
@@ -498,25 +480,18 @@ impl<P: Preset> StateField<P> for CommitteeFields<P> {
 
 impl<P: Preset> CommitteeFields<P> {
     fn from_frame(frame: &BeaconStateFrameCursor<P>) -> Result<Self> {
-        let (slot, randao_mixes) = match frame {
-            BeaconStateFrameCursor::Phase0(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
-            BeaconStateFrameCursor::Altair(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
-            BeaconStateFrameCursor::Bellatrix(frame) => {
-                (frame.get_slot()?, frame.get_randao_mixes()?)
-            }
-            BeaconStateFrameCursor::Capella(frame) => {
-                (frame.get_slot()?, frame.get_randao_mixes()?)
-            }
-            BeaconStateFrameCursor::Deneb(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
-            BeaconStateFrameCursor::Electra(frame) => {
-                (frame.get_slot()?, frame.get_randao_mixes()?)
-            }
-            BeaconStateFrameCursor::Fulu(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
-            BeaconStateFrameCursor::Gloas(frame) => (frame.get_slot()?, frame.get_randao_mixes()?),
+        let randao_mixes = match frame {
+            BeaconStateFrameCursor::Phase0(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Altair(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Bellatrix(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Capella(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Deneb(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Electra(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Fulu(frame) => frame.get_randao_mixes()?,
+            BeaconStateFrameCursor::Gloas(frame) => frame.get_randao_mixes()?,
         };
 
         Ok(Self {
-            slot,
             validators: ValidatorColumns::from_frame(frame)?,
             randao_mixes,
         })
@@ -774,14 +749,12 @@ impl ValidatorColumns {
 }
 
 pub struct StateRandaoMixes<P: Preset> {
-    pub slot: Slot,
     pub randao_mixes: RandaoMixes<P>,
 }
 
 impl<P: Preset> StateField<P> for StateRandaoMixes<P> {
     fn from_state(state: &BeaconState<P>) -> Self {
         Self {
-            slot: state.slot(),
             randao_mixes: state.randao_mixes().clone(),
         }
     }
@@ -824,7 +797,7 @@ impl<P: Preset> StateField<P> for StateRandaoMixes<P> {
                 *randao_mixes.mod_index_mut(epoch) = current_mix;
             }
 
-            return Ok(Some(Self { slot, randao_mixes }));
+            return Ok(Some(Self { randao_mixes }));
         }
 
         Ok(None)

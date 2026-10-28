@@ -4329,7 +4329,7 @@ mod tests {
                 .state_rows_before_or_at(slot)?
                 .expect("the anchor state is stored");
 
-            let StateRandaoMixes { randao_mixes, .. } =
+            let StateRandaoMixes { randao_mixes } =
                 StateRandaoMixes::reconstruct(slot, rows)?.expect("every slot has a stored mix");
 
             let epoch = misc::compute_epoch_at_slot::<Mainnet>(slot);
@@ -4345,7 +4345,7 @@ mod tests {
             .state_rows_before_or_at(32)?
             .expect("the node state is stored");
 
-        let StateRandaoMixes { randao_mixes, .. } =
+        let StateRandaoMixes { randao_mixes } =
             StateRandaoMixes::reconstruct(32, rows)?.expect("the node state has mixes");
 
         assert_eq!(
@@ -4660,7 +4660,6 @@ mod tests {
 
             Ok(CommitteeFields::reconstruct(slot, rows)?.map(|fields| {
                 (
-                    fields.slot,
                     fields.validators.partial_validators,
                     fields.validators.effective_balances,
                     fields.randao_mixes.hash_tree_root(),
@@ -4668,9 +4667,8 @@ mod tests {
             }))
         };
 
-        let expected = |slot, state: &BeaconState<Mainnet>| {
+        let expected = |state: &BeaconState<Mainnet>| {
             Some((
-                slot,
                 state.validators().partial_validators().copied().collect(),
                 state.validators().effective_balances().copied().collect(),
                 state.randao_mixes().hash_tree_root(),
@@ -4682,8 +4680,8 @@ mod tests {
                 storage.clear_caches();
             }
 
-            assert_eq!(read(547)?, expected(547, &child_state));
-            assert_eq!(read(543)?, expected(543, &parent_state));
+            assert_eq!(read(547)?, expected(&child_state));
+            assert_eq!(read(543)?, expected(&parent_state));
             assert_eq!(read(576)?, None);
         }
 
