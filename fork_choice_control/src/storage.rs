@@ -3153,7 +3153,11 @@ mod tests {
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
-        Validators,
+        Balances, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, Validators,
+        electra::{
+            beacon_state::BeaconState as ElectraBeaconState,
+            containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
+        },
         phase0::{
             beacon_state::BeaconState as Phase0BeaconState,
             containers::{
@@ -3162,10 +3166,12 @@ mod tests {
             },
         },
         preset::Mainnet,
+        storage::ProposerRewards,
     };
 
     use crate::state_field::{
-        CommitteeFields, FinalityCheckpoints, StateField as _, StateRandaoMixes, StateValidators,
+        CommitteeFields, FinalityCheckpoints, StateField as _, StatePendingConsolidations,
+        StatePendingDeposits, StatePendingPartialWithdrawals, StateRandaoMixes, StateValidators,
         ValidatorColumns,
     };
 
@@ -4455,6 +4461,201 @@ mod tests {
                 .expect("the anchor state is stored");
 
             assert!(rows.slot_diff(slot)?.is_some(), "rewards in slot {slot}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn slot_diffs_give_the_pending_queues_between_stored_states() -> Result<()> {
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet().start_and_stay_in(Phase::Electra)),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )?;
+
+        let validator_source = state_with_validators(0, 6, 0);
+        let finalized_validators = validator_source.validators();
+
+        let BeaconState::Phase0(validator_source_state) = validator_source.as_ref() else {
+            unreachable!("the state above is a Phase 0 state");
+        };
+
+        let deposit = |amount, slot| PendingDeposit {
+            amount,
+            slot,
+            ..PendingDeposit::default()
+        };
+
+        let withdrawal = |validator_index| PendingPartialWithdrawal {
+            validator_index,
+            ..PendingPartialWithdrawal::default()
+        };
+
+        let consolidation = |source_index| PendingConsolidation {
+            source_index,
+            ..PendingConsolidation::default()
+        };
+
+        let state = |slot,
+                     deposits: &[PendingDeposit],
+                     withdrawals: &[PendingPartialWithdrawal],
+                     consolidations: &[PendingConsolidation]|
+         -> Result<Arc<BeaconState<Mainnet>>> {
+            Ok(Arc::new(BeaconState::Electra(
+                ElectraBeaconState {
+                    slot,
+                    latest_block_header: BeaconBlockHeader {
+                        slot,
+                        ..BeaconBlockHeader::default()
+                    },
+                    validators: validator_source_state.validators.clone(),
+                    balances: Balances::<Mainnet>::try_from_iter([32_000_000_000; 6])?,
+                    pending_deposits: PendingDeposits::<Mainnet>::try_from_iter(
+                        deposits.iter().copied(),
+                    )?,
+                    pending_partial_withdrawals:
+                        PendingPartialWithdrawals::<Mainnet>::try_from_iter(
+                            withdrawals.iter().copied(),
+                        )?,
+                    pending_consolidations: PendingConsolidations::<Mainnet>::try_from_iter(
+                        consolidations.iter().copied(),
+                    )?,
+                    ..ElectraBeaconState::default()
+                }
+                .into(),
+            )))
+        };
+
+        let states = [
+            state(0, &[deposit(1, 0)], &[withdrawal(0), withdrawal(1)], &[])?,
+            state(
+                1,
+                &[deposit(1, 0), deposit(2, 1), deposit(3, 1)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0)],
+            )?,
+            state(
+                2,
+                &[deposit(1, 0), deposit(2, 1), deposit(3, 1)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0)],
+            )?,
+            state(
+                3,
+                &[deposit(2, 1), deposit(3, 1), deposit(4, 0)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0), consolidation(1)],
+            )?,
+            state(
+                4,
+                &[
+                    deposit(2, 1),
+                    deposit(3, 1),
+                    deposit(4, 0),
+                    deposit(5, 4),
+                    deposit(6, 0),
+                ],
+                &[withdrawal(2)],
+                &[consolidation(1)],
+            )?,
+        ];
+
+        let root = |slot| H256::from_low_u64_be(slot);
+
+        let patch_config = PatchConfig {
+            compression_level: DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        };
+
+        let slot_diffs = states
+            .iter()
+            .tuple_windows()
+            .map(|(base, changed)| {
+                SlotDiff::diff(patch_config, base, changed, ProposerRewards::default())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut batch = states
+            .iter()
+            .map(|state| {
+                serialize(
+                    BlockRootBySlot(state.slot()),
+                    BlockRootBySlotValue::Block(root(state.slot())),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        batch.push(serialize_raw(
+            SlotDiffsBySlot(0),
+            SlotDiffs::with_level(slot_diffs.try_into()?, DEFAULT_ZSTD_COMPRESSION_LEVEL),
+        )?);
+
+        storage.database.put_batch_raw(batch)?;
+
+        storage.append_finalized_states(
+            [(0, Some(root(0)), states[0].clone_arc())],
+            0,
+            finalized_validators,
+        )?;
+
+        storage.clear_caches();
+
+        for (slot, expected) in (0..).zip(&states) {
+            let expected = expected
+                .post_electra()
+                .expect("the states above are Electra states");
+
+            let rows = || {
+                storage
+                    .state_rows_before_or_at(slot)?
+                    .context("the anchor state is stored")
+            };
+
+            let StatePendingDeposits { pending_deposits } =
+                Option::<StatePendingDeposits>::reconstruct(slot, rows()?)?
+                    .flatten()
+                    .expect("Electra states have pending deposits");
+
+            let StatePendingPartialWithdrawals {
+                pending_partial_withdrawals,
+            } = Option::<StatePendingPartialWithdrawals>::reconstruct(slot, rows()?)?
+                .flatten()
+                .expect("Electra states have pending partial withdrawals");
+
+            let StatePendingConsolidations {
+                pending_consolidations,
+            } = Option::<StatePendingConsolidations>::reconstruct(slot, rows()?)?
+                .flatten()
+                .expect("Electra states have pending consolidations");
+
+            assert_eq!(
+                pending_deposits.iter().copied().collect_vec(),
+                expected.pending_deposits().iter().copied().collect_vec(),
+                "pending deposits in slot {slot}",
+            );
+            assert_eq!(
+                pending_partial_withdrawals.iter().copied().collect_vec(),
+                expected
+                    .pending_partial_withdrawals()
+                    .iter()
+                    .copied()
+                    .collect_vec(),
+                "pending partial withdrawals in slot {slot}",
+            );
+            assert_eq!(
+                pending_consolidations.iter().copied().collect_vec(),
+                expected
+                    .pending_consolidations()
+                    .iter()
+                    .copied()
+                    .collect_vec(),
+                "pending consolidations in slot {slot}",
+            );
         }
 
         Ok(())

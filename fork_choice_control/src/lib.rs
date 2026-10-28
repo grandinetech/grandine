@@ -27,8 +27,10 @@ pub use crate::{
     queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
     state_field::{
-        CommitteeFields, FinalityCheckpoints, StateBalances, StateField, StateProposerLookahead,
-        StateRandaoMixes, StateValidators, SyncCommittees, ValidatorColumns,
+        CommitteeFields, FinalityCheckpoints, StateBalances, StateField,
+        StatePendingConsolidations, StatePendingDeposits, StatePendingPartialWithdrawals,
+        StateProposerLookahead, StateRandaoMixes, StateValidators, SyncCommittees,
+        ValidatorColumns,
     },
     state_storage_config::StateStorageConfig,
     storage::{

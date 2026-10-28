@@ -37,7 +37,8 @@ use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
     CommitteeFields, Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip,
-    StateBalances, StateField as _, StateProposerLookahead, StateRandaoMixes, StateValidators,
+    StateBalances, StateField as _, StatePendingConsolidations, StatePendingDeposits,
+    StatePendingPartialWithdrawals, StateProposerLookahead, StateRandaoMixes, StateValidators,
     StoredBlock, SyncCommittees, Topic, ValidatorColumns, Wait,
 };
 use fork_choice_store::{
@@ -77,7 +78,7 @@ use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, ProgressiveList, Ssz,
-    SszHash as _, SszListMut, SszRead,
+    SszHash as _, SszList, SszListMut, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -1234,25 +1235,28 @@ pub async fn state_builder_pending_payments<P: Preset, W: Wait>(
 pub async fn state_pending_consolidations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, pending_consolidations),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<(Slot, Option<StatePendingConsolidations>)> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let StatePendingConsolidations {
+        pending_consolidations,
+    } = pending_consolidations.ok_or(Error::StatePreElectra)?;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_consolidations(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
-    )
+    let pending_consolidations: &dyn SszList<_> = &*pending_consolidations;
+
+    Ok(EthResponse::json_or_ssz(pending_consolidations, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(chain_config.phase_at_slot::<P>(slot))
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_deposits`
@@ -1260,25 +1264,27 @@ pub async fn state_pending_consolidations<P: Preset, W: Wait>(
 pub async fn state_pending_deposits<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, pending_deposits),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<(Slot, Option<StatePendingDeposits>)> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let StatePendingDeposits { pending_deposits } =
+        pending_deposits.ok_or(Error::StatePreElectra)?;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_deposits(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
-    )
+    let pending_deposits: &dyn SszList<_> = &*pending_deposits;
+
+    Ok(EthResponse::json_or_ssz(pending_deposits, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(chain_config.phase_at_slot::<P>(slot))
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_partial_withdrawals`
@@ -1290,23 +1296,28 @@ pub async fn state_pending_deposits<P: Preset, W: Wait>(
 pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, pending_partial_withdrawals),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<(Slot, Option<StatePendingPartialWithdrawals>)> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let StatePendingPartialWithdrawals {
+        pending_partial_withdrawals,
+    } = pending_partial_withdrawals.ok_or(Error::StatePreElectra)?;
+
+    let pending_partial_withdrawals: &dyn SszList<_> = &*pending_partial_withdrawals;
 
     Ok(
-        EthResponse::json_or_ssz(state.pending_partial_withdrawals(), &headers)?
+        EthResponse::json_or_ssz(pending_partial_withdrawals, &headers)?
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
-            .version(version)
+            .version(chain_config.phase_at_slot::<P>(slot))
             .into_response(),
     )
 }

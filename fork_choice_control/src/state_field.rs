@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use anyhow::Result;
-use diff::{Patch as _, ReplacePatch, VectorPatch};
+use anyhow::{Context as _, Result};
+use diff::{Patch as _, QueuePatch, ReplacePatch, VectorPatch};
 use helper_functions::misc;
 use ssz::{Compressed, Hc, SszListMut};
 use std_ext::ArcExt as _;
@@ -9,6 +9,7 @@ use types::{
     ProposerLookahead, RandaoMixes,
     altair::containers::SyncCommittee,
     combined::BeaconState,
+    electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     nonstandard::{EffectiveBalanceList, PartialValidatorList, PubkeyList},
     phase0::{
         balances_patch::BalancesPatch,
@@ -1006,5 +1007,331 @@ impl<P: Preset> StateField<P> for StateValidators {
         }
 
         Ok(None)
+    }
+}
+
+pub struct StatePendingDeposits {
+    pub pending_deposits: Box<dyn SszListMut<PendingDeposit>>,
+}
+
+impl<P: Preset> StateField<P> for Option<StatePendingDeposits> {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        let pending_deposits: Box<dyn SszListMut<PendingDeposit>> = match state {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_) => return None,
+            BeaconState::Electra(state) => Box::new(state.pending_deposits.clone()),
+            BeaconState::Fulu(state) => Box::new(state.pending_deposits.clone()),
+            BeaconState::Gloas(state) => Box::new(state.pending_deposits.clone()),
+        };
+
+        Some(StatePendingDeposits { pending_deposits })
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let Some(slot_diffs) = rows.slot_diffs(slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let base = match row {
+                StateRow::Delta(patch) => {
+                    patches.extend(StatePendingDeposits::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => StatePendingDeposits::from_frame(&frame)?,
+                StateRow::State(state) => Self::from_state(&state),
+            };
+
+            let Some(StatePendingDeposits {
+                mut pending_deposits,
+            }) = base
+            else {
+                return Ok(Some(None));
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut *pending_deposits)?;
+            }
+
+            for slot_diff in slot_diffs {
+                let (patch, _, _) = slot_diff
+                    .into_queues()
+                    .context("slot diff lacks queue diffs")?;
+
+                patch.apply(&mut *pending_deposits)?;
+            }
+
+            return Ok(Some(Some(StatePendingDeposits { pending_deposits })));
+        }
+
+        Ok(None)
+    }
+}
+
+impl StatePendingDeposits {
+    fn from_frame<P: Preset>(frame: &BeaconStateFrameCursor<P>) -> Result<Option<Self>> {
+        let pending_deposits: Box<dyn SszListMut<PendingDeposit>> = match frame {
+            BeaconStateFrameCursor::Phase0(_)
+            | BeaconStateFrameCursor::Altair(_)
+            | BeaconStateFrameCursor::Bellatrix(_)
+            | BeaconStateFrameCursor::Capella(_)
+            | BeaconStateFrameCursor::Deneb(_) => return Ok(None),
+            BeaconStateFrameCursor::Electra(frame) => {
+                Box::new(frame.get_pending_deposits()?.into_inner())
+            }
+            BeaconStateFrameCursor::Fulu(frame) => {
+                Box::new(frame.get_pending_deposits()?.into_inner())
+            }
+            BeaconStateFrameCursor::Gloas(frame) => {
+                Box::new(frame.get_pending_deposits()?.into_inner())
+            }
+        };
+
+        Ok(Some(Self { pending_deposits }))
+    }
+
+    fn patches<P: Preset>(
+        patch: &BeaconStatePatchCursor<P>,
+    ) -> Result<Option<Compressed<QueuePatch<PendingDeposit>>>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(_)
+            | BeaconStatePatchCursor::Altair(_)
+            | BeaconStatePatchCursor::Bellatrix(_)
+            | BeaconStatePatchCursor::Capella(_)
+            | BeaconStatePatchCursor::Deneb(_) => return Ok(None),
+            BeaconStatePatchCursor::Electra(patch) => patch.get_pending_deposits()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_pending_deposits()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_pending_deposits()?,
+        };
+
+        Ok(Some(patches))
+    }
+}
+
+pub struct StatePendingPartialWithdrawals {
+    pub pending_partial_withdrawals: Box<dyn SszListMut<PendingPartialWithdrawal>>,
+}
+
+impl<P: Preset> StateField<P> for Option<StatePendingPartialWithdrawals> {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        let pending_partial_withdrawals: Box<dyn SszListMut<PendingPartialWithdrawal>> = match state
+        {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_) => return None,
+            BeaconState::Electra(state) => Box::new(state.pending_partial_withdrawals.clone()),
+            BeaconState::Fulu(state) => Box::new(state.pending_partial_withdrawals.clone()),
+            BeaconState::Gloas(state) => Box::new(state.pending_partial_withdrawals.clone()),
+        };
+
+        Some(StatePendingPartialWithdrawals {
+            pending_partial_withdrawals,
+        })
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let Some(slot_diffs) = rows.slot_diffs(slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let base = match row {
+                StateRow::Delta(patch) => {
+                    patches.extend(StatePendingPartialWithdrawals::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => StatePendingPartialWithdrawals::from_frame(&frame)?,
+                StateRow::State(state) => Self::from_state(&state),
+            };
+
+            let Some(StatePendingPartialWithdrawals {
+                mut pending_partial_withdrawals,
+            }) = base
+            else {
+                return Ok(Some(None));
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut *pending_partial_withdrawals)?;
+            }
+
+            for slot_diff in slot_diffs {
+                let (_, patch, _) = slot_diff
+                    .into_queues()
+                    .context("slot diff lacks queue diffs")?;
+
+                patch.apply(&mut *pending_partial_withdrawals)?;
+            }
+
+            return Ok(Some(Some(StatePendingPartialWithdrawals {
+                pending_partial_withdrawals,
+            })));
+        }
+
+        Ok(None)
+    }
+}
+
+impl StatePendingPartialWithdrawals {
+    fn from_frame<P: Preset>(frame: &BeaconStateFrameCursor<P>) -> Result<Option<Self>> {
+        let pending_partial_withdrawals: Box<dyn SszListMut<PendingPartialWithdrawal>> = match frame
+        {
+            BeaconStateFrameCursor::Phase0(_)
+            | BeaconStateFrameCursor::Altair(_)
+            | BeaconStateFrameCursor::Bellatrix(_)
+            | BeaconStateFrameCursor::Capella(_)
+            | BeaconStateFrameCursor::Deneb(_) => return Ok(None),
+            BeaconStateFrameCursor::Electra(frame) => {
+                Box::new(frame.get_pending_partial_withdrawals()?.into_inner())
+            }
+            BeaconStateFrameCursor::Fulu(frame) => {
+                Box::new(frame.get_pending_partial_withdrawals()?.into_inner())
+            }
+            BeaconStateFrameCursor::Gloas(frame) => {
+                Box::new(frame.get_pending_partial_withdrawals()?.into_inner())
+            }
+        };
+
+        Ok(Some(Self {
+            pending_partial_withdrawals,
+        }))
+    }
+
+    fn patches<P: Preset>(
+        patch: &BeaconStatePatchCursor<P>,
+    ) -> Result<Option<Compressed<QueuePatch<PendingPartialWithdrawal>>>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(_)
+            | BeaconStatePatchCursor::Altair(_)
+            | BeaconStatePatchCursor::Bellatrix(_)
+            | BeaconStatePatchCursor::Capella(_)
+            | BeaconStatePatchCursor::Deneb(_) => return Ok(None),
+            BeaconStatePatchCursor::Electra(patch) => patch.get_pending_partial_withdrawals()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_pending_partial_withdrawals()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_pending_partial_withdrawals()?,
+        };
+
+        Ok(Some(patches))
+    }
+}
+
+pub struct StatePendingConsolidations {
+    pub pending_consolidations: Box<dyn SszListMut<PendingConsolidation>>,
+}
+
+impl<P: Preset> StateField<P> for Option<StatePendingConsolidations> {
+    fn from_state(state: &BeaconState<P>) -> Self {
+        let pending_consolidations: Box<dyn SszListMut<PendingConsolidation>> = match state {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_) => return None,
+            BeaconState::Electra(state) => Box::new(state.pending_consolidations.clone()),
+            BeaconState::Fulu(state) => Box::new(state.pending_consolidations.clone()),
+            BeaconState::Gloas(state) => Box::new(state.pending_consolidations.clone()),
+        };
+
+        Some(StatePendingConsolidations {
+            pending_consolidations,
+        })
+    }
+
+    fn reconstruct(slot: Slot, mut rows: StateRows<'_, P>) -> Result<Option<Self>> {
+        let Some(slot_diffs) = rows.slot_diffs(slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        while let Some(row) = rows.next()? {
+            let base = match row {
+                StateRow::Delta(patch) => {
+                    patches.extend(StatePendingConsolidations::patches(&patch)?);
+
+                    continue;
+                }
+                StateRow::Frame(frame) => StatePendingConsolidations::from_frame(&frame)?,
+                StateRow::State(state) => Self::from_state(&state),
+            };
+
+            let Some(StatePendingConsolidations {
+                mut pending_consolidations,
+            }) = base
+            else {
+                return Ok(Some(None));
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut *pending_consolidations)?;
+            }
+
+            for slot_diff in slot_diffs {
+                let (_, _, patch) = slot_diff
+                    .into_queues()
+                    .context("slot diff lacks queue diffs")?;
+
+                patch.apply(&mut *pending_consolidations)?;
+            }
+
+            return Ok(Some(Some(StatePendingConsolidations {
+                pending_consolidations,
+            })));
+        }
+
+        Ok(None)
+    }
+}
+
+impl StatePendingConsolidations {
+    fn from_frame<P: Preset>(frame: &BeaconStateFrameCursor<P>) -> Result<Option<Self>> {
+        let pending_consolidations: Box<dyn SszListMut<PendingConsolidation>> = match frame {
+            BeaconStateFrameCursor::Phase0(_)
+            | BeaconStateFrameCursor::Altair(_)
+            | BeaconStateFrameCursor::Bellatrix(_)
+            | BeaconStateFrameCursor::Capella(_)
+            | BeaconStateFrameCursor::Deneb(_) => return Ok(None),
+            BeaconStateFrameCursor::Electra(frame) => {
+                Box::new(frame.get_pending_consolidations()?.into_inner())
+            }
+            BeaconStateFrameCursor::Fulu(frame) => {
+                Box::new(frame.get_pending_consolidations()?.into_inner())
+            }
+            BeaconStateFrameCursor::Gloas(frame) => {
+                Box::new(frame.get_pending_consolidations()?.into_inner())
+            }
+        };
+
+        Ok(Some(Self {
+            pending_consolidations,
+        }))
+    }
+
+    fn patches<P: Preset>(
+        patch: &BeaconStatePatchCursor<P>,
+    ) -> Result<Option<Compressed<QueuePatch<PendingConsolidation>>>> {
+        let patches = match patch {
+            BeaconStatePatchCursor::Phase0(_)
+            | BeaconStatePatchCursor::Altair(_)
+            | BeaconStatePatchCursor::Bellatrix(_)
+            | BeaconStatePatchCursor::Capella(_)
+            | BeaconStatePatchCursor::Deneb(_) => return Ok(None),
+            BeaconStatePatchCursor::Electra(patch) => patch.get_pending_consolidations()?,
+            BeaconStatePatchCursor::Fulu(patch) => patch.get_pending_consolidations()?,
+            BeaconStatePatchCursor::Gloas(patch) => patch.get_pending_consolidations()?,
+        };
+
+        Ok(Some(patches))
     }
 }

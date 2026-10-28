@@ -661,6 +661,9 @@ pub struct SlotDiff {
     pub rewards: ProposerRewards,
     pub validators: ValidatorListPatch,
     pub balances: BalancesPatch,
+    pub pending_deposits: QueuePatch<PendingDeposit>,
+    pub pending_partial_withdrawals: QueuePatch<PendingPartialWithdrawal>,
+    pub pending_consolidations: QueuePatch<PendingConsolidation>,
 }
 
 impl SlotDiff {
@@ -677,6 +680,21 @@ impl SlotDiff {
             rewards,
             validators: Patch::diff(config, &base.validators, &changed.validators)?,
             balances: Patch::diff(config, &base.balances, &changed.balances)?,
+            pending_deposits: Patch::diff(
+                config,
+                &base.pending_deposits,
+                &changed.pending_deposits,
+            )?,
+            pending_partial_withdrawals: Patch::diff(
+                config,
+                &base.pending_partial_withdrawals,
+                &changed.pending_partial_withdrawals,
+            )?,
+            pending_consolidations: Patch::diff(
+                config,
+                &base.pending_consolidations,
+                &changed.pending_consolidations,
+            )?,
         })
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use diff::{Error as PatchError, Patch, PatchConfig, Unlimited};
+use diff::{Error as PatchError, Patch, PatchConfig, QueuePatch, Unlimited};
 use enum_iterator::Sequence as _;
 use ssz::{
     Compressed, ContiguousList, Hc, ReadError, Size, Ssz, SszCursor, SszRead, SszSize, SszWrite,
@@ -35,11 +35,14 @@ use crate::{
         BeaconStatePatch as DenebBeaconStatePatch,
         BeaconStatePatchCursor as DenebBeaconStatePatchCursor, SlotDiff as DenebSlotDiff,
     },
-    electra::storage::{
-        BeaconStateFrame as ElectraBeaconStateFrame,
-        BeaconStateFrameCursor as ElectraBeaconStateFrameCursor,
-        BeaconStatePatch as ElectraBeaconStatePatch,
-        BeaconStatePatchCursor as ElectraBeaconStatePatchCursor, SlotDiff as ElectraSlotDiff,
+    electra::{
+        containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
+        storage::{
+            BeaconStateFrame as ElectraBeaconStateFrame,
+            BeaconStateFrameCursor as ElectraBeaconStateFrameCursor,
+            BeaconStatePatch as ElectraBeaconStatePatch,
+            BeaconStatePatchCursor as ElectraBeaconStatePatchCursor, SlotDiff as ElectraSlotDiff,
+        },
     },
     fulu::storage::{
         BeaconStateFrame as FuluBeaconStateFrame,
@@ -578,6 +581,38 @@ impl SlotDiff {
             Self::Electra(diff) => (diff.validators, diff.balances),
             Self::Fulu(diff) => (diff.validators, diff.balances),
             Self::Gloas(diff) => (diff.validators, diff.balances),
+        }
+    }
+
+    #[must_use]
+    pub fn into_queues(
+        self,
+    ) -> Option<(
+        QueuePatch<PendingDeposit>,
+        QueuePatch<PendingPartialWithdrawal>,
+        QueuePatch<PendingConsolidation>,
+    )> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => None,
+            Self::Electra(diff) => Some((
+                diff.pending_deposits,
+                diff.pending_partial_withdrawals,
+                diff.pending_consolidations,
+            )),
+            Self::Fulu(diff) => Some((
+                diff.pending_deposits,
+                diff.pending_partial_withdrawals,
+                diff.pending_consolidations,
+            )),
+            Self::Gloas(diff) => Some((
+                diff.pending_deposits,
+                diff.pending_partial_withdrawals,
+                diff.pending_consolidations,
+            )),
         }
     }
 }
