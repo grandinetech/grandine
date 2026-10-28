@@ -2,7 +2,7 @@
 //!
 //! [Eth Beacon Node API]: https://ethereum.github.io/beacon-APIs/
 
-use core::time::Duration;
+use core::{fmt::Display, str::FromStr, time::Duration};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
@@ -65,7 +65,7 @@ use p2p::{
     NodePeersQuery, SyncCommitteeSubscription, ToSubnetService,
 };
 use prometheus_metrics::Metrics;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned, de::Error as _};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
@@ -164,22 +164,41 @@ use crate::{
     },
 };
 
+// Accepts both `?key=a,b` and `?key=a&key=b` (and mixtures of the two).
+// `serde_aux::field_attributes::deserialize_vec_from_string_or_vec` cannot be used for numbers
+// because repeated keys are buffered as strings that integers refuse to deserialize from.
+fn deserialize_comma_separated_or_repeated<'de, D: Deserializer<'de>, T: FromStr>(
+    deserializer: D,
+) -> Result<Vec<T>, D::Error>
+where
+    T::Err: Display,
+{
+    Vec::<String>::deserialize(deserializer)?
+        .iter()
+        .flat_map(|values| values.split(','))
+        .map(|value| value.parse().map_err(D::Error::custom))
+        .collect()
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlobSidecarsQuery {
-    indices: Option<Vec<BlobIndex>>,
+    #[serde(default, deserialize_with = "deserialize_comma_separated_or_repeated")]
+    indices: Vec<BlobIndex>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BlobsQuery {
-    versioned_hashes: Option<Vec<VersionedHash>>,
+    #[serde(default, deserialize_with = "deserialize_comma_separated_or_repeated")]
+    versioned_hashes: Vec<VersionedHash>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DataColumnSidecarsQuery {
-    indices: Option<Vec<ColumnIndex>>,
+    #[serde(default, deserialize_with = "deserialize_comma_separated_or_repeated")]
+    indices: Vec<ColumnIndex>,
 }
 
 #[derive(Deserialize)]
@@ -1554,9 +1573,13 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
-    let blob_identifiers = query
-        .indices
-        .unwrap_or_else(|| (0..max_blobs_per_block).collect())
+    let indices = if query.indices.is_empty() {
+        (0..max_blobs_per_block).collect()
+    } else {
+        query.indices
+    };
+
+    let blob_identifiers = indices
         .into_iter()
         .map(|index| {
             ensure!(index < max_blobs_per_block, Error::InvalidBlobIndex(index));
@@ -1675,7 +1698,9 @@ pub async fn blobs<P: Preset, W: Wait>(
     let epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
-    let requested_indices = if let Some(versioned_hashes) = query.versioned_hashes {
+    let requested_indices = if query.versioned_hashes.is_empty() {
+        None
+    } else {
         let Some(kzg_commitments) = block
             .message()
             .body()
@@ -1695,7 +1720,7 @@ pub async fn blobs<P: Preset, W: Wait>(
 
         let mut indices = BTreeSet::new();
 
-        for versioned_hash in versioned_hashes {
+        for versioned_hash in query.versioned_hashes {
             let index = block_versioned_hashes
                 .iter()
                 .position(|block_versioned_hash| *block_versioned_hash == versioned_hash)
@@ -1705,8 +1730,6 @@ pub async fn blobs<P: Preset, W: Wait>(
         }
 
         Some(indices)
-    } else {
-        None
     };
 
     let blobs = if version.is_peerdas_activated() {
@@ -3053,9 +3076,13 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
         return Err(Error::BlockPreFulu);
     }
 
-    let data_column_identifiers = query
-        .indices
-        .unwrap_or_else(|| (0..P::NumberOfColumns::U64).collect())
+    let indices = if query.indices.is_empty() {
+        (0..P::NumberOfColumns::U64).collect()
+    } else {
+        query.indices
+    };
+
+    let data_column_identifiers = indices
         .into_iter()
         .map(|index| {
             ensure!(
@@ -6425,6 +6452,72 @@ mod tests {
                     ValidatorStatus::ActiveOngoing,
                 ],
             }
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_blobs_query() -> Result<()> {
+        let hash1 = H256(hex!(
+            "01a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f"
+        ));
+        let hash2 = H256(hex!(
+            "01f1e2d3c4b5a69788796a5b4c3d2e1f0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+        ));
+
+        let extract = async |query: String| {
+            let (mut parts, ()) = Request::get(format!("/?{query}")).body(())?.into_parts();
+            let EthQuery(query) = parts.extract::<EthQuery<BlobsQuery>>().await?;
+            Ok::<_, AnyhowError>(query.versioned_hashes)
+        };
+
+        assert!(extract(String::new()).await?.is_empty());
+        assert_eq!(
+            extract(format!("versioned_hashes={hash1:?}")).await?,
+            [hash1]
+        );
+        assert_eq!(
+            extract(format!("versioned_hashes={hash1:?},{hash2:?}")).await?,
+            [hash1, hash2],
+        );
+        assert_eq!(
+            extract(format!(
+                "versioned_hashes={hash1:?}&versioned_hashes={hash2:?}"
+            ))
+            .await?,
+            [hash1, hash2],
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_indices_queries() -> Result<()> {
+        async fn extract<T: DeserializeOwned + Send + 'static>(query: &str) -> Result<T> {
+            let (mut parts, ()) = Request::get(format!("/?{query}")).body(())?.into_parts();
+            let EthQuery(query) = parts.extract::<EthQuery<T>>().await?;
+            Ok(query)
+        }
+
+        for (query, expected) in [
+            ("indices=1,3", vec![1, 3]),
+            ("indices=1&indices=3", vec![1, 3]),
+            ("indices=1&indices=3,5", vec![1, 3, 5]),
+        ] {
+            assert_eq!(extract::<BlobSidecarsQuery>(query).await?.indices, expected);
+            assert_eq!(
+                extract::<DataColumnSidecarsQuery>(query).await?.indices,
+                expected
+            );
+        }
+
+        assert!(extract::<BlobSidecarsQuery>("").await?.indices.is_empty());
+        assert!(
+            extract::<DataColumnSidecarsQuery>("")
+                .await?
+                .indices
+                .is_empty()
         );
 
         Ok(())
