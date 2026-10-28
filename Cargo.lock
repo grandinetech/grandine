@@ -2366,6 +2366,7 @@ dependencies = [
  "criterion",
  "eth-state-diff",
  "fs-err",
+ "im",
  "qbsdiff",
  "reqwest 0.13.5",
  "rkyv",

@@ -1,10 +1,16 @@
 use core::cmp::Reverse;
 use std::collections::HashMap;
 
-use ssz::{ByteList, Ssz, SszListMut};
+use ssz::{ByteList, Ssz, SszList, SszListMut};
 use typenum::U4294967296;
 
-use crate::{error::Error, list::position_set::PositionSet};
+use crate::{
+    error::Error,
+    list::{
+        bundles::{Vector, vector_bundles, zip_unshared},
+        position_set::PositionSet,
+    },
+};
 
 /// Changes to a list of gwei balances.
 #[derive(Ssz, Debug, Clone)]
@@ -16,9 +22,32 @@ pub struct GweiDeltas {
 }
 
 impl GweiDeltas {
-    /// Encodes the changes in `pairs`, which must yield `(base, changed)` balances in index order
-    /// for the first `total_len` elements of the list being diffed.
-    pub fn diff<I: Iterator<Item = (u64, u64)>>(
+    pub fn diff_lists<C: SszList<u64> + ?Sized>(base: &C, changed: &C) -> Result<Self, Error> {
+        Self::diff(base.len_usize(), || {
+            zip_unshared(base.bundles(), changed.bundles())
+                .map(|(index, &before, &after)| (index, before, after))
+        })
+    }
+
+    pub fn diff_vectors(base: &Vector<u64>, changed: &Vector<u64>) -> Result<Self, Error> {
+        Self::diff(base.len(), || {
+            zip_unshared(vector_bundles(base), vector_bundles(changed))
+                .map(|(index, &before, &after)| (index, before, after))
+        })
+    }
+
+    pub fn diff_pairs<I: Iterator<Item = (u64, u64)>>(
+        total_len: usize,
+        pairs: impl Fn() -> I,
+    ) -> Result<Self, Error> {
+        Self::diff(total_len, || {
+            pairs()
+                .enumerate()
+                .map(|(index, (before, after))| (index, before, after))
+        })
+    }
+
+    fn diff<I: Iterator<Item = (usize, u64, u64)>>(
         total_len: usize,
         pairs: impl Fn() -> I,
     ) -> Result<Self, Error> {
@@ -28,7 +57,7 @@ impl GweiDeltas {
         let mut buffer = unsigned_varint::encode::u64_buffer();
         let mut deltas = Vec::new();
 
-        for (index, (before, after)) in pairs().enumerate() {
+        for (index, before, after) in pairs() {
             if before == after {
                 continue;
             }
@@ -122,10 +151,10 @@ impl GweiDeltas {
         }
     }
 
-    fn compute_mode(pairs: impl Iterator<Item = (u64, u64)>) -> Result<i64, Error> {
+    fn compute_mode(pairs: impl Iterator<Item = (usize, u64, u64)>) -> Result<i64, Error> {
         let mut counts = HashMap::new();
 
-        for (before, after) in pairs {
+        for (_, before, after) in pairs {
             if before == after || after == 0 {
                 continue;
             }
@@ -180,7 +209,7 @@ const fn unzigzag(value: u64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use ssz::{PersistentList, SszList as _};
+    use ssz::PersistentList;
     use try_from_iterator::TryFromIterator as _;
     use typenum::U64;
 
@@ -195,10 +224,8 @@ mod tests {
             PersistentList::<u64, U64>::try_from_iter((0..20).map(|index| 31_999_900_000 + index))
                 .expect("length is below the maximum");
 
-        let deltas = GweiDeltas::diff(base.len_usize(), || {
-            base.iter().copied().zip(changed.iter().copied())
-        })
-        .expect("deltas should represent the change");
+        let deltas =
+            GweiDeltas::diff_lists(&base, &changed).expect("deltas should represent the change");
 
         assert_eq!(deltas.mode, zigzag(-100_000));
 
@@ -221,10 +248,8 @@ mod tests {
         let changed = PersistentList::<u64, U64>::try_from_iter([0, 0, 0, 47])
             .expect("length is below the maximum");
 
-        let deltas = GweiDeltas::diff(base.len_usize(), || {
-            base.iter().copied().zip(changed.iter().copied())
-        })
-        .expect("deltas should represent the change");
+        let deltas =
+            GweiDeltas::diff_lists(&base, &changed).expect("deltas should represent the change");
 
         // The -10 of the three zeroings is the most repeated delta, but zeroings are skipped,
         // which leaves the lone +7.
@@ -249,10 +274,8 @@ mod tests {
         let changed = PersistentList::<u64, U64>::try_from_iter([11, 22, 33])
             .expect("length is below the maximum");
 
-        let deltas = GweiDeltas::diff(base.len_usize(), || {
-            base.iter().copied().zip(changed.iter().copied())
-        })
-        .expect("deltas should represent the change");
+        let deltas =
+            GweiDeltas::diff_lists(&base, &changed).expect("deltas should represent the change");
 
         let mut truncated = deltas.clone();
 
@@ -285,10 +308,8 @@ mod tests {
         let changed =
             PersistentList::<u64, U64>::try_from_iter([50]).expect("length is below the maximum");
 
-        let deltas = GweiDeltas::diff(base.len_usize(), || {
-            base.iter().copied().zip(changed.iter().copied())
-        })
-        .expect("deltas should represent the change");
+        let deltas =
+            GweiDeltas::diff_lists(&base, &changed).expect("deltas should represent the change");
 
         assert_eq!(deltas.mode, zigzag(-50));
 
@@ -311,18 +332,16 @@ mod tests {
 
         let mut visited = Vec::new();
 
-        GweiDeltas::diff(base.len_usize(), || {
-            base.iter().copied().zip(changed.iter().copied())
-        })
-        .expect("deltas should represent the change")
-        .apply_by_index(|index, patch| {
-            let before = *base.get(index).expect("index is within bounds");
+        GweiDeltas::diff_lists(&base, &changed)
+            .expect("deltas should represent the change")
+            .apply_by_index(|index, patch| {
+                let before = *base.get(index).expect("index is within bounds");
 
-            visited.push((index, patch(before)?));
+                visited.push((index, patch(before)?));
 
-            Ok(())
-        })
-        .expect("deltas should apply");
+                Ok(())
+            })
+            .expect("deltas should apply");
 
         assert_eq!(visited, [(1, 22), (3, 0), (4, 51)]);
     }
