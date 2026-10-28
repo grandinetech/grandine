@@ -405,6 +405,17 @@ where
         Box::new(self.into_iter())
     }
 
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a> {
+        let nodes = core::iter::successors(self.root.as_deref().map(AsRef::as_ref), |node| {
+            node.right.as_deref().map(AsRef::as_ref)
+        });
+
+        Box::new(nodes.flat_map(|node| {
+            let mut leaves = node.left.leaves();
+            core::iter::from_fn(move || leaves.next_leaf())
+        }))
+    }
+
     fn clone_boxed(&self) -> Box<dyn SszList<T>>
     where
         T: Clone + 'static,

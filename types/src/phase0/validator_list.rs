@@ -23,7 +23,10 @@ use try_from_iterator::TryFromIterator;
 use typenum::Unsigned;
 
 use crate::{
-    nonstandard::{PartialValidator, PubkeyList, RawValidatorList, ValidatorListIter},
+    nonstandard::{
+        EffectiveBalanceList, PartialValidator, PartialValidatorList, PubkeyList, RawValidatorList,
+        ValidatorListIter,
+    },
     phase0::{containers::Validator, primitives::Gwei},
     traits::SszValidatorList,
 };
@@ -311,6 +314,10 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei> {
         self.buf.effective_balances()
+    }
+
+    fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList) {
+        self.buf.columns()
     }
 
     fn update_effective_balances(

@@ -8,7 +8,10 @@ use try_from_iterator::TryFromIterator as _;
 
 use crate::{
     error::Error,
-    list::Unlimited,
+    list::{
+        Unlimited,
+        bundles::{Vector, vector_bundles, zip_unshared},
+    },
     patch::{Patch, PatchConfig},
 };
 
@@ -148,6 +151,22 @@ impl<T: Clone + Eq + SszSize> PositionalPatch<T> {
         accumulator.finish()
     }
 
+    pub fn diff_vector_edits<U: Clone>(
+        base: &Vector<U>,
+        changed: &Vector<U>,
+        project: impl Fn(&U) -> T,
+    ) -> ContiguousList<PositionalEdit<T>, Unlimited> {
+        let mut accumulator = EditAccumulator::new();
+
+        for (index, base_item, changed_item) in
+            zip_unshared(vector_bundles(base), vector_bundles(changed))
+        {
+            accumulator.push(index, &project(base_item), &project(changed_item));
+        }
+
+        accumulator.finish()
+    }
+
     /// Replays positional edits by handing every `(index, value)` pair to `set`.
     pub fn apply_edits(
         edits: ContiguousList<PositionalEdit<T>, Unlimited>,
@@ -241,10 +260,39 @@ where
 
 #[cfg(test)]
 mod tests {
+    use core::cell::Cell;
+
     use ssz::{PersistentList, PersistentProgressiveList};
     use typenum::U64;
 
     use super::*;
+
+    #[test]
+    fn vector_edits_compare_only_the_bundles_that_were_written_to() {
+        let base = (0..1000_u64).collect::<Vector<_>>();
+        let mut changed = base.clone();
+
+        changed.set(500, 0);
+
+        let compared = Cell::new(0_usize);
+
+        let edits = PositionalPatch::diff_vector_edits(&base, &changed, |&value| {
+            compared.set(compared.get() + 1);
+            value
+        });
+
+        assert!(compared.get() < 200, "{} values compared", compared.get());
+
+        let mut applied = base;
+
+        PositionalPatch::apply_edits(edits, |index, value| {
+            applied.set(usize::try_from(index).expect("index fits in usize"), value);
+            Ok(())
+        })
+        .expect("edits should apply");
+
+        assert_eq!(applied, changed);
+    }
 
     #[test]
     fn round_trips_over_persistent_list() {

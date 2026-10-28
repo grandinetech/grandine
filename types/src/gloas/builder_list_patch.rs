@@ -73,7 +73,7 @@ impl<C: SszListMut<Builder> + ?Sized> Patch<C> for BuilderListPatch {
 
         Ok(Self {
             base_len: u32::try_from(common_len).map_err(|_| Error::PatchListLimitExceeded)?,
-            balances: GweiDeltas::diff(common_len, || {
+            balances: GweiDeltas::diff_pairs(common_len, || {
                 base.iter()
                     .zip(changed.iter())
                     .map(|(before, after)| (before.balance, after.balance))
