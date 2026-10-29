@@ -16,7 +16,7 @@ use bitvec::vec::BitVec;
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
-use clock::{Tick, TickKind};
+use clock::Tick;
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
@@ -77,8 +77,7 @@ use types::{
     },
     phase0::{
         consts::{
-            ATTESTATION_PROPAGATION_SLOT_RANGE, BASIS_POINTS, DOMAIN_BEACON_PROPOSER,
-            GENESIS_EPOCH, GENESIS_SLOT,
+            ATTESTATION_PROPAGATION_SLOT_RANGE, DOMAIN_BEACON_PROPOSER, GENESIS_EPOCH, GENESIS_SLOT,
         },
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
@@ -6410,16 +6409,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     //
     // NOTE: only checks tick phase, not which slot the message belongs to. Callers must also
     // verify `message.slot() == self.slot()` (see `Store::apply_block`'s `is_current_slot`).
+    //
+    // Exact only for due points that start an interval.
+    // For others, like `PAYLOAD_DUE_BPS`, use `clock::is_before_due_bps_in_slot` with the arrival time.
     pub fn is_before_due_bps_deadline(&self, due_bps: u64) -> bool {
-        let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
-            &self.chain_config,
-            self.slot(),
-        ))
-        .expect("number of ticks per slot should fit in u64");
-        let tick_index = self.tick.kind as u64;
-
-        (tick_index.saturating_add(1)).saturating_mul(BASIS_POINTS)
-            <= due_bps.saturating_mul(ticks_per_slot)
+        self.tick.ends_by_due_bps::<P>(&self.chain_config, due_bps)
     }
 
     const fn start_of_epoch(epoch: Epoch) -> Slot {
