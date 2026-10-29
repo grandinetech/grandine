@@ -196,7 +196,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "rate(VALIDATOR_PROPOSE_TICK_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(VALIDATOR_PROPOSE_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
+          "expr": "rate(VALIDATOR_PROPOSE_TICK_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(VALIDATOR_PROPOSE_TICK_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -724,7 +724,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "rate(ATT_POOL_PACK_PROPOSABLE_ATTESTATION_TASK_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(ATT_POOL_PACK_PROPOSABLE_ATTESTATION_TASK_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
+          "expr": "rate(ATT_POOL_PACK_PROPOSABLE_ATTESTATIONS_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(ATT_POOL_PACK_PROPOSABLE_ATTESTATIONS_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
           "instant": false,
           "range": true,
           "refId": "A"
@@ -903,178 +903,6 @@
         }
       ],
       "title": "Process sync committee contribution times",
-      "type": "timeseries"
-    },
-    {
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 42
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(ETH1_PENDING_DEPOSITS_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(ETH1_PENDING_DEPOSITS_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
-          "instant": false,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Eth1 Pending deposits times",
-      "type": "timeseries"
-    },
-    {
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 42
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(ETH1_VOTES_TIMES_sum{instance=~\"$Instance\"}[$__rate_interval]) / rate(ETH1_VOTES_TIMES_count{instance=~\"$Instance\"}[$__rate_interval])",
-          "instant": false,
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Eth1 vote times",
       "type": "timeseries"
     },
     {

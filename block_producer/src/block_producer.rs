@@ -928,6 +928,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Option<BuilderUrl>,
         )>,
     > {
+        let _block_timer = self
+            .producer_context
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.build_beacon_block_times.start_timer());
+
         let block_without_state_root =
             wait_for_result(self.spawn_job(|build_context| async move {
                 build_context
