@@ -23,6 +23,10 @@ impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
         self.envelopes.insert(block_root, (envelope, slot, false));
     }
 
+    pub fn remove(&mut self, block_root: H256) {
+        self.envelopes.remove(&block_root);
+    }
+
     pub fn prune_finalized(&mut self, finalized_slot: Slot) {
         self.envelopes
             .retain(|_, (_, envelope_slot, _)| finalized_slot <= *envelope_slot);

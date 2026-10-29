@@ -2745,23 +2745,44 @@ fn gloas_invalid_payload_spares_block_and_children_on_empty_node() {
 
     let (_, state_0) = context.genesis();
     let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
-    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, 2, H256::default());
 
     let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
 
     context.on_slot(block_2.message().slot());
 
     context.on_acceptable_block(&block_1);
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
     context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
 
     context.assert_head(2, block_2.message().hash_tree_root());
 
+    context.assert_execution_payload_envelope_present(&block_1, true);
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
-    context.assert_payload_status(&block_2, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Optimistic));
     context.assert_head(2, block_2.message().hash_tree_root());
+    context.assert_execution_payload_envelope_present(&block_1, false);
+    context.assert_execution_payload_envelope_present(&block_2, true);
+    context.assert_execution_payload_envelope_persisted(&block_1, false);
+    context.assert_execution_payload_envelope_persisted(&block_2, true);
+
+    // A replacement envelope for 1 is not deduplicated against the rejected one.
+    // It stays persisted while its own payload is being verified.
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.assert_execution_payload_envelope_present(&block_1, true);
+    context.assert_execution_payload_envelope_persisted(&block_1, true);
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_execution_payload_envelope_persisted(&block_1, true);
 }
 
 // ```text
@@ -2783,21 +2804,36 @@ fn gloas_invalid_payload_kills_children_on_full_node_and_their_descendants() {
     let (block_3, _) = context.empty_block(&state_2, 3, H256::default());
 
     let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
 
     context.on_slot(block_3.message().slot());
 
     context.on_acceptable_block(&block_1);
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
     context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
     context.on_acceptable_block(&block_3);
 
     context.assert_head(3, block_3.message().hash_tree_root());
 
+    context.assert_execution_payload_envelope_present(&block_1, true);
+    context.assert_execution_payload_envelope_present(&block_2, true);
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
     context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+    context.assert_execution_payload_envelope_present(&block_1, false);
+    context.assert_execution_payload_envelope_present(&block_2, false);
+
+    // An envelope arriving for dead 2 does not revive it.
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_execution_payload_envelope_present(&block_2, false);
+    context.assert_execution_payload_envelope_persisted(&block_2, false);
     context.assert_head(1, block_1.message().hash_tree_root());
     context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
 }
@@ -2831,6 +2867,7 @@ fn gloas_forkchoice_updated_invalid_verdict_invalidates_the_block_carrying_the_h
     context.assert_head(3, block_3.message().hash_tree_root());
 
     context.on_notified_invalid_fork_choice_update(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
@@ -2860,6 +2897,7 @@ fn gloas_rejects_attestation_for_invalid_payload() {
     context.on_acceptable_block(&block_1);
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
     context.assert_head(1, block_1.message().hash_tree_root());
@@ -2917,6 +2955,7 @@ fn gloas_invalid_payload_switches_head_to_sibling_on_empty_node() {
     context.on_acceptable_block(&block_3);
 
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
@@ -2932,7 +2971,7 @@ fn gloas_invalid_payload_switches_head_to_sibling_on_empty_node() {
 //
 // Payload of 1 is rejected before 2, 3 and 4 arrive.
 // Late blocks must get the same verdict as if they had been there all along.
-// Dead ones are stored but ignored on gossip, same as pre-Gloas.
+// 3 skips the rejected payload and is accepted. 2 extends it, so 2 and 4 wait for a replacement.
 #[test]
 fn gloas_new_descendants_of_invalid_payload_inherit_the_right_status() {
     let mut context = Context::gloas_minimal();
@@ -2952,17 +2991,74 @@ fn gloas_new_descendants_of_invalid_payload_inherit_the_right_status() {
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
 
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
 
-    context.on_ignorable_block(&block_2);
+    context.on_block_delayed_until_payload(&block_2);
     context.on_acceptable_block(&block_3);
-    context.on_ignorable_block(&block_4);
+    context.on_block_with_unknown_parent(&block_4);
 
-    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_2, None);
     context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
-    context.assert_payload_status(&block_4, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_4, None);
     context.assert_head(3, block_3.message().hash_tree_root());
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 4
+//       |
+//       e- 3
+// ```
+//
+// Payload of 1 is rejected and 2 and 4 wait for a replacement, as above.
+// The replacement envelope releases them before its own payload is verified.
+// Its verdict validates the chain built on it.
+#[test]
+fn gloas_replacement_envelope_releases_descendants_of_invalid_payload() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_1, 3, H256::default());
+    let (block_4, _) = context.empty_block(&state_2, 4, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_4.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+
+    context.on_block_delayed_until_payload(&block_2);
+    context.on_acceptable_block(&block_3);
+    context.on_block_with_unknown_parent(&block_4);
+
+    context.assert_payload_status(&block_2, None);
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_4, None);
+    context.assert_head(3, block_3.message().hash_tree_root());
+
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.assert_payload_envelope_needed(&block_2);
+    context.assert_delayed_block_accepted();
+    context.assert_payload_envelope_needed(&block_4);
+    context.assert_delayed_block_accepted();
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Valid));
+    context.assert_head(4, block_4.message().hash_tree_root());
 }
 
 // ```text
@@ -3167,6 +3263,7 @@ fn gloas_invalid_payload_with_older_latest_valid_hash_invalidates_payloads_in_be
     context.assert_payload_status(&block_4, Some(PayloadStatus::Valid));
 
     context.on_notified_invalid_payload(&block_3, Some(&block_1));
+    context.assert_payload_envelope_invalidated(&block_3);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
@@ -3217,6 +3314,7 @@ fn gloas_invalid_payload_with_older_latest_valid_hash_skips_payloads_left_out() 
 
     context.on_notified_valid_payload(&block_1);
     context.on_notified_invalid_payload(&block_4, Some(&block_1));
+    context.assert_payload_envelope_invalidated(&block_4);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Optimistic));
@@ -3298,6 +3396,7 @@ fn gloas_proposal_extending_rejected_payload_is_not_signable() {
 
     context.on_notified_valid_payload(&block_1);
     context.on_notified_invalid_payload(&block_2, Some(&block_1));
+    context.assert_payload_envelope_invalidated(&block_2);
 
     context.assert_extended_payload_status(&block_3f, Some(PayloadStatus::Invalid));
     context.assert_extended_payload_status(&block_3e, Some(PayloadStatus::Valid));
@@ -3388,6 +3487,7 @@ fn gloas_invalid_payload_with_older_latest_valid_hash_invalidates_all_payloads_i
 
     context.on_notified_valid_payload(&block_1);
     context.on_notified_invalid_payload(&block_4, Some(&block_1));
+    context.assert_payload_envelope_invalidated(&block_4);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
@@ -3568,6 +3668,7 @@ fn gloas_reorg_to_full_node_of_unvalidated_payload_is_held_until_validated() {
     context.assert_chain_reorg_events(&[]);
 
     context.on_notified_invalid_payload(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
 
     context.assert_head(2, root_3);
     context.assert_head_payload_status(PAYLOAD_STATUS_FULL);

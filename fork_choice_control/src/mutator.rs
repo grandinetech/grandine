@@ -348,10 +348,12 @@ where
                 MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
                     wait_group,
                     persisted_block_roots,
+                    deleted_block_roots,
                 } => {
                     self.handle_finish_persisting_execution_payload_envelopes(
-                        wait_group,
+                        &wait_group,
                         persisted_block_roots,
+                        deleted_block_roots,
                     );
                 }
                 MutatorMessage::FinishedArchivingFinalized {
@@ -3063,22 +3065,17 @@ where
 
     fn handle_finish_persisting_execution_payload_envelopes(
         &mut self,
-        wait_group: W,
+        wait_group: &W,
         persisted_block_roots: Vec<H256>,
+        deleted_block_roots: Vec<H256>,
     ) {
         self.store_mut()
-            .mark_persisted_envelopes(persisted_block_roots);
+            .mark_persisted_envelopes(persisted_block_roots, deleted_block_roots);
 
         self.update_store_snapshot();
 
         if self.store.has_unpersisted_envelopes() {
-            self.spawn(PersistExecutionPayloadEnvelopesTask {
-                store_snapshot: self.owned_store(),
-                storage: self.storage.clone_arc(),
-                mutator_tx: self.owned_mutator_tx(),
-                wait_group,
-                metrics: self.metrics.clone(),
-            });
+            self.spawn_persist_execution_payload_envelopes_task(wait_group);
         }
     }
 
@@ -3199,8 +3196,17 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            self.store_mut()
+            let invalidated_envelopes = self
+                .store_mut()
                 .invalidate_payload_and_descendant_payloads(beacon_block_root);
+
+            // Only post-Gloas blocks have an envelope to refetch.
+            if invalidated_envelopes
+                .iter()
+                .any(|(_, block_root)| *block_root == beacon_block_root)
+            {
+                self.send_to_p2p(P2pMessage::PayloadEnvelopeInvalidated(beacon_block_root));
+            }
         } else {
             return;
         }
@@ -3218,6 +3224,12 @@ where
         }
 
         self.update_store_snapshot();
+
+        // the replacement may not come, so delete the rejected envelopes from storage immediately
+        // after EL invalidates them
+        if status.is_invalid() {
+            self.spawn_persist_execution_payload_envelopes_task(wait_group);
+        }
 
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
@@ -3851,15 +3863,7 @@ where
             self.retry_delayed(delayed, wait_group);
         }
 
-        if !self.storage.prune_storage_enabled() {
-            self.spawn(PersistExecutionPayloadEnvelopesTask {
-                store_snapshot: self.owned_store(),
-                storage: self.storage.clone_arc(),
-                mutator_tx: self.owned_mutator_tx(),
-                wait_group: wait_group.clone(),
-                metrics: self.metrics.clone(),
-            });
-        }
+        self.spawn_persist_execution_payload_envelopes_task(wait_group);
     }
 
     fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: &Arc<BlobSidecar<P>>) {
@@ -5381,6 +5385,22 @@ where
             wait_group,
             metrics: self.metrics.clone(),
         })
+    }
+
+    fn spawn_persist_execution_payload_envelopes_task(&self, wait_group: &W) {
+        if self.storage.prune_storage_enabled()
+            || !(self.store.has_unpersisted_envelopes() || self.store.has_rejected_envelopes())
+        {
+            return;
+        }
+
+        self.spawn(PersistExecutionPayloadEnvelopesTask {
+            store_snapshot: self.owned_store(),
+            storage: self.storage.clone_arc(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: wait_group.clone(),
+            metrics: self.metrics.clone(),
+        });
     }
 
     fn archive_finalized(&mut self, wait_group: &W) -> Result<()> {

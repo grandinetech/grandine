@@ -776,11 +776,15 @@ where
     }
 
     pub fn stored_envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
-        if let Some(envelope) = self
-            .snapshot()
-            .cached_execution_payload_envelope(block_root)
-        {
+        let snapshot = self.snapshot();
+
+        if let Some(envelope) = snapshot.cached_execution_payload_envelope(block_root) {
             return Ok(Some(StoredEnvelope::Full(envelope.clone_arc())));
+        }
+
+        // A rejected envelope stays in storage until the delete runs.
+        if snapshot.is_payload_invalid(block_root) {
+            return Ok(None);
         }
 
         self.storage().envelope_by_root(block_root)
@@ -1890,6 +1894,11 @@ impl<P: Preset> Snapshot<'_, P> {
     ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
         self.store_snapshot
             .cached_execution_payload_envelope_by_root(block_root)
+    }
+
+    #[must_use]
+    pub(crate) fn is_payload_invalid(&self, block_root: H256) -> bool {
+        self.store_snapshot.is_payload_invalid(block_root)
     }
 
     #[must_use]

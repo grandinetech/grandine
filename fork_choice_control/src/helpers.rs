@@ -431,6 +431,14 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    pub fn on_block_delayed_until_payload(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
+        assert!(matches!(
+            self.on_block(block),
+            Some(P2pMessage::PayloadEnvelopeNeeded(block_root, _))
+                if block_root == block.message().parent_root(),
+        ));
+    }
+
     // Sync must be told to forget the root, so the genuine block can still arrive.
     pub fn on_block_with_invalid_signature(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         let expected_root = block.message().hash_tree_root();
@@ -1074,6 +1082,22 @@ impl<P: Preset> Context<P> {
         self.controller().stored_blocks_by_range(range)
     }
 
+    pub fn assert_payload_envelope_needed(&mut self, block: &SignedBeaconBlock<P>) {
+        assert!(matches!(
+            self.next_p2p_message(),
+            Some(P2pMessage::PayloadEnvelopeNeeded(block_root, _))
+                if block_root == block.message().hash_tree_root(),
+        ));
+    }
+
+    pub fn assert_payload_envelope_invalidated(&mut self, block: &SignedBeaconBlock<P>) {
+        assert!(matches!(
+            self.next_p2p_message(),
+            Some(P2pMessage::PayloadEnvelopeInvalidated(block_root))
+                if block_root == block.message().hash_tree_root(),
+        ));
+    }
+
     pub fn assert_genesis_time(&self, expected_time: UnixSeconds) {
         assert_eq!(self.controller().genesis_time(), expected_time);
     }
@@ -1183,6 +1207,35 @@ impl<P: Preset> Context<P> {
         assert_eq!(
             self.controller().unfinalized_block_count_total(),
             expected_status.unfinalized_block_count_total,
+        );
+    }
+
+    pub fn assert_execution_payload_envelope_present(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        expected_present: bool,
+    ) {
+        assert_eq!(
+            self.controller()
+                .stored_envelope_by_root(block.message().hash_tree_root())
+                .expect("envelope lookup should not fail")
+                .is_some(),
+            expected_present,
+        );
+    }
+
+    pub fn assert_execution_payload_envelope_persisted(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        expected_persisted: bool,
+    ) {
+        assert_eq!(
+            self.controller()
+                .storage()
+                .envelope_by_root(block.message().hash_tree_root())
+                .expect("envelope lookup should not fail")
+                .is_some(),
+            expected_persisted,
         );
     }
 
