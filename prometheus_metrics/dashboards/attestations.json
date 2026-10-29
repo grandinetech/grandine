@@ -151,11 +151,11 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT{instance=~\"$Instance\"}[$__rate_interval])",
+          "expr": "avg_over_time(ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT{instance=~\"$Instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "interval": "",
-          "legendFormat": "AVG {{label_name}} ({{instance}})",
+          "legendFormat": "AVG ({{instance}})",
           "range": true,
           "refId": "B"
         }

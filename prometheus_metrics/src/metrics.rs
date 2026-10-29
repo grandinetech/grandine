@@ -133,14 +133,11 @@ pub struct Metrics {
     pub local_execution_payload_times: Histogram,
     pub process_sync_committee_contribution_times: Histogram,
     pub prepare_bls_to_execution_changes_times: Histogram,
-    pub eth1_vote_times: Histogram,
-    pub eth1_pending_deposits_times: Histogram,
     pub prepare_attester_slashings_times: Histogram,
     pub prepare_proposer_slashings_times: Histogram,
     pub prepare_voluntary_exits_times: Histogram,
 
     // Pools
-    pub att_pool_pack_iterations: IntCounter,
     pub att_pool_insert_attestation_task_times: Histogram,
     pub att_pool_attestation_tracking_times: Histogram,
     pub att_pool_best_proposable_attestations_times: Histogram,
@@ -628,16 +625,6 @@ impl Metrics {
                 "Prepare BLS to execution changes times",
             ))?,
 
-            eth1_vote_times: Histogram::with_opts(histogram_opts!(
-                "ETH1_VOTE_TIMES",
-                "Eth1 vote times",
-            ))?,
-
-            eth1_pending_deposits_times: Histogram::with_opts(histogram_opts!(
-                "ETH1_PENDING_DEPOSITS_TIMES",
-                "Eth1 pending deposits times",
-            ))?,
-
             prepare_attester_slashings_times: Histogram::with_opts(histogram_opts!(
                 "PREPARE_ATTESTER_SLASHINGS_TIMES",
                 "Prepare attester slashing times",
@@ -654,11 +641,6 @@ impl Metrics {
             ))?,
 
             // Pools
-            att_pool_pack_iterations: IntCounter::new(
-                "ATT_POOL_PACK_ITERATIONS",
-                "Attestation packer iteration count per slog",
-            )?,
-
             att_pool_insert_attestation_task_times: Histogram::with_opts(histogram_opts!(
                 "ATT_POOL_INSERT_ATTESTATION_TASK_TIMES",
                 "Attestation agg pool insert attestation task times",
@@ -1053,6 +1035,7 @@ impl Metrics {
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
         default_registry.register(Box::new(self.metrics_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
+        default_registry.register(Box::new(self.dedicated_executor_task_times.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_task_count.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_thread_count.clone()))?;
         default_registry.register(Box::new(self.validator_propose_tick_times.clone()))?;
@@ -1162,12 +1145,9 @@ impl Metrics {
         default_registry.register(Box::new(
             self.prepare_bls_to_execution_changes_times.clone(),
         ))?;
-        default_registry.register(Box::new(self.eth1_vote_times.clone()))?;
-        default_registry.register(Box::new(self.eth1_pending_deposits_times.clone()))?;
         default_registry.register(Box::new(self.prepare_attester_slashings_times.clone()))?;
         default_registry.register(Box::new(self.prepare_proposer_slashings_times.clone()))?;
         default_registry.register(Box::new(self.prepare_voluntary_exits_times.clone()))?;
-        default_registry.register(Box::new(self.att_pool_pack_iterations.clone()))?;
         default_registry.register(Box::new(
             self.att_pool_insert_attestation_task_times.clone(),
         ))?;

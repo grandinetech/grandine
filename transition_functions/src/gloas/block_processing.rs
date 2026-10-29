@@ -94,11 +94,6 @@ pub fn process_block<P: Preset>(
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
-    #[cfg(feature = "metrics")]
-    let _timer = METRICS
-        .get()
-        .map(|metrics| metrics.block_transition_times.start_timer());
-
     verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
@@ -150,6 +145,11 @@ pub fn custom_process_block<P: Preset>(
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
+    #[cfg(feature = "metrics")]
+    let _timer = METRICS
+        .get()
+        .map(|metrics| metrics.block_transition_times.start_timer());
+
     debug_assert_eq!(state.slot, block.slot);
 
     // > [New in Gloas:EIP7732]
