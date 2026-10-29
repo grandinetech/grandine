@@ -10,6 +10,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{misc, predicates, signing::SignForSingleFork};
 use http_api_utils::ValidatorAttesterDutyResponse;
+use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};
 use p2p::BeaconCommitteeSubscription;
 use scc::{HashMap as SccHashMap, hash_map::Entry};
@@ -117,8 +118,18 @@ impl OwnBeaconCommitteeMembers {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.members.len()
+    // Slots rather than epochs, as only a handful of epochs are ever cached.
+    pub async fn len(&self) -> usize {
+        let mut len = 0_usize;
+
+        self.members
+            .iter_async(|_, entry| {
+                len = len.saturating_add(entry.members_by_slot.len());
+                true
+            })
+            .await;
+
+        len
     }
 
     #[instrument(skip_all, level = "debug", fields(slot = slot))]
@@ -362,6 +373,8 @@ impl OwnBeaconCommitteeMembers {
             .filter(|duty| {
                 signer_snapshot.has_key(duty.pubkey) && members_by_slot.contains_key(&duty.slot)
             })
+            // A validator attests once per epoch, so a repeated duty would be signed twice.
+            .unique_by(|duty| duty.validator_index)
             .collect::<Vec<_>>();
 
         // Members keep the order the committees are laid out in: by committee, then by position
@@ -627,6 +640,31 @@ mod tests {
                 )
                 .await
         );
+
+        Ok(())
+    }
+
+    // A node repeating a duty must not get it signed and attested twice.
+    #[tokio::test]
+    async fn a_repeated_duty_is_kept_once() -> Result<()> {
+        let (own_members, state) = own_members_with_keys()?;
+        let public_key = public_key(41);
+
+        own_members
+            .init_from_duties::<Minimal>(
+                ForkInfo::from_state(state.as_ref()),
+                H256::zero(),
+                misc::slots_in_epoch::<Minimal>(0)?,
+                vec![duty(public_key, 41, 0, 0, 1), duty(public_key, 41, 0, 0, 1)],
+            )
+            .await?;
+
+        let members_at_slot_1 = own_members
+            .get_at_slot::<Minimal>(1)
+            .await
+            .expect("the duty should be kept");
+
+        assert_eq!(members_at_slot_1.len(), 1);
 
         Ok(())
     }

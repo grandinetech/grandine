@@ -5408,7 +5408,8 @@ where
                 .name("store-archiver".to_owned())
                 .spawn(move || {
                     // Storage writes are transactional and a panic counts as a failed save, so the
-                    // blocks stay in the store and the next archive writes them again.
+                    // blocks stay in the store for the next archive to write again, unless saving
+                    // fails `MAX_CONSECUTIVE_FAILED_ARCHIVES` times in a row and they are dropped.
                     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         debug_with_peers!("saving finalized blocks and anchor state…");
 
