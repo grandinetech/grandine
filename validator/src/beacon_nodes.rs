@@ -43,9 +43,10 @@ use types::{
 
 use crate::{
     beacon_node_api::{AttesterDuties, BeaconNodeApi, ProducedBlock, ProposerDuties, PtcDuties},
+    chain_events::HeadStatus,
     local_beacon_node::LocalBeaconNode,
     misc,
-    remote_beacon_node::RemoteBeaconNode,
+    remote_beacon_node::{RemoteBeaconNode, is_optimistic_head},
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
 };
@@ -208,22 +209,56 @@ impl RemoteNodes {
 
     async fn head_block_root(&self) -> Result<H256> {
         let operation = "produce the head block root";
+        let slot = self.current_slot;
+        let mut attempts = Vec::with_capacity(self.nodes.len());
+        let mut failures = vec![];
 
         // The head of the earliest node holding one, so that the root signed for is one it knows.
         for node in &self.nodes {
-            if let Ok(Some(block_root)) = node
-                .chain_head()
-                .get(self.current_slot, self.max_empty_slots)
-            {
+            let status = node.chain_head().status(slot, self.max_empty_slots);
+
+            if let HeadStatus::Verified(block_root) = status {
                 return Ok(block_root);
+            }
+
+            // `refresh_head` polls it every slot; polling here could only hold up the duty.
+            if !node.health().may_be_synced() {
+                debug_with_peers!("{node} beacon node is not asked for its head root");
+                let reason = anyhow!("not asked while {:?}", node.health());
+                failures.push((node.clone_arc(), reason));
+                continue;
+            }
+
+            // A node does not stream its head again once verified, so only a poll can tell.
+            if matches!(status, HeadStatus::Optimistic(_)) {
+                match node.fresh_head_block_root(slot).await {
+                    Ok(root) => {
+                        debug_with_peers!("{node} beacon node reported head block root {root:?}");
+                        return Ok(root);
+                    }
+                    Err(error) => {
+                        // A head still being validated is routine; a node not answering is not.
+                        if is_optimistic_head(&error) {
+                            debug_with_peers!("{node} beacon node has no verified head: {error}");
+                        } else {
+                            warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                        }
+
+                        failures.push((node.clone_arc(), error));
+                    }
+                }
+            } else {
+                attempts.push((node, node.fresh_head_block_root(slot)));
             }
         }
 
-        let (node, root) = self
-            .first_success(operation, |node| {
-                node.fresh_head_block_root(self.current_slot)
-            })
-            .await?;
+        let (node, root) = first_success(operation, attempts).await.map_err(|error| {
+            if failures.is_empty() {
+                error
+            } else {
+                publish_error(operation, &failures)
+            }
+        })?;
 
         debug_with_peers!("{node} beacon node reported head block root {root:?}");
 
@@ -320,7 +355,8 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
 
         let mut any_success = false;
 
-        // A node that is behind has not seen the attestations and reports nobody live.
+        // Only a ready node is asked: one behind has not seen attestations and reports nobody live,
+        // and a check that passes lets validators sign, so it rests only on verified heads.
         let ready_nodes = self.nodes.iter().filter(|node| node.health().is_ready());
 
         let responses = join_all(ready_nodes.map(|node| async move {
@@ -350,7 +386,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
 
         ensure!(
             any_success,
-            "no synced beacon node could report validator liveness for epoch {epoch}",
+            "no ready beacon node could report validator liveness for epoch {epoch}",
         );
 
         Ok(liveness
@@ -391,7 +427,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
 
         if !node.health().is_ready() {
             debug_with_peers!(
-                "attestation data for slot {slot} came from {node}, which is not fully synced",
+                "attestation data for slot {slot} came from {node}, which is not ready",
             );
         }
 
@@ -667,9 +703,11 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
                         .is_some_and(|(_, head)| head == parent_root)
                 };
 
+                // A node passed over as optimistic may have verified its head while building on it.
                 if let Some(parent_root) = parent_root
                     && built_on != parent_root
                     && !shares_head(parent_root)
+                    && !node.poll_optimistic_head_is_verified(built_on, slot).await
                 {
                     if stash.set((node, produced_block)).is_err() {
                         debug_with_peers!(
@@ -1396,19 +1434,34 @@ fn should_publish_to_every_node(configured: &[PublishedDuty], duty: PublishedDut
 mod tests {
     use core::{
         iter::once,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
         time::Duration,
     };
 
     use anyhow::ensure;
-    use axum::{Json, Router};
-    use reqwest::Client;
-    use serde_json::json;
+    use axum::{Json, Router, routing::get};
+    use http_api_utils::ETH_EXECUTION_PAYLOAD_BLINDED;
+    use httpmock::{Method, Mock, MockServer};
+    use reqwest::{Client, header::CONTENT_TYPE};
+    use serde_json::{Value, json};
+    use ssz::SszWrite as _;
     use tokio::{net::TcpListener, time::sleep};
-    use types::{config::Config as ChainConfig, preset::Mainnet};
+    use types::{
+        config::Config as ChainConfig, phase0::containers::BeaconBlock as Phase0BeaconBlock,
+        preset::Mainnet,
+    };
 
     use super::*;
     use crate::health::Health;
+
+    fn node(url: &str) -> Result<Arc<RemoteBeaconNode>> {
+        Ok(Arc::new(RemoteBeaconNode::new(
+            Arc::new(ChainConfig::mainnet()),
+            Client::new(),
+            url.parse()?,
+            32,
+        )))
+    }
 
     // A head streamed by a node that cannot serve duties is not acted on.
     #[tokio::test]
@@ -1429,18 +1482,401 @@ mod tests {
         Ok(())
     }
 
+    fn head_response(slot: Slot, block_root: H256, execution_optimistic: bool) -> Value {
+        json!({
+            "execution_optimistic": execution_optimistic,
+            "finalized": false,
+            "data": {
+                "root": block_root,
+                "canonical": true,
+                "header": {
+                    "message": {
+                        "slot": slot.to_string(),
+                        "proposer_index": "0",
+                        "parent_root": H256::zero(),
+                        "state_root": H256::zero(),
+                        "body_root": H256::zero(),
+                    },
+                    "signature": SignatureBytes::zero(),
+                },
+            },
+        })
+    }
+
+    fn mock_head(
+        server: &MockServer,
+        slot: Slot,
+        block_root: H256,
+        execution_optimistic: bool,
+    ) -> Mock<'_> {
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/beacon/headers/head");
+
+            then.status(200)
+                .json_body(head_response(slot, block_root, execution_optimistic));
+        })
+    }
+
+    fn block_ssz(slot: Slot, parent_root: H256) -> Result<Vec<u8>> {
+        let block = Phase0BeaconBlock::<Mainnet> {
+            slot,
+            parent_root,
+            ..Phase0BeaconBlock::default()
+        };
+
+        Ok(block.to_ssz()?)
+    }
+
+    fn mock_block(server: &MockServer, slot: Slot, parent_root: H256) -> Result<Mock<'_>> {
+        let block = block_ssz(slot, parent_root)?;
+
+        Ok(server.mock(|when, then| {
+            when.method(Method::GET)
+                .path(format!("/eth/v3/validator/blocks/{slot}"));
+
+            then.status(200)
+                .header(CONTENT_TYPE.as_str(), "application/octet-stream")
+                .header(ETH_EXECUTION_PAYLOAD_BLINDED, "false")
+                .body(block);
+        }))
+    }
+
+    async fn parent_of_produced_block(nodes: &RemoteNodes, slot: Slot) -> Result<H256> {
+        let produced = BeaconNodeApi::<Mainnet>::produce_block(
+            nodes,
+            slot,
+            SignatureBytes::default(),
+            None,
+            Uint256::from_u64(100),
+            0,
+            &ContiguousList::default(),
+        )
+        .await?;
+
+        Ok(produced.block.parent_root())
+    }
+
+    // The poll that chose the parent found the head optimistic; it is verified by the time the
+    // node has built on it, and the lagging node's root must not outrank that block.
+    #[tokio::test]
+    async fn a_block_on_a_head_verified_during_production_is_taken() -> Result<()> {
+        const SLOT: Slot = 11;
+
+        let head = H256::repeat_byte(1);
+        let older = H256::repeat_byte(2);
+
+        let verified = Arc::new(AtomicBool::new(false));
+        let verified_by_block = verified.clone_arc();
+        let block = block_ssz(SLOT, head)?;
+
+        let router = Router::new()
+            .route(
+                "/eth/v1/beacon/headers/head",
+                get(move || async move {
+                    let optimistic = !verified.load(Ordering::Relaxed);
+
+                    Json(head_response(10, head, optimistic))
+                }),
+            )
+            .fallback(move || async move {
+                verified_by_block.store(true, Ordering::Relaxed);
+
+                (
+                    [
+                        (CONTENT_TYPE.as_str(), "application/octet-stream"),
+                        (ETH_EXECUTION_PAYLOAD_BLINDED, "false"),
+                    ],
+                    block,
+                )
+            });
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+
+        tokio::spawn(async move { axum::serve(listener, router).await });
+
+        let lagging_server = MockServer::start_async().await;
+        let leading = node(&format!("http://{address}"))?;
+        let lagging = node(&lagging_server.base_url())?;
+
+        leading.chain_head().update(10, head, true);
+        lagging.chain_head().update(8, older, false);
+
+        let lagging_block = mock_block(&lagging_server, SLOT, older)?;
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![leading.clone_arc(), lagging.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, SLOT, 32);
+        assert_eq!(parent_of_produced_block(&nodes, SLOT).await?, head);
+        lagging_block.assert_calls_async(0).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_block_on_a_head_still_optimistic_gives_way_to_a_verified_parent() -> Result<()> {
+        const SLOT: Slot = 11;
+
+        let head = H256::repeat_byte(1);
+        let older = H256::repeat_byte(2);
+
+        let leading_server = MockServer::start_async().await;
+        let lagging_server = MockServer::start_async().await;
+        let leading = node(&leading_server.base_url())?;
+        let lagging = node(&lagging_server.base_url())?;
+
+        leading.chain_head().update(10, head, true);
+        lagging.chain_head().update(8, older, false);
+
+        let leading_head = mock_head(&leading_server, 10, head, true);
+        let leading_block = mock_block(&leading_server, SLOT, head)?;
+        let lagging_block = mock_block(&lagging_server, SLOT, older)?;
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![leading.clone_arc(), lagging.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, SLOT, 32);
+        assert_eq!(parent_of_produced_block(&nodes, SLOT).await?, older);
+
+        // Once to choose the parent and once more for the block built on the head.
+        leading_head.assert_calls_async(2).await;
+        leading_block.assert_async().await;
+        lagging_block.assert_async().await;
+
+        Ok(())
+    }
+
+    // Only a head cached as optimistic is polled for: a verified head that differs from the
+    // parent is a different view of the chain, which no poll may excuse.
+    #[tokio::test]
+    async fn only_the_cached_optimistic_head_can_be_found_verified() -> Result<()> {
+        let head = H256::repeat_byte(1);
+        let other = H256::repeat_byte(2);
+
+        let server = MockServer::start_async().await;
+        let node = node(&server.base_url())?;
+        let mock = mock_head(&server, 10, head, false);
+
+        node.chain_head().update(10, head, false);
+        assert!(!node.poll_optimistic_head_is_verified(head, 11).await);
+
+        node.chain_head().update(10, other, true);
+        assert!(!node.poll_optimistic_head_is_verified(head, 11).await);
+        mock.assert_calls_async(0).await;
+
+        node.chain_head().update(10, head, true);
+        assert!(node.poll_optimistic_head_is_verified(head, 11).await);
+        mock.assert_async().await;
+
+        assert_eq!(node.chain_head().status(11, 32), HeadStatus::Verified(head));
+
+        Ok(())
+    }
+
+    // A leading node's head verified since it was streamed beats a lagging node's older root.
+    #[tokio::test]
+    async fn the_head_root_polls_an_optimistic_node_before_taking_an_older_root() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let leading = node(&server.base_url())?;
+        let lagging = node("http://lagging")?;
+
+        leading.chain_head().update(10, H256::repeat_byte(1), true);
+        lagging.chain_head().update(8, H256::repeat_byte(2), false);
+
+        let mock = mock_head(&server, 10, H256::repeat_byte(1), false);
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![leading.clone_arc(), lagging.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, 10, 32);
+        assert_eq!(nodes.head_block_root().await?, H256::repeat_byte(1));
+        mock.assert_async().await;
+
+        Ok(())
+    }
+
+    // A node whose head is still not verified gives way to one whose head is.
+    #[tokio::test]
+    async fn the_head_root_moves_on_from_a_node_still_optimistic() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let optimistic = node(&server.base_url())?;
+        let verified = node("http://verified")?;
+
+        optimistic
+            .chain_head()
+            .update(10, H256::repeat_byte(1), true);
+
+        verified.chain_head().update(8, H256::repeat_byte(2), false);
+
+        let mock = mock_head(&server, 10, H256::repeat_byte(1), true);
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![optimistic.clone_arc(), verified.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, 10, 32);
+        assert_eq!(nodes.head_block_root().await?, H256::repeat_byte(2));
+        mock.assert_async().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_head_root_moves_on_from_an_optimistic_node_whose_poll_fails() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let failing = node(&server.base_url())?;
+        let verified = node("http://verified")?;
+
+        failing.chain_head().update(10, H256::repeat_byte(1), true);
+        verified.chain_head().update(8, H256::repeat_byte(2), false);
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/beacon/headers/head");
+            then.status(500);
+        });
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![failing.clone_arc(), verified.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, 10, 32);
+        assert_eq!(nodes.head_block_root().await?, H256::repeat_byte(2));
+        mock.assert_async().await;
+
+        Ok(())
+    }
+
+    // Each `assert_async` requires exactly one request: a node already polled is not asked again.
+    #[tokio::test]
+    async fn the_head_root_fails_after_polling_each_optimistic_node_once() -> Result<()> {
+        let first_server = MockServer::start_async().await;
+        let second_server = MockServer::start_async().await;
+        let first = node(&first_server.base_url())?;
+        let second = node(&second_server.base_url())?;
+
+        first.chain_head().update(10, H256::repeat_byte(1), true);
+        second.chain_head().update(10, H256::repeat_byte(2), true);
+
+        let first_mock = mock_head(&first_server, 10, H256::repeat_byte(1), true);
+        let second_mock = mock_head(&second_server, 10, H256::repeat_byte(2), true);
+
+        let remotes =
+            RemoteBeaconNodes::new(vec![first.clone_arc(), second.clone_arc()], vec![], false);
+
+        let nodes = RemoteNodes::new(&remotes, 10, 32);
+
+        let error = nodes
+            .head_block_root()
+            .await
+            .expect_err("no node holds a verified head");
+
+        assert!(
+            error
+                .to_string()
+                .contains("verified by an execution engine")
+        );
+
+        first_mock.assert_async().await;
+        second_mock.assert_async().await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn the_head_root_does_not_poll_a_node_known_to_be_down_or_behind() -> Result<()> {
+        let live_server = MockServer::start_async().await;
+        let unreachable_server = MockServer::start_async().await;
+        let unusable_server = MockServer::start_async().await;
+        let live = node(&live_server.base_url())?;
+        let unreachable = node(&unreachable_server.base_url())?;
+        let unusable = node(&unusable_server.base_url())?;
+
+        live.set_health(Health::Optimistic);
+        unreachable.set_health(Health::Unreachable);
+        unusable.set_health(Health::Unusable);
+
+        live.chain_head().update(100, H256::repeat_byte(1), true);
+
+        unreachable
+            .chain_head()
+            .update(100, H256::repeat_byte(2), true);
+
+        unusable
+            .chain_head()
+            .update(50, H256::repeat_byte(3), false);
+
+        let live_mock = mock_head(&live_server, 100, H256::repeat_byte(1), true);
+        let unreachable_mock = mock_head(&unreachable_server, 100, H256::repeat_byte(2), false);
+        let unusable_mock = mock_head(&unusable_server, 100, H256::repeat_byte(3), false);
+
+        let remotes = RemoteBeaconNodes::new(
+            vec![
+                live.clone_arc(),
+                unreachable.clone_arc(),
+                unusable.clone_arc(),
+            ],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, 100, 32);
+
+        let error = nodes
+            .head_block_root()
+            .await
+            .expect_err("the only node polled is still optimistic")
+            .to_string();
+
+        assert!(error.contains("verified by an execution engine"));
+        assert!(error.contains("not asked while Unreachable"));
+        assert!(error.contains("not asked while Unusable"));
+        live_mock.assert_async().await;
+        unreachable_mock.assert_calls_async(0).await;
+        unusable_mock.assert_calls_async(0).await;
+
+        Ok(())
+    }
+
+    // Withholding an optimistic head here would lose every duty of the tick.
+    #[test]
+    fn the_slot_head_follows_an_optimistic_head() -> Result<()> {
+        let optimistic = node("http://optimistic")?;
+
+        optimistic.seed_genesis_validators_root(H256::zero());
+
+        optimistic
+            .chain_head()
+            .update(10, H256::repeat_byte(1), true);
+
+        let remotes = RemoteBeaconNodes::new(vec![optimistic.clone_arc()], vec![], false);
+        let nodes = RemoteNodes::new(&remotes, 10, 32);
+
+        let slot_head = nodes
+            .slot_head::<Mainnet>(10)
+            .ok_or_else(|| anyhow!("an optimistic head is followed"))?;
+
+        assert_eq!(slot_head.beacon_block_root, H256::repeat_byte(1));
+
+        Ok(())
+    }
+
     // The streaming node leads, and the others keep their health order behind it.
     #[test]
     fn led_by_moves_only_the_leading_node() -> Result<()> {
-        let node = |url: &str| -> Result<_> {
-            Ok(Arc::new(RemoteBeaconNode::new(
-                Arc::new(ChainConfig::mainnet()),
-                Client::new(),
-                url.parse()?,
-                32,
-            )))
-        };
-
         let (first, second, third) = (node("http://a")?, node("http://b")?, node("http://c")?);
         let remotes = RemoteBeaconNodes::new(
             vec![first.clone_arc(), second.clone_arc(), third.clone_arc()],
@@ -1465,7 +1901,7 @@ mod tests {
         Ok(())
     }
 
-    // Only a synced node has seen the epoch's attestations, so a lagging one is never asked.
+    // Only a ready node is asked, as a lagging one has not seen the epoch's attestations.
     #[tokio::test]
     async fn liveness_is_not_asked_of_a_node_that_is_not_ready() -> Result<()> {
         let requests = Arc::new(AtomicUsize::new(0));

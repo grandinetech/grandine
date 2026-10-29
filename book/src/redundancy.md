@@ -37,13 +37,14 @@ Once per slot, the validator client polls every node and gives it one of these h
 |---|---|
 | Ready | Synced, its execution client online, its head verified by the execution client, and its head no more than `--max-empty-slots` slots (default `32`) behind the clock |
 | Unknown | Not polled yet |
-| Unusable | Reachable but syncing, optimistic, with its execution client offline, or with a stale head |
+| Optimistic | Synced, but its head is not yet verified by the execution client. A head is usually optimistic for a moment after each block |
+| Unusable | Reachable but syncing, with its execution client offline, or with a stale head |
 | Unreachable | The node did not answer |
 | Incompatible | The node is on a different network. It is never used |
 
 It also follows each node's head through the node's event stream (`/eth/v1/events`), and reconnects with a growing delay, up to one minute, when the stream drops.
 
-Changes are logged:
+Changes are logged, except that moves between Ready and Optimistic are logged only at debug level, as they are routine:
 
 ```text
 beacon node at http://BN-2:5052/ is now Unusable
@@ -58,8 +59,9 @@ Requests for data then go to the nodes in that order until one succeeds: duties,
 
 Some requests are special:
 
-- **Block production.** A block is taken from the first node that builds on the head the other nodes agree on. A node with a different view of the head is passed over. If no node builds on that head, the first block produced is proposed anyway, because any block beats a missed slot.
-- **Attesting on a new head.** When a node streams the slot's block as its new head before attestation time, the validator client attests to it without waiting for the attestation tick, and asks that node first, as it is the one known to have the block.
+- **Block production.** A block is taken from the first node that builds on the head the other nodes agree on. A node with a different view of the head is passed over, unless that head was optimistic and the node has verified it since. If no node builds on that head, the first block produced is proposed anyway, because any block beats a missed slot.
+- **Attesting on a new head.** When a node streams the slot's block as its new head before attestation time, the validator client attests to it without waiting for the attestation tick, and asks that node first, as it is the one known to have the block. An optimistic head does not trigger this, and the duty waits for the attestation tick.
+- **Sync committee messages and contributions.** These are signed only over a verified head. An optimistic node is asked whether its head has been verified since, and Unusable and Unreachable nodes are not asked. If no node has a verified head, the duty is skipped.
 - **Doppelganger liveness.** Liveness is asked from every Ready node at once. A validator seen live by any of them counts as live.
 
 ### Publishing
@@ -125,7 +127,7 @@ Combine several beacon nodes with a [Web3Signer](./web3signer.md), so that the k
 
 ## Troubleshooting
 
-- **`no remote beacon node is fully synced`**: no node is Ready. Duties are still attempted on the best node available, but its data may be outdated. Check each node's sync status, execution client and peers.
+- **`no remote beacon node is fully synced`**: no node is Ready or Optimistic. Duties are still attempted on the best node available, but its data may be outdated. Check each node's sync status, execution client and peers.
 - **`no remote beacon node can serve duties`**: no node could be reached. Check the URLs, firewalls and `--http-address` on the nodes.
 - **`beacon nodes at URL-1 and URL-2 are on different chains`**: the nodes disagree on genesis. One of them is on the wrong network.
 - **`URL beacon node failed to ...`** warnings: a request failed on one node and was retried on the next one. Occasional warnings are normal. Constant ones point to a broken node.

@@ -165,8 +165,9 @@ While the head is optimistic:
 - Validators do not sign attestations, blocks or sync committee messages based on an optimistic
   head. The built-in validator client waits briefly for the head to be fully validated and
   otherwise skips the duty with `validator cannot perform its duties because chain head has not
-  been fully verified by an execution engine`. A separate validator client ignores heads that a
-  beacon node reports as optimistic.
+  been fully verified by an execution engine`. A separate validator client follows an optimistic
+  head, signs sync committee messages and contributions only over a verified one, and relies on
+  its beacon nodes to refuse attestation data and blocks over an optimistic one.
 - Shortly before each interval of a slot, Grandine sends the head payload to the execution client
   again, so the head becomes fully validated as soon as the execution client can verify it.
 

@@ -5,6 +5,8 @@ pub enum Health {
     Incompatible,
     Unreachable,
     Unusable,
+    /// Synced, with a head not yet verified by an execution engine.
+    Optimistic,
     Unknown,
     Ready,
 }
@@ -13,6 +15,18 @@ impl Health {
     #[must_use]
     pub const fn is_ready(self) -> bool {
         matches!(self, Self::Ready)
+    }
+
+    /// Whether the node follows the chain, verified or not.
+    #[must_use]
+    pub const fn is_synced(self) -> bool {
+        matches!(self, Self::Optimistic | Self::Ready)
+    }
+
+    /// Whether the node may follow the chain, as no poll has shown otherwise.
+    #[must_use]
+    pub const fn may_be_synced(self) -> bool {
+        matches!(self, Self::Optimistic | Self::Unknown | Self::Ready)
     }
 
     #[must_use]
@@ -27,9 +41,13 @@ impl Health {
         is_syncing: bool,
         is_optimistic: bool,
     ) -> Self {
-        // An optimistic head has not been verified by an execution engine.
-        if el_offline || is_syncing || is_optimistic {
+        if el_offline || is_syncing {
             return Self::Unusable;
+        }
+
+        // An optimistic head has not been verified by an execution engine.
+        if is_optimistic {
+            return Self::Optimistic;
         }
 
         Self::Ready
@@ -44,7 +62,8 @@ impl Health {
             0 => Self::Incompatible,
             1 => Self::Unreachable,
             2 => Self::Unusable,
-            4 => Self::Ready,
+            3 => Self::Optimistic,
+            5 => Self::Ready,
             _ => Self::Unknown,
         }
     }
@@ -58,15 +77,37 @@ mod tests {
     fn only_a_ready_node_reports_ready() {
         assert!(Health::Ready.is_ready());
         assert!(!Health::Unknown.is_ready());
+        assert!(!Health::Optimistic.is_ready());
         assert!(!Health::Unusable.is_ready());
         assert!(!Health::Unreachable.is_ready());
         assert!(!Health::Incompatible.is_ready());
     }
 
     #[test]
+    fn a_ready_or_optimistic_node_is_synced() {
+        assert!(Health::Ready.is_synced());
+        assert!(Health::Optimistic.is_synced());
+        assert!(!Health::Unknown.is_synced());
+        assert!(!Health::Unusable.is_synced());
+        assert!(!Health::Unreachable.is_synced());
+        assert!(!Health::Incompatible.is_synced());
+    }
+
+    #[test]
+    fn a_node_may_be_synced_until_a_poll_shows_otherwise() {
+        assert!(Health::Ready.may_be_synced());
+        assert!(Health::Unknown.may_be_synced());
+        assert!(Health::Optimistic.may_be_synced());
+        assert!(!Health::Unusable.may_be_synced());
+        assert!(!Health::Unreachable.may_be_synced());
+        assert!(!Health::Incompatible.may_be_synced());
+    }
+
+    #[test]
     fn any_node_may_serve_but_one_on_the_wrong_network() {
         assert!(Health::Ready.can_serve());
         assert!(Health::Unknown.can_serve());
+        assert!(Health::Optimistic.can_serve());
         assert!(Health::Unusable.can_serve());
         assert!(Health::Unreachable.can_serve());
         assert!(!Health::Incompatible.can_serve());
@@ -76,12 +117,13 @@ mod tests {
     fn health_is_ordered_worst_first() {
         assert!(Health::Incompatible < Health::Unreachable);
         assert!(Health::Unreachable < Health::Unusable);
-        assert!(Health::Unusable < Health::Unknown);
+        assert!(Health::Unusable < Health::Optimistic);
+        assert!(Health::Optimistic < Health::Unknown);
         assert!(Health::Unknown < Health::Ready);
     }
 
     #[test]
-    fn any_reported_degradation_makes_a_node_unusable() {
+    fn a_syncing_node_or_one_without_an_execution_engine_is_unusable() {
         assert_eq!(
             Health::from_syncing_status(true, false, false),
             Health::Unusable,
@@ -93,8 +135,13 @@ mod tests {
         );
 
         assert_eq!(
-            Health::from_syncing_status(false, false, true),
+            Health::from_syncing_status(false, true, true),
             Health::Unusable,
+        );
+
+        assert_eq!(
+            Health::from_syncing_status(false, false, true),
+            Health::Optimistic,
         );
 
         assert_eq!(
@@ -109,6 +156,7 @@ mod tests {
             Health::Incompatible,
             Health::Unreachable,
             Health::Unusable,
+            Health::Optimistic,
             Health::Unknown,
             Health::Ready,
         ] {

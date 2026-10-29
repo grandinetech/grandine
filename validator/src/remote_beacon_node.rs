@@ -129,10 +129,8 @@ enum Error {
         expected: H256,
         actual: H256,
     },
-    #[error("beacon node at {url} reported an optimistic head")]
+    #[error("beacon node at {url} has not reported its head as verified by an execution engine")]
     OptimisticHead { url: String },
-    #[error("beacon node at {url} did not report whether its head is optimistic")]
-    UnknownOptimisticStatus { url: String },
     #[error(
         "beacon node at {url} returned payload attestation data for slot {actual} \
          where slot {expected} was requested"
@@ -527,9 +525,10 @@ impl RemoteBeaconNode {
             return;
         }
 
-        // Polled when the head is not from this slot, as the stream may be silently dead; a healthy
-        // stream makes this a no-op except in a slot whose block is late or missed.
-        if matches!(self.chain_head.status(slot, 0), HeadStatus::Usable(_)) {
+        // Polled when the head is not a verified one from this slot, as the stream may be silently
+        // dead and does not report a head again once verified; a healthy stream makes this a no-op
+        // except in a slot whose block is late, missed or optimistic.
+        if matches!(self.chain_head.status(slot, 0), HeadStatus::Verified(_)) {
             return;
         }
 
@@ -541,25 +540,51 @@ impl RemoteBeaconNode {
     pub(crate) async fn fresh_head_block_root(&self, slot: Slot) -> Result<H256> {
         self.poll_head().await?;
 
-        self.chain_head
-            .get(slot, self.max_empty_slots)?
-            .ok_or_else(|| {
-                anyhow!(
-                    "head of beacon node at {} is too old to sign for slot {slot}",
-                    self.url,
-                )
-            })
+        let status = self.chain_head.status(slot, self.max_empty_slots);
+
+        if matches!(status, HeadStatus::Optimistic(_)) {
+            bail!(Error::OptimisticHead {
+                url: self.url.to_string(),
+            });
+        }
+
+        status.block_root(slot)?.ok_or_else(|| {
+            anyhow!(
+                "head of beacon node at {} is too old to sign for slot {slot}",
+                self.url,
+            )
+        })
+    }
+
+    /// Asks the node whether `block_root`, its cached optimistic head, is now verified.
+    pub(crate) async fn poll_optimistic_head_is_verified(
+        &self,
+        block_root: H256,
+        slot: Slot,
+    ) -> bool {
+        let status = self.chain_head.status(slot, self.max_empty_slots);
+
+        if status != HeadStatus::Optimistic(block_root) {
+            return false;
+        }
+
+        if let Err(error) = self.poll_head().await {
+            debug_with_peers!("{} did not verify its head: {error:?}", self.url);
+            return false;
+        }
+
+        self.chain_head.status(slot, self.max_empty_slots) == HeadStatus::Verified(block_root)
     }
 
     async fn poll_head(&self) -> Result<()> {
         let asked_at = Instant::now();
-        let (head_slot, block_root) = self.head_header().await?;
+        let (head_slot, block_root, optimistic) = self.head_header().await?;
 
         // Recorded at the head's own slot, so that a stale head is cached as stale rather than
         // appearing fresh for another `max_empty_slots` slots.
         if !self
             .chain_head
-            .update_seen_at(asked_at, head_slot, block_root)
+            .update_seen_at(asked_at, head_slot, block_root, optimistic)
         {
             debug_with_peers!(
                 "{} answered with head {block_root:?} at slot {head_slot} after the stream \
@@ -571,7 +596,7 @@ impl RemoteBeaconNode {
         Ok(())
     }
 
-    async fn head_header(&self) -> Result<(Slot, H256)> {
+    async fn head_header(&self) -> Result<(Slot, H256, bool)> {
         let url = self.endpoint("/eth/v1/beacon/headers/head")?;
 
         let response = self
@@ -588,9 +613,11 @@ impl RemoteBeaconNode {
             .await?
             .into_data_and_execution_optimistic();
 
-        check_not_optimistic(&self.url, execution_optimistic)?;
-
-        Ok((block_header.header.message.slot, block_header.root))
+        Ok((
+            block_header.header.message.slot,
+            block_header.root,
+            is_optimistic(execution_optimistic),
+        ))
     }
 
     pub async fn refresh_health(&self, slot: Slot) {
@@ -598,10 +625,15 @@ impl RemoteBeaconNode {
         let health = self.poll_health(slot).await;
 
         if health != previous {
-            info_with_peers!("beacon node at {} is now {health:?}", self.url);
+            // A head is optimistic for a moment after each block while its payload is validated.
+            if health.is_synced() && previous.is_synced() {
+                debug_with_peers!("beacon node at {} is now {health:?}", self.url);
+            } else {
+                info_with_peers!("beacon node at {} is now {health:?}", self.url);
+            }
 
-            // A node that just became ready may have restarted and forgotten what it was sent.
-            if health.is_ready() {
+            // A node that just caught up may have restarted and forgotten what it was sent.
+            if health.is_synced() && !previous.is_synced() {
                 *self.prepared_proposers.lock().await = None;
                 self.sent_subscriptions.lock().await.clear();
             }
@@ -688,7 +720,7 @@ impl RemoteBeaconNode {
 
         // A node that has fallen behind keeps serving stale duty data while calling itself
         // synced; its own head, held to the wall clock, shows what its sync status cannot.
-        if health == Health::Ready
+        if health.is_synced()
             && matches!(
                 self.chain_head.status(slot, self.max_empty_slots),
                 HeadStatus::Stale { .. }
@@ -893,7 +925,10 @@ impl RemoteBeaconNode {
     }
 
     pub fn slot_head<P: Preset>(&self, slot: Slot) -> Result<Option<SlotHead<P>>> {
-        let Some(beacon_block_root) = self.chain_head.get(slot, self.max_empty_slots)? else {
+        let Some(beacon_block_root) = self
+            .chain_head
+            .verified_or_optimistic(slot, self.max_empty_slots)?
+        else {
             return Ok(None);
         };
 
@@ -1969,18 +2004,13 @@ fn check_attestation_source(source_epoch: Epoch, target_epoch: Epoch) -> Result<
     Ok(())
 }
 
-fn check_not_optimistic(url: &RedactingUrl, execution_optimistic: Option<bool>) -> Result<()> {
-    match execution_optimistic {
-        Some(false) => Ok(()),
-        Some(true) => bail!(Error::OptimisticHead {
-            url: url.to_string(),
-        }),
-        // Not saying is not the same as saying no, and an optimistic validator must not sign
-        // across the sync committee domains.
-        None => bail!(Error::UnknownOptimisticStatus {
-            url: url.to_string(),
-        }),
-    }
+// Not saying is not the same as saying no.
+const fn is_optimistic(execution_optimistic: Option<bool>) -> bool {
+    !matches!(execution_optimistic, Some(false))
+}
+
+pub fn is_optimistic_head(error: &AnyhowError) -> bool {
+    matches!(error.downcast_ref(), Some(Error::OptimisticHead { .. }))
 }
 
 fn parse_header<T: FromStr>(headers: &HeaderMap, name: &str) -> Result<Option<T>>
@@ -2416,6 +2446,92 @@ mod tests {
         Ok(())
     }
 
+    fn node_reporting_health(server: &MockServer, is_optimistic: bool) -> Result<RemoteBeaconNode> {
+        let chain_config = ChainConfig::mainnet();
+        let genesis_fork_version = chain_config.genesis_fork_version;
+
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/beacon/genesis");
+
+            then.status(200).json_body(json!({
+                "data": {
+                    "genesis_time": "0",
+                    "genesis_validators_root": H256::zero(),
+                    "genesis_fork_version": genesis_fork_version,
+                },
+            }));
+        });
+
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/node/syncing");
+
+            then.status(200).json_body(json!({
+                "data": {
+                    "is_syncing": false,
+                    "is_optimistic": is_optimistic,
+                    "el_offline": false,
+                },
+            }));
+        });
+
+        let node = test_node(chain_config, &server.base_url())?;
+
+        node.seed_genesis_validators_root(H256::zero());
+
+        Ok(node)
+    }
+
+    // A node that catches up may have restarted; one moving between synced states has not.
+    #[tokio::test]
+    async fn only_a_node_catching_up_is_taken_to_have_forgotten_what_it_was_sent() -> Result<()> {
+        let subscription = BeaconCommitteeSubscription {
+            validator_index: 1,
+            committee_index: 2,
+            committees_at_slot: 3,
+            slot: 200,
+            is_aggregator: false,
+        };
+
+        for (previous, is_optimistic, expected, forgotten) in [
+            (Health::Unreachable, true, Health::Optimistic, true),
+            (Health::Unusable, false, Health::Ready, true),
+            (Health::Ready, true, Health::Optimistic, false),
+            (Health::Optimistic, false, Health::Ready, false),
+        ] {
+            let server = MockServer::start_async().await;
+            let node = node_reporting_health(&server, is_optimistic)?;
+
+            node.set_health(previous);
+            *node.prepared_proposers.lock().await = Some((3, vec![]));
+            node.record_sent_subscriptions(100, [subscription]).await;
+
+            node.refresh_health(100).await;
+            let proposers_forgotten = node.prepared_proposers.lock().await.is_none();
+            let subscriptions_forgotten = node.sent_subscriptions.lock().await.is_empty();
+            assert_eq!(node.health(), expected);
+            assert_eq!(proposers_forgotten, forgotten);
+            assert_eq!(subscriptions_forgotten, forgotten);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_synced_node_with_a_stale_head_is_unusable() -> Result<()> {
+        for is_optimistic in [false, true] {
+            let server = MockServer::start_async().await;
+            let node = node_reporting_health(&server, is_optimistic)?;
+
+            node.chain_head()
+                .update(50, H256::repeat_byte(1), is_optimistic);
+
+            node.refresh_health(100).await;
+            assert_eq!(node.health(), Health::Unusable);
+        }
+
+        Ok(())
+    }
+
     // A subscription goes to a node once; the sliding window offered every slot must not repeat
     // it, while a changed entry for the same duty is sent again.
     #[tokio::test]
@@ -2684,16 +2800,20 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn only_the_optimistic_head_error_is_recognized_as_one() {
+        let url = "http://localhost:5052/".to_owned();
+
+        assert!(is_optimistic_head(&Error::OptimisticHead { url }.into()));
+        assert!(!is_optimistic_head(&anyhow!("the node timed out")));
+    }
+
     // Signing across the sync committee domains requires a head the node has verified.
     #[test]
-    fn check_not_optimistic_accepts_only_a_verified_head() -> Result<()> {
-        let url = "http://localhost:5052/".parse()?;
-
-        check_not_optimistic(&url, Some(false))?;
-        check_not_optimistic(&url, Some(true)).expect_err("an optimistic head is not verified");
-        check_not_optimistic(&url, None).expect_err("an unreported head is not verified");
-
-        Ok(())
+    fn only_a_head_reported_as_not_optimistic_is_verified() {
+        assert!(!is_optimistic(Some(false)));
+        assert!(is_optimistic(Some(true)));
+        assert!(is_optimistic(None));
     }
 
     // The node verifies the reveal, so it and the graffiti must go into the query in full.
