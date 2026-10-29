@@ -2513,13 +2513,14 @@ mod tests {
         let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/")?;
 
         // The pre-Gloas windows of the mainnet configuration are 3334 and 3333 basis points.
+        // Durations round down to whole milliseconds, like the spec.
         assert_eq!(
             node.attestation_timeout(Phase::Electra),
-            Duration::from_micros(4_000_800),
+            Duration::from_millis(4_000),
         );
         assert_eq!(
             node.aggregate_timeout(Phase::Electra),
-            Duration::from_micros(3_999_600),
+            Duration::from_millis(3_999),
         );
         assert_eq!(
             node.attestation_timeout(Phase::Gloas),
@@ -2531,7 +2532,7 @@ mod tests {
         // Publishing an attestation may take the rest of the slot, not just until aggregation.
         assert_eq!(
             node.publish_timeout(Phase::Electra),
-            Duration::from_micros(8_000_400),
+            Duration::from_millis(8_000),
         );
         assert_eq!(node.publish_timeout(Phase::Gloas), Duration::from_secs(9));
         assert_eq!(node.background_timeout(), Duration::from_secs(6));
@@ -2562,12 +2563,12 @@ mod tests {
 
         assert_eq!(
             node.block_timeout(Phase::Electra),
-            Duration::from_micros(3_999_600),
+            Duration::from_millis(3_999),
         );
         assert_eq!(node.block_timeout(Phase::Gloas), Duration::from_secs(3));
         assert_eq!(
             node.publish_timeout(Phase::Electra),
-            Duration::from_micros(8_000_400),
+            Duration::from_millis(8_000),
         );
         assert_eq!(node.publish_timeout(Phase::Gloas), Duration::from_secs(9));
 

@@ -39,6 +39,17 @@ pub enum InternalMessage {
         slot: Slot,
         block_root: H256,
     },
+    /// A sync committee due point not on an interval start has arrived.
+    SyncCommitteeDue {
+        slot: Slot,
+        duty: SyncCommitteeDuty,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SyncCommitteeDuty {
+    Messages,
+    Contributions,
 }
 
 impl InternalMessage {
