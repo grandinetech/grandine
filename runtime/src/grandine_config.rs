@@ -382,6 +382,15 @@ impl BeaconNodeConfig {
         } = self;
 
         info!("storage mode: {:?}", storage_config.storage_mode);
+        info!(
+            "state storage: hierarchy {}, cache sizes [{}]",
+            storage_config.state_storage_config.hierarchy,
+            storage_config
+                .state_storage_config
+                .cache_sizes
+                .iter()
+                .join(", "),
+        );
 
         storage_config.print_db_sizes();
 
@@ -393,10 +402,6 @@ impl BeaconNodeConfig {
             info!("HTTP API disabled");
         }
 
-        info!(
-            "archival interval: {} epochs",
-            storage_config.archival_epoch_interval
-        );
         info!("slasher enabled: {}", slasher_config.is_some());
 
         if *track_liveness {

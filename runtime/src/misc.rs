@@ -1,10 +1,10 @@
-use core::num::NonZeroU64;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Result, ensure};
 use bytesize::ByteSize;
 use database::{Database, DatabaseMode, RestartMessage};
 use directories::Directories;
+use fork_choice_control::StateStorageConfig;
 use fs_err::PathExt as _;
 use futures::channel::mpsc::UnboundedSender;
 use logging::info_with_peers;
@@ -25,11 +25,11 @@ pub struct StorageConfig {
     pub db_size: ByteSize,
     pub directories: Arc<Directories>,
     pub eth1_db_size: ByteSize,
-    pub archival_epoch_interval: NonZeroU64,
     pub reset_databases: bool,
     pub storage_mode: StorageMode,
     pub store_execution_payloads: bool,
     pub zstd_compression_level: i32,
+    pub state_storage_config: StateStorageConfig,
 }
 
 impl StorageConfig {
@@ -142,11 +142,11 @@ impl StorageConfig {
             db_size,
             directories,
             eth1_db_size,
-            archival_epoch_interval,
             reset_databases,
             storage_mode,
             store_execution_payloads,
             zstd_compression_level,
+            state_storage_config,
         } = self;
 
         let new_db_size = ByteSize::b(
@@ -168,11 +168,11 @@ impl StorageConfig {
             db_size: new_db_size,
             directories,
             eth1_db_size: new_eth1_db_size,
-            archival_epoch_interval,
             reset_databases,
             storage_mode,
             store_execution_payloads,
             zstd_compression_level,
+            state_storage_config,
         }
     }
 
@@ -188,7 +188,6 @@ impl StorageConfig {
 #[cfg(test)]
 mod tests {
     use fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL;
-    use nonzero_ext::nonzero;
 
     use super::*;
 
@@ -199,11 +198,11 @@ mod tests {
             db_size: ByteSize::gb(6),
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::gb(2),
-            archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
             store_execution_payloads: false,
             zstd_compression_level: DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            state_storage_config: StateStorageConfig::default_for_mode(StorageMode::default()),
         };
 
         let StorageConfig {
@@ -223,11 +222,11 @@ mod tests {
             db_size: ByteSize::b(u64::MAX),
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::b(u64::MAX),
-            archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
             store_execution_payloads: false,
             zstd_compression_level: DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            state_storage_config: StateStorageConfig::default_for_mode(StorageMode::default()),
         };
 
         assert_eq!(storage_config.db_size, ByteSize::b(u64::MAX));

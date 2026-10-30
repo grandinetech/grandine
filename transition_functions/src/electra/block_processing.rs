@@ -7,7 +7,7 @@ use bls::PublicKeyBytes;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
-        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
+        self, attestation_epoch, compute_base_reward, get_attestation_participation_flags,
         get_base_reward_per_increment, get_beacon_proposer_index, get_consolidation_churn_limit,
         get_current_epoch, get_pending_balance_to_withdraw, get_randao_mix, index_of_public_key,
         initialize_shuffled_indices,
@@ -708,36 +708,39 @@ pub fn apply_attestation<P: Preset>(
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
-    let attesting_indices = get_attesting_indices(state, attestation)?;
+    let mut attesting_indices = get_attesting_indices(state, attestation)?;
+    attesting_indices.sort_unstable();
 
-    let attesting_indices_with_base_rewards = attesting_indices
-        .iter()
-        .copied()
-        .map(|validator_index| {
-            let base_reward = get_base_reward(state, validator_index, base_reward_per_increment)?;
-            Ok((validator_index, base_reward))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let epoch_participation = match attestation_epoch(state, attestation.data.target.epoch)? {
-        AttestationEpoch::Previous => state.previous_epoch_participation_mut(),
-        AttestationEpoch::Current => state.current_epoch_participation_mut(),
-    };
+    let (epoch_participation, validators) =
+        match attestation_epoch(state, attestation.data.target.epoch)? {
+            AttestationEpoch::Previous => state.previous_epoch_participation_mut_with_validators(),
+            AttestationEpoch::Current => state.current_epoch_participation_mut_with_validators(),
+        };
 
     let mut proposer_reward_numerator: Gwei = 0;
 
-    for (validator_index, base_reward) in attesting_indices_with_base_rewards {
-        let epoch_participation = epoch_participation.get_mut(validator_index)?;
+    epoch_participation.update_at(
+        &attesting_indices,
+        &mut |validator_index, epoch_participation| {
+            let base_reward = compute_base_reward::<P>(
+                validators.effective_balance(validator_index)?,
+                base_reward_per_increment,
+            )?;
 
-        for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
-            if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
-                proposer_reward_numerator =
-                    proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
+            for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
+                if participation_flags.get_bit(flag_index)
+                    && !epoch_participation.get_bit(flag_index)
+                {
+                    proposer_reward_numerator =
+                        proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
+                }
             }
-        }
 
-        *epoch_participation |= participation_flags;
-    }
+            *epoch_participation |= participation_flags;
+
+            Ok(())
+        },
+    )?;
 
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(config, state)?;

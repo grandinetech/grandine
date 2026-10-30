@@ -738,13 +738,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn state_by_state_root(&self, state_root: H256) -> Option<WithStatus<Arc<BeaconState<P>>>> {
-        self.canonical_chain()
-            .find(|chain_link| chain_link.block.message().state_root() == state_root)
+        self.chain_link_by_state_root(state_root)
             .map(|chain_link| WithStatus {
                 value: chain_link.state(self),
                 status: self.reported_payload_status(chain_link),
                 finalized: self.is_slot_finalized(chain_link.slot()),
             })
+    }
+
+    #[must_use]
+    pub fn chain_link_by_state_root(&self, state_root: H256) -> Option<&ChainLink<P>> {
+        self.canonical_chain()
+            .find(|chain_link| chain_link.block.message().state_root() == state_root)
     }
 
     pub fn state_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {

@@ -12,8 +12,9 @@ use itertools::Itertools as _;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens as _, TokenStreamExt as _, format_ident, quote};
 use syn::{
-    Error, Expr, ExprLit, Generics, Ident, ImplGenerics, ImplItemFn, ImplItemType, Lit, Member,
-    Path, TypeGenerics, TypeParam, WhereClause, WherePredicate, parse_quote,
+    Error, Expr, ExprLit, Generics, Ident, ImplGenerics, ImplItemFn, ImplItemType, Lifetime,
+    LifetimeParam, Lit, Member, Path, TypeGenerics, TypeParam, Visibility, WhereClause,
+    WherePredicate, parse_quote,
     punctuated::Punctuated,
     token::{Comma, Where},
 };
@@ -31,6 +32,7 @@ use crate::{crate_path, ssz_field::SszField};
 #[darling(attributes(ssz))]
 pub struct SszType {
     ident: Ident,
+    vis: Visibility,
     generics: Generics,
     data: Data<(), SszField>,
 
@@ -59,6 +61,8 @@ pub struct SszType {
     transparent: bool,
     #[darling(default)]
     stable: Option<StableContainer>,
+    #[darling(default)]
+    derive_cursor: bool,
 }
 
 #[derive(FromMeta)]
@@ -172,6 +176,20 @@ impl SszType {
             });
         }
 
+        if !self.transparent {
+            let fields_expr = self.fields_expr(&ssz)?;
+
+            impls.append_all(quote! {
+                impl #impl_generics #ssz::SszContainer for #ident #ty_generics #where_clause {
+                    const FIELDS: &'static [#ssz::Size] = #fields_expr;
+                }
+            });
+        }
+
+        if self.derive_cursor {
+            impls.append_all(self.cursor_impls(&ssz)?);
+        }
+
         if self.derive_hash {
             let packing_factor_type_impl = self.packing_factor_type_impl(&ssz)?;
             let hash_tree_root_fn_impl = self.hash_tree_root_fn_impl(&ssz)?;
@@ -201,6 +219,13 @@ impl SszType {
             return Err(Error::new(
                 Span::call_site(),
                 "at least one impl must be derived",
+            ));
+        }
+
+        if self.derive_cursor && self.transparent {
+            return Err(Error::new(
+                Span::call_site(),
+                "transparent types have no container layout to navigate",
             ));
         }
 
@@ -279,6 +304,16 @@ impl SszType {
         (impl_generics, where_clause)
     }
 
+    fn cursor_generics(&self) -> Generics {
+        let mut generics = self.generics.clone();
+
+        generics
+            .params
+            .insert(0, LifetimeParam::new(cursor_lifetime()).into());
+
+        generics
+    }
+
     fn ssz_path(&self) -> Result<Path, Error> {
         if self.internal {
             Ok(parse_quote! { crate })
@@ -306,6 +341,93 @@ impl SszType {
         }
 
         Ok(parse_quote! { #tokens })
+    }
+
+    fn fields_expr(&self, ssz: &Path) -> Result<Expr, Error> {
+        let size_exprs = self
+            .unskipped_fields()?
+            .map(|(_, ssz_field)| ssz_field.size_expr(ssz))
+            .collect_vec();
+
+        Ok(parse_quote! { &[#(#size_exprs),*] })
+    }
+
+    fn cursor_impls(&self, ssz: &Path) -> Result<TokenStream, Error> {
+        let ident = &self.ident;
+        let vis = &self.vis;
+        let cursor_ident = format_ident!("{ident}Cursor");
+        let lifetime = cursor_lifetime();
+
+        let (impl_generics, ty_generics, where_clause) = self.split_for_impl();
+        let cursor_generics = self.cursor_generics();
+        let (cursor_impl_generics, cursor_ty_generics, _) = cursor_generics.split_for_impl();
+
+        let getters = self
+            .unskipped_fields()?
+            .enumerate()
+            .map(|(index, (member, ssz_field))| {
+                let getter_ident = format_ident!("get_{}", member);
+                let ty = &ssz_field.ty;
+
+                quote! {
+                    #vis fn #getter_ident(
+                        &self,
+                    ) -> ::core::result::Result<
+                        <#ty as #ssz::SszNavigable>::View<#lifetime>,
+                        #ssz::ReadError,
+                    > {
+                        ::core::convert::TryInto::try_into(self.0.field(#index)?)
+                    }
+                }
+            })
+            .collect_vec();
+
+        Ok(quote! {
+            #vis struct #cursor_ident #cursor_impl_generics (
+                #ssz::SszContainerCursor<#lifetime, #ident #ty_generics>,
+            ) #where_clause;
+
+            impl #impl_generics #ident #ty_generics #where_clause {
+                #[must_use]
+                #vis const fn cursor<#lifetime>(
+                    bytes: & #lifetime [u8],
+                ) -> #cursor_ident #cursor_ty_generics {
+                    #cursor_ident(#ssz::SszCursor::new(bytes).container())
+                }
+            }
+
+            impl #cursor_impl_generics #cursor_ident #cursor_ty_generics #where_clause {
+                #(#getters)*
+
+                /// Deserializes the whole value the cursor points at.
+                #vis fn read<C>(
+                    &self,
+                    context: &C,
+                ) -> ::core::result::Result<#ident #ty_generics, #ssz::ReadError>
+                where
+                    #ident #ty_generics: #ssz::SszRead<C>,
+                {
+                    self.0.read(context)
+                }
+            }
+
+            impl #cursor_impl_generics ::core::convert::TryFrom<#ssz::SszCursor<#lifetime>>
+                for #cursor_ident #cursor_ty_generics
+                #where_clause
+            {
+                type Error = #ssz::ReadError;
+
+                fn try_from(
+                    cursor: #ssz::SszCursor<#lifetime>,
+                ) -> ::core::result::Result<Self, #ssz::ReadError> {
+                    ::core::result::Result::Ok(Self(cursor.container()))
+                }
+            }
+
+            impl #impl_generics #ssz::SszNavigable for #ident #ty_generics #where_clause {
+                type View<#lifetime> = #cursor_ident #cursor_ty_generics;
+            }
+        })
     }
 
     #[expect(
@@ -666,6 +788,10 @@ impl Member {
     fn value_ident(&self) -> Ident {
         format_ident!("value_of_{}", self)
     }
+}
+
+fn cursor_lifetime() -> Lifetime {
+    parse_quote! { 'cursor }
 }
 
 fn context_type() -> TypeParam {

@@ -4,7 +4,7 @@ use ethereum_types::H256;
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -58,6 +58,10 @@ impl<T: SszHash> SszHash for Box<T> {
     }
 }
 
+impl<T: SszNavigable> SszNavigable for Box<T> {
+    type View<'cursor> = T::View<'cursor>;
+}
+
 impl<T: SszSize> SszSize for Arc<T> {
     const SIZE: Size = T::SIZE;
 }
@@ -84,4 +88,8 @@ impl<T: SszHash> SszHash for Arc<T> {
     fn hash_tree_root(&self) -> H256 {
         self.as_ref().hash_tree_root()
     }
+}
+
+impl<T: SszNavigable> SszNavigable for Arc<T> {
+    type View<'cursor> = T::View<'cursor>;
 }

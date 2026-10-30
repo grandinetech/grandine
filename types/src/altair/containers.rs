@@ -132,6 +132,7 @@ pub struct SyncAggregatorSelectionData {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct SyncCommittee<P: Preset> {
     // The vector has to be boxed because it's large enough to cause stack overflows when not in
     // release mode.

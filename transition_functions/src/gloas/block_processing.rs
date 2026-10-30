@@ -6,7 +6,7 @@ use bit_field::BitField as _;
 use bls::traits::SignatureBytes as _;
 use helper_functions::{
     accessors::{
-        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
+        self, attestation_epoch, compute_base_reward, get_attestation_participation_flags,
         get_base_reward_per_increment, get_beacon_proposer_index, get_current_epoch,
         get_indexed_payload_attestation, get_previous_epoch, get_randao_mix,
         initialize_shuffled_indices,
@@ -1078,17 +1078,8 @@ pub fn apply_attestation<P: Preset>(
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
-    let attesting_indices = get_attesting_indices(state, attestation)?;
-
-    let attesting_indices_with_base_rewards = attesting_indices
-        .iter()
-        .copied()
-        .map(|validator_index| {
-            let base_reward = get_base_reward(state, validator_index, base_reward_per_increment)?;
-            let effective_balance = state.validators().effective_balance(validator_index)?;
-            Ok((validator_index, base_reward, effective_balance))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut attesting_indices = get_attesting_indices(state, attestation)?;
+    attesting_indices.sort_unstable();
 
     // > [New in Gloas:EIP7732]
     let is_attestation_same_slot = is_attestation_same_slot(state, &attestation.data)?;
@@ -1107,40 +1098,49 @@ pub fn apply_attestation<P: Preset>(
         .get(payment_slot)?
         .to_owned();
 
-    let epoch_participation = match attestation_epoch {
-        AttestationEpoch::Previous => state.previous_epoch_participation_mut(),
-        AttestationEpoch::Current => state.current_epoch_participation_mut(),
+    let (epoch_participation, validators) = match attestation_epoch {
+        AttestationEpoch::Previous => state.previous_epoch_participation_mut_with_validators(),
+        AttestationEpoch::Current => state.current_epoch_participation_mut_with_validators(),
     };
 
     let mut proposer_reward_numerator: Gwei = 0;
 
-    for (validator_index, base_reward, effective_balance) in attesting_indices_with_base_rewards {
-        let epoch_participation = epoch_participation.get_mut(validator_index)?;
+    epoch_participation.update_at(
+        &attesting_indices,
+        &mut |validator_index, epoch_participation| {
+            let effective_balance = validators.effective_balance(validator_index)?;
+            let base_reward =
+                compute_base_reward::<P>(effective_balance, base_reward_per_increment)?;
 
-        // > [New in Gloas:EIP7732]
-        let had_no_participation = *epoch_participation == 0;
-        let mut will_set_new_flag = false;
+            // > [New in Gloas:EIP7732]
+            let had_no_participation = *epoch_participation == 0;
+            let mut will_set_new_flag = false;
 
-        for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
-            if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
-                proposer_reward_numerator =
-                    proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
+            for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
+                if participation_flags.get_bit(flag_index)
+                    && !epoch_participation.get_bit(flag_index)
+                {
+                    proposer_reward_numerator =
+                        proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
 
-                will_set_new_flag = true;
+                    will_set_new_flag = true;
+                }
             }
-        }
 
-        *epoch_participation |= participation_flags;
+            *epoch_participation |= participation_flags;
 
-        // > [New in Gloas:EIP7732]
-        if will_set_new_flag
-            && had_no_participation
-            && is_attestation_same_slot
-            && payment.withdrawal.amount > 0
-        {
-            payment.weight = payment.weight.try_add(effective_balance)?;
-        }
-    }
+            // > [New in Gloas:EIP7732]
+            if will_set_new_flag
+                && had_no_participation
+                && is_attestation_same_slot
+                && payment.withdrawal.amount > 0
+            {
+                payment.weight = payment.weight.try_add(effective_balance)?;
+            }
+
+            Ok(())
+        },
+    )?;
 
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(config, state)?;

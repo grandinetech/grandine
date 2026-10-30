@@ -33,12 +33,16 @@ use types::{
         },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
-    nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{
+        BlockRewards, ExecutionPayloadBody, PayloadStatus, Phase, PubkeyList, RelativeEpoch,
+        WithStatus,
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
+    storage::ProposerRewards,
     traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
@@ -46,6 +50,7 @@ use crate::{
     controller::Controller,
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
+    state_field::StateField,
     storage::{Storage, StoredBlock, StoredEnvelope},
     unbounded_sink::UnboundedSink,
     wait::Wait,
@@ -162,6 +167,136 @@ where
             status: chain_link.payload_status,
             finalized: store.is_slot_finalized(chain_link.slot()),
         })
+    }
+
+    pub fn status_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<()>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        let store = self.store_snapshot();
+
+        if let Some(chain_link) = store.chain_link_before_or_at(slot) {
+            return Ok(Some(WithStatus {
+                value: (),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        if slot < self.storage().pruned_up_to_slot()? {
+            return Ok(None);
+        }
+
+        Ok(self
+            .storage()
+            .block_root_before_or_at_slot(slot)?
+            .map(|_| WithStatus::valid_and_finalized(())))
+    }
+
+    pub fn field_at_slot_checked_blocking<F: StateField<P>>(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<F>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        let store = self.store_snapshot();
+        let state_cache = self.state_cache();
+
+        let chain_link = store.chain_link_before_or_at(slot);
+
+        if let Some(chain_link) = chain_link
+            && let Some(state) = state_cache
+                .before_or_at_slot_in_cache_only(chain_link.block_root, slot)
+                .or_else(|| chain_link.state.clone())
+        {
+            let state = state_cache.process_slots(
+                self.pubkey_cache(),
+                &store,
+                state,
+                chain_link.block_root,
+                slot,
+            )?;
+
+            return Ok(Some(WithStatus {
+                value: F::from_state(&state),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        if store.is_slot_finalized(slot)
+            && let Some(rows) = self.storage().state_rows_before_or_at(slot)?
+            && let Some(field) = F::reconstruct(slot, rows)?
+        {
+            return Ok(Some(WithStatus {
+                value: field,
+                status: chain_link
+                    .map_or(PayloadStatus::Valid, |chain_link| chain_link.payload_status),
+                finalized: true,
+            }));
+        }
+
+        Ok(self
+            .state_at_slot_blocking(slot)?
+            .map(|state| state.map(|state| F::from_state(&state))))
+    }
+
+    pub fn stored_block_rewards(&self, slot: Slot) -> Result<Option<BlockRewards>> {
+        let Some(rows) = self
+            .storage()
+            .state_rows_before_or_at(slot.saturating_sub(1))?
+        else {
+            return Ok(None);
+        };
+
+        let rewards = rows.slot_diff(slot)?.map(|slot_diff| {
+            let ProposerRewards {
+                attestations,
+                sync_aggregate,
+                proposer_slashings,
+                attester_slashings,
+            } = slot_diff.rewards();
+
+            BlockRewards {
+                total: attestations
+                    .saturating_add(sync_aggregate)
+                    .saturating_add(proposer_slashings)
+                    .saturating_add(attester_slashings),
+                attestations,
+                sync_aggregate,
+                proposer_slashings,
+                attester_slashings,
+            }
+        });
+
+        Ok(rewards)
+    }
+
+    #[must_use]
+    pub fn finalized_pubkeys(&self) -> PubkeyList {
+        self.store_snapshot()
+            .finalized_validators()
+            .pubkeys()
+            .clone()
+    }
+
+    pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {
+        let store = self.store_snapshot();
+
+        if let Some(chain_link) = store.chain_link_by_state_root(state_root) {
+            return Ok(Some(WithStatus {
+                value: chain_link.slot(),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(chain_link.slot()),
+            }));
+        }
+
+        let pruned_up_to_slot = self.storage().pruned_up_to_slot()?;
+
+        Ok(self
+            .storage()
+            .slot_by_state_root(state_root)?
+            .filter(|slot| *slot >= pruned_up_to_slot)
+            .map(|slot| WithStatus::valid(slot, store.is_slot_finalized(slot))))
     }
 
     #[must_use]
@@ -402,25 +537,16 @@ where
         self.snapshot().state_at_slot_blocking(slot)
     }
 
-    pub fn state_at_slot_cached_blocking(
+    pub fn state_at_slot_checked_blocking(
         &self,
         slot: Slot,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        let store = self.store_snapshot();
+        self.ensure_slot_reachable(slot)?;
+        self.state_at_slot_blocking(slot)
+    }
 
-        if slot < store.finalized_slot() {
-            let state_from_cache = self.state_at_slot_cache().get_or_try_init(slot, || {
-                Ok(self
-                    .state_at_slot_blocking(slot)?
-                    .map(|with_status| with_status.value))
-            })?;
-
-            if let Some(state) = state_from_cache {
-                return Ok(Some(WithStatus::valid(state, true)));
-            }
-        }
-
-        let store_epoch = store.current_epoch();
+    fn ensure_slot_reachable(&self, slot: Slot) -> Result<()> {
+        let store_epoch = self.store_snapshot().current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
         let max_allowed_epoch = store_epoch.saturating_add(P::MinSeedLookahead::U64);
 
@@ -437,7 +563,7 @@ where
             );
         }
 
-        self.state_at_slot_blocking(slot)
+        Ok(())
     }
 
     pub fn state_before_or_at_slot(
@@ -1953,12 +2079,12 @@ pub enum BlockError {
 mod tests {
     use types::{config::Config, preset::Minimal};
 
-    use crate::specialized::TestController;
+    use crate::{specialized::TestController, state_field::FinalityCheckpoints};
 
     use super::*;
 
     #[test]
-    fn test_state_at_slot_cached_allowed_epoch_boundaries() {
+    fn test_state_at_slot_checked_allowed_epoch_boundaries() {
         let config = Arc::new(Config::minimal());
         let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
             .expect("should build beacon state")
@@ -1968,34 +2094,95 @@ mod tests {
             TestController::quiet(config, genesis_block, genesis_state);
 
         controller
-            .state_at_slot_cached_blocking(0)
+            .state_at_slot_checked_blocking(0)
             .expect("should get state at slot 0");
 
         controller.on_slot(6);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(15)
+            .state_at_slot_checked_blocking(15)
             .expect("should get state at slot 15");
-        assert!(controller.state_at_slot_cached_blocking(16).is_err());
+        assert!(controller.state_at_slot_checked_blocking(16).is_err());
 
         controller.on_slot(7);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(16)
+            .state_at_slot_checked_blocking(16)
             .expect("should get state at slot 16");
         controller
-            .state_at_slot_cached_blocking(23)
+            .state_at_slot_checked_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached_blocking(24).is_err());
+        assert!(controller.state_at_slot_checked_blocking(24).is_err());
 
         controller.on_slot(8);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(23)
+            .state_at_slot_checked_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached_blocking(24).is_err());
+        assert!(controller.state_at_slot_checked_blocking(24).is_err());
+    }
+
+    #[test]
+    fn status_and_slot_by_state_root_are_read_from_the_store() -> Result<()> {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let genesis_state_root = genesis_block.message().state_root();
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        assert_eq!(
+            controller
+                .slot_by_state_root(genesis_state_root)?
+                .map(|with_status| with_status.value),
+            Some(GENESIS_SLOT),
+        );
+        assert!(
+            controller
+                .slot_by_state_root(H256::repeat_byte(1))?
+                .is_none()
+        );
+
+        assert!(controller.status_at_slot(15)?.is_some());
+        assert!(controller.status_at_slot(16).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn field_at_slot_reads_the_store_and_rejects_unreachable_slots() -> Result<()> {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let genesis_checkpoints = FinalityCheckpoints::from_state(&genesis_state);
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        assert_eq!(
+            controller
+                .field_at_slot_checked_blocking::<FinalityCheckpoints>(15)?
+                .map(|with_status| with_status.value),
+            Some(genesis_checkpoints),
+        );
+        assert!(
+            controller
+                .field_at_slot_checked_blocking::<FinalityCheckpoints>(16)
+                .is_err()
+        );
+
+        Ok(())
     }
 }

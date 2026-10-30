@@ -19,6 +19,7 @@ members = [
     'database',
     'debug_info',
     'deposit_tree',
+    'diff',
     'directories',
     'doppelganger_protection',
     'eip_2335',
@@ -443,6 +444,7 @@ strum = { version = '0.28', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
 sysinfo = '0.38'
 tap = '1'
+tabled = { version = '0.21', default-features = false, features = ['std'] }
 tempfile = '3'
 test-case = '3'
 test-generator = '0.3'
@@ -495,6 +497,7 @@ data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 debug_info = { path = 'debug_info' }
 deposit_tree = { path = 'deposit_tree' }
+diff = { path = 'diff' }
 directories = { path = 'directories' }
 doppelganger_protection = { path = 'doppelganger_protection' }
 eip_2335 = { path = 'eip_2335' }

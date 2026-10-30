@@ -19,6 +19,8 @@ pub trait SszList<T>: SszHash<PackingFactor = U1> + Send + Sync + Debug {
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
 
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a>;
+
     fn clone_boxed(&self) -> Box<dyn SszList<T>>
     where
         T: Clone + 'static;
@@ -33,6 +35,14 @@ pub trait SszListMut<T>: SszList<T> {
     where
         T: Clone;
 
+    fn extend(&mut self, elements: &[T]) -> Result<(), PushError>
+    where
+        T: Clone;
+
+    fn retain_range(&mut self, start: u64, end: u64) -> Result<(), IndexError>
+    where
+        T: Clone;
+
     fn update(&mut self, f: &mut dyn FnMut(&mut T))
     where
         T: Clone + PartialEq;
@@ -40,6 +50,14 @@ pub trait SszListMut<T>: SszList<T> {
     fn try_assign_from_iter(&mut self, iter: &mut dyn Iterator<Item = T>) -> Result<(), ReadError>;
 
     fn iter_mut<'a>(&'a mut self) -> Box<dyn ExactSizeIterator<Item = &'a mut T> + 'a>
+    where
+        T: Clone;
+
+    fn update_at(
+        &mut self,
+        indices: &[u64],
+        f: &mut dyn FnMut(u64, &mut T) -> Result<(), anyhow::Error>,
+    ) -> Result<(), anyhow::Error>
     where
         T: Clone;
 }

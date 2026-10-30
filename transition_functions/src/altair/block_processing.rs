@@ -3,9 +3,10 @@ use arithmetic::{U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
-        self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
-        get_base_reward_per_increment, get_beacon_proposer_index, get_block_root_at_slot,
-        index_of_public_key, initialize_shuffled_indices, total_active_balance,
+        self, attestation_epoch, compute_base_reward, compute_base_reward_per_increment,
+        get_attestation_participation_flags, get_base_reward_per_increment,
+        get_beacon_proposer_index, get_block_root_at_slot, index_of_public_key,
+        initialize_shuffled_indices, total_active_balance,
     },
     altair::slash_validator,
     error::SignatureKind,
@@ -342,32 +343,39 @@ pub fn apply_attestation<P: Preset>(
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
-    let attesting_indices_with_base_rewards = get_attesting_indices(state, data, aggregation_bits)?
-        .map(|validator_index| {
-            let base_reward = get_base_reward(state, validator_index, base_reward_per_increment)?;
-            Ok((validator_index, base_reward))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut attesting_indices =
+        get_attesting_indices(state, data, aggregation_bits)?.collect::<Vec<_>>();
+    attesting_indices.sort_unstable();
 
-    let epoch_participation = match attestation_epoch(state, data.target.epoch)? {
-        AttestationEpoch::Previous => state.previous_epoch_participation_mut(),
-        AttestationEpoch::Current => state.current_epoch_participation_mut(),
+    let (epoch_participation, validators) = match attestation_epoch(state, data.target.epoch)? {
+        AttestationEpoch::Previous => state.previous_epoch_participation_mut_with_validators(),
+        AttestationEpoch::Current => state.current_epoch_participation_mut_with_validators(),
     };
 
     let mut proposer_reward_numerator: Gwei = 0;
 
-    for &(validator_index, base_reward) in &attesting_indices_with_base_rewards {
-        let epoch_participation = epoch_participation.get_mut(validator_index)?;
+    epoch_participation.update_at(
+        &attesting_indices,
+        &mut |validator_index, epoch_participation| {
+            let base_reward = compute_base_reward::<P>(
+                validators.effective_balance(validator_index)?,
+                base_reward_per_increment,
+            )?;
 
-        for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
-            if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
-                proposer_reward_numerator =
-                    proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?
+            for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
+                if participation_flags.get_bit(flag_index)
+                    && !epoch_participation.get_bit(flag_index)
+                {
+                    proposer_reward_numerator =
+                        proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
+                }
             }
-        }
 
-        *epoch_participation |= participation_flags;
-    }
+            *epoch_participation |= participation_flags;
+
+            Ok(())
+        },
+    )?;
 
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(config, state)?;
@@ -382,13 +390,7 @@ pub fn apply_attestation<P: Preset>(
     increase_balance(balance(state, proposer_index)?, proposer_reward)?;
 
     slot_report.add_attestation_reward(proposer_reward);
-    slot_report.update_performance(
-        state,
-        attestation.data,
-        attesting_indices_with_base_rewards
-            .iter()
-            .map(|(validator_index, _)| *validator_index),
-    )?;
+    slot_report.update_performance(state, attestation.data, attesting_indices)?;
 
     Ok(())
 }
@@ -528,6 +530,23 @@ pub fn apply_deposits<P: Preset>(
     Ok(())
 }
 
+pub fn sync_committee_rewards<P: Preset>(total_active_balance: Gwei) -> Result<(Gwei, Gwei)> {
+    let total_active_increments = total_active_balance / P::EFFECTIVE_BALANCE_INCREMENT;
+    let total_base_rewards = compute_base_reward_per_increment::<P>(total_active_balance)?
+        .try_mul(total_active_increments)?;
+
+    let max_participant_rewards = (total_base_rewards.try_mul(SYNC_REWARD_WEIGHT)?
+        / WEIGHT_DENOMINATOR)
+        .div_typenum::<P::SlotsPerEpoch>();
+
+    let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
+    let proposer_reward = participant_reward
+        .try_mul(PROPOSER_WEIGHT.get())?
+        .try_div(WEIGHT_DENOMINATOR.get().try_sub(PROPOSER_WEIGHT.get())?)?;
+
+    Ok((participant_reward, proposer_reward))
+}
+
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_sync_aggregate<P: Preset>(
     config: &Config,
@@ -541,18 +560,8 @@ pub fn process_sync_aggregate<P: Preset>(
     verify_sync_aggregate_signature(config, pubkey_cache, state, sync_aggregate, verifier)?;
 
     // > Compute participant and proposer rewards
-    let total_active_increments = total_active_balance(state) / P::EFFECTIVE_BALANCE_INCREMENT;
-    let total_base_rewards =
-        get_base_reward_per_increment(state)?.try_mul(total_active_increments)?;
-
-    let max_participant_rewards = (total_base_rewards.try_mul(SYNC_REWARD_WEIGHT)?
-        / WEIGHT_DENOMINATOR)
-        .div_typenum::<P::SlotsPerEpoch>();
-
-    let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
-    let proposer_reward = participant_reward
-        .try_mul(PROPOSER_WEIGHT.get())?
-        .try_div(WEIGHT_DENOMINATOR.get().try_sub(PROPOSER_WEIGHT.get())?)?;
+    let (participant_reward, proposer_reward) =
+        sync_committee_rewards::<P>(total_active_balance(state))?;
 
     // > Apply participant and proposer rewards
     let proposer_index = get_beacon_proposer_index(config, state)?;
