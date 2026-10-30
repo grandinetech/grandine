@@ -4,8 +4,8 @@ use anyhow::Result;
 use derive_more::Constructor;
 use either::Either;
 use execution_engine::{
-    EngineGetBlobsParams, ExecutionEngine, ExecutionServiceMessage, PayloadAttributes, PayloadId,
-    PayloadStatusV1,
+    EngineGetBlobsParams, ExecutionEngine, ExecutionServiceMessage, PayloadAttributes,
+    PayloadStatusV1, PreparedPayloadId,
 };
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use logging::{info_with_peers, warn_with_peers};
@@ -61,7 +61,7 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        sender: Option<Sender<Option<PayloadId>>>,
+        sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
         ExecutionServiceMessage::NotifyForkchoiceUpdated {
             head_eth1_block_hash,
@@ -153,7 +153,7 @@ impl<P: Preset> Eth1ExecutionEngine<P> {
 
     pub async fn get_execution_payload(
         &self,
-        payload_id: PayloadId,
+        payload_id: PreparedPayloadId,
     ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         self.eth1_api.get_payload::<P>(payload_id).await
     }

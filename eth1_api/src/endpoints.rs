@@ -16,6 +16,7 @@ pub type ClientVersions = Vec<ClientVersionV1>;
 #[derive(Debug)]
 #[expect(clippy::partial_pub_fields)]
 pub struct Endpoint {
+    pub index: usize,
     is_online: AtomicBool,
     pub is_fallback: bool,
     pub url: RedactingUrl,
@@ -50,7 +51,7 @@ impl Endpoint {
 }
 
 pub struct Endpoints {
-    endpoints: Vec<Endpoint>,
+    endpoints: Vec<Arc<Endpoint>>,
 }
 
 impl Endpoints {
@@ -58,16 +59,27 @@ impl Endpoints {
         let endpoints = urls
             .into_iter()
             .enumerate()
-            .map(|(index, url)| Endpoint {
-                is_online: AtomicBool::new(true),
-                is_fallback: index > 0,
-                url,
-                capabilities: ArcSwap::from_pointee(HashSet::default()),
-                client_versions: ArcSwap::from_pointee(vec![]),
+            .map(|(index, url)| {
+                Arc::new(Endpoint {
+                    index,
+                    is_online: AtomicBool::new(true),
+                    is_fallback: index > 0,
+                    url,
+                    capabilities: ArcSwap::from_pointee(HashSet::default()),
+                    client_versions: ArcSwap::from_pointee(vec![]),
+                })
             })
             .collect();
 
         Self { endpoints }
+    }
+
+    pub fn shared(&self) -> impl Iterator<Item = Arc<Endpoint>> {
+        self.endpoints.iter().cloned()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Endpoint> {
+        self.endpoints.get(index).map(Arc::as_ref)
     }
 
     pub const fn is_empty(&self) -> bool {
@@ -79,7 +91,9 @@ impl Endpoints {
     }
 
     pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
-        self.endpoints.iter().map(Endpoint::get_client_versions)
+        self.endpoints
+            .iter()
+            .map(|endpoint| endpoint.get_client_versions())
     }
 
     pub fn endpoints_for_request(
@@ -88,6 +102,7 @@ impl Endpoints {
     ) -> impl Iterator<Item = &Endpoint> {
         self.endpoints
             .iter()
+            .map(Arc::as_ref)
             .filter(|endpoint| {
                 capability
                     .map(|capability| endpoint.capabilities.load().contains(capability))

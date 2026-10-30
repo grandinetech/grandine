@@ -10,7 +10,7 @@ use execution_engine::{
     EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
     ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
     ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1, PreparedPayloadId,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -671,7 +671,10 @@ impl Eth1Api {
 
         Ok(ForkChoiceUpdatedResponse {
             payload_status,
-            payload_id,
+            payload_id: payload_id.map(|payload_id| PreparedPayloadId {
+                payload_id,
+                endpoint: None,
+            }),
         })
     }
 
@@ -688,9 +691,13 @@ impl Eth1Api {
     /// [`engine_getPayloadV6`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_getpayloadv6
     pub async fn get_payload<P: Preset>(
         &self,
-        payload_id: PayloadId,
+        payload_id: PreparedPayloadId,
     ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
-        let result: WithBlobsAndMev<ExecutionPayload<P>, P> = match payload_id {
+        ensure!(
+            payload_id.endpoint.is_none(),
+            "HTTP payload ID passed to embedded EL"
+        );
+        let result: WithBlobsAndMev<ExecutionPayload<P>, P> = match payload_id.payload_id {
             PayloadId::Bellatrix(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
