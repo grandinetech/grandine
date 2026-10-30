@@ -670,7 +670,7 @@ impl SlashingProtector {
         let rows_changed = transaction.execute(
             "WITH
                 validator AS (SELECT id FROM validators WHERE pubkey = ?1),
-                matching AS (SELECT signing_root FROM attestation_proposals, validator WHERE validator_id = validator.id AND
+                matching AS (SELECT source_epoch, target_epoch, signing_root FROM attestation_proposals, validator WHERE validator_id = validator.id AND
                     (target_epoch = ?3
                         OR (source_epoch < ?2 AND target_epoch > ?3)
                         OR (source_epoch > ?2 AND target_epoch < ?3)
@@ -679,8 +679,12 @@ impl SlashingProtector {
                 SELECT id, ?2, ?3, ?4 FROM validator
             WHERE (
                 SELECT CASE
-                    WHEN (SELECT matching.signing_root IS NULL AND ?4 IS NOT NULL from matching) THEN 1
-                    WHEN (SELECT matching.signing_root IS NOT NULL AND matching.signing_root != ?4 from matching) THEN 1
+                    -- Check every conflicting row, not just the first one.
+                    -- Only an exact repeat with a known, equal signing root is safe.
+                    WHEN EXISTS (SELECT 1 FROM matching WHERE
+                        signing_root IS NULL OR ?4 IS NULL OR signing_root != ?4
+                            OR source_epoch != ?2 OR target_epoch != ?3
+                    ) THEN 1
                     WHEN ?2 < (SELECT MIN(source_epoch) FROM attestation_proposals, validator WHERE validator_id = validator.id) THEN 2
                     WHEN ?3 < (SELECT MIN(target_epoch) FROM attestation_proposals, validator WHERE validator_id = validator.id) THEN 3
                     ELSE 0
@@ -1210,6 +1214,46 @@ mod tests {
         )?;
 
         assert_eq!(outcome, SlashingValidationOutcome::Accept);
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_slashing_protector)]
+    #[test_case(build_in_memory_slashing_protector)]
+    fn test_slashing_protection_surround_vote_after_import(constructor: Constructor) -> Result<()> {
+        let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
+
+        slashing_protector.register_validators(core::iter::once(PUBKEY))?;
+
+        let outer = Attestation {
+            source_epoch: 3,
+            target_epoch: 6,
+            signing_root: Some(ATTESTATION_SIGNING_ROOT),
+        };
+
+        let outcome = slashing_protector
+            .validate_and_store_attestations([(outer, PUBKEY)])?
+            .remove(0)?;
+        assert_eq!(outcome, SlashingValidationOutcome::Accept);
+
+        let report = slashing_protector.import(InterchangeFormat::new(
+            H256::default(),
+            vec![InterchangeData {
+                pubkey: PUBKEY,
+                signed_blocks: vec![],
+                signed_attestations: vec![InterchangeAttestation {
+                    source_epoch: 4,
+                    target_epoch: 5,
+                    signing_root: Some(H256::repeat_byte(0xab)),
+                }],
+            }],
+        ))?;
+        assert_eq!(report.attestations.succeeded.len(), 1);
+
+        let outcome = slashing_protector
+            .validate_and_store_attestations([(outer, PUBKEY)])?
+            .remove(0)?;
+        assert_ne!(outcome, SlashingValidationOutcome::Accept);
 
         Ok(())
     }
