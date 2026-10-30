@@ -1271,6 +1271,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         },
                     })),
                     Phase::Gloas => {
+                        let snapshot = self.producer_context.controller.snapshot();
                         let parent_block = self.producer_context.controller.head_block();
 
                         // TODO(gloas): payload attestations are valid only for one slot after block.
@@ -1284,6 +1285,22 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         };
 
                         info_with_peers!("block producer prepared payload attestations");
+
+                        let parent_execution_requests = if snapshot.should_build_on_full(slot) {
+                            // TODO(gloas): the block root needs to be checked if it is gloas or not.
+                            // the current behavior erroneously returns empty execution requests
+                            // when payload envelope is not found, though block may be from gloas
+                            // phase and envelope is missing (so it should error out).
+                            snapshot
+                                .cached_execution_payload_envelope_by_root(parent_root)
+                                .ok_or_else(|| anyhow!("no cached payload envelope"))
+                                .map(|payload| payload.message.execution_requests.clone())
+                                .unwrap_or_default()
+                        } else {
+                            GloasExecutionRequests::default()
+                        };
+
+                        info_with_peers!("block producer prepared parent execution requests");
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
@@ -1303,7 +1320,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 bls_to_execution_changes: bls_to_execution_changes.into(),
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
-                                parent_execution_requests: GloasExecutionRequests::default(),
+                                parent_execution_requests,
                             },
                         }))
                     }
@@ -2883,7 +2900,17 @@ fn prepare_gloas_scoring_state<P: Preset>(
         GloasExecutionRequests::default()
     };
     let mut scoring_state = state.clone();
-    gloas::process_parent_execution_payload(config, pubkey_cache, &mut scoring_state, block)?;
+    gloas::process_parent_execution_payload(
+        config,
+        pubkey_cache,
+        &mut scoring_state,
+        block
+            .body
+            .signed_execution_payload_bid
+            .message
+            .parent_block_hash,
+        &block.body.parent_execution_requests,
+    )?;
     Ok(scoring_state)
 }
 
@@ -3187,7 +3214,8 @@ mod gloas_scoring_tests {
 
         assert!(!Feature::TrustOwnBlockSignatures.is_enabled());
         let config = Arc::new(config.start_and_stay_in(Phase::Gloas));
-        let anchor_slot = 2 * P::SlotsPerEpoch::U64;
+        let anchor_slot = P::SlotsPerEpoch::U64;
+        let first_attestation_slot = 2 * P::SlotsPerEpoch::U64;
         let proposal_slot = 3 * P::SlotsPerEpoch::U64 - 2;
         let pubkeys = Arc::new(PubkeyCache::default());
         let keys = (1_u64..=validator_count as u64)
@@ -3261,6 +3289,8 @@ mod gloas_scoring_tests {
             database::Database::in_memory(),
             fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             Default::default(),
+            true,
+            fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,
         ));
         let (controller, _mutator) = fork_choice_control::Controller::<P, _, _, WaitGroup>::new(
             config.clone_arc(),
@@ -3307,7 +3337,6 @@ mod gloas_scoring_tests {
         let sync_pool = SyncCommitteeAggPool::new(
             executor.clone_arc(),
             controller.clone_arc(),
-            None,
             pool_tx.clone(),
             None,
             None,
@@ -3319,8 +3348,9 @@ mod gloas_scoring_tests {
             PayloadAttestationAggPool::new(controller.clone_arc(), executor.clone_arc(), None);
         let configs = Arc::new(ProposerConfigs::new(
             Default::default(),
-            30_000_000,
+            Some(30_000_000),
             H256::zero(),
+            keymanager::BuilderSettings::default(),
             Arc::new(keymanager::ValidatorDefinitionsWithStorage::new(
                 Arc::default(),
                 Default::default(),
@@ -3329,6 +3359,12 @@ mod gloas_scoring_tests {
         let producer = BlockProducer::new(
             configs,
             None,
+            Arc::new(PayloadBuilderApi::new(
+                config.clone_arc(),
+                reqwest::Client::new(),
+                builder_api::BuilderApiFormat::default(),
+                None,
+            )),
             controller.clone_arc(),
             executor.clone_arc(),
             engine,
@@ -3342,7 +3378,7 @@ mod gloas_scoring_tests {
         let proposal_state = controller.preprocessed_state_at_current_slot_blocking()?;
         let before = proposal_state.hash_tree_root();
         let data = AttestationData {
-            slot: anchor_slot + 1,
+            slot: first_attestation_slot + 1,
             index: 0,
             beacon_block_root: root,
             source: proposal_state.current_justified_checkpoint(),
@@ -3355,7 +3391,7 @@ mod gloas_scoring_tests {
             &proposal_state,
             types::nonstandard::RelativeEpoch::Current,
         )?;
-        for attestation_slot in anchor_slot..proposal_slot {
+        for attestation_slot in first_attestation_slot..proposal_slot {
             let data = AttestationData {
                 slot: attestation_slot,
                 ..data
@@ -3392,7 +3428,7 @@ mod gloas_scoring_tests {
             }
         }
         tokio::task::spawn_blocking(move || wait.wait()).await?;
-        let candidate_count = (proposal_slot - anchor_slot) * committees;
+        let candidate_count = (proposal_slot - first_attestation_slot) * committees;
         assert_eq!(
             pool.aggregate_attestations_by_epoch(2).await.len(),
             usize::try_from(candidate_count)?
@@ -3449,6 +3485,7 @@ mod gloas_scoring_tests {
                 Some(tokio::spawn(async move {
                     Some(WithClientVersions::none(response))
                 })),
+                None,
             )
             .await?
             .expect("self-built block must process successfully");
@@ -3474,7 +3511,8 @@ mod gloas_scoring_tests {
         }
         assert_eq!(
             block.body.attestations.len(),
-            usize::try_from(proposal_slot - anchor_slot)?.min(P::MaxAttestationsElectra::USIZE)
+            usize::try_from(proposal_slot - first_attestation_slot)?
+                .min(P::MaxAttestationsElectra::USIZE)
         );
         assert!(
             block
@@ -3577,16 +3615,16 @@ mod gloas_scoring_tests {
             },
         );
         controller.wait_for_tasks();
-        controller.on_slot(33);
+        controller.on_slot(25);
         controller.wait_for_tasks();
         let proposal_state = controller.preprocessed_state_at_next_slot_blocking()?;
-        assert!(controller.snapshot().should_build_on_full(34));
+        assert!(controller.snapshot().should_build_on_full(26));
         let proposer = accessors::get_beacon_proposer_index(&config, &proposal_state)?;
-        let preferences = types::gloas::containers::ProposerPreferences {
+        let preferences = ProposerPreferences {
             dependent_root: controller
-                .shuffling_dependent_root(built_root, 4)
+                .shuffling_dependent_root(built_root, 3)
                 .expect("known shuffling root"),
-            proposal_slot: 34,
+            proposal_slot: 26,
             validator_index: proposer,
             fee_recipient: Default::default(),
             target_gas_limit: 30_000_000,
@@ -3603,16 +3641,16 @@ mod gloas_scoring_tests {
         );
         assert_eq!(rx.await??, types::nonstandard::ValidationOutcome::Accept);
         controller.wait_for_tasks();
-        controller.on_slot(34);
+        controller.on_slot(26);
         controller.wait_for_tasks();
         let bid = ExecutionPayloadBid::<P> {
             parent_block_hash: H256::repeat_byte(3),
             parent_block_root: built_root,
             block_hash: H256::repeat_byte(4),
-            prev_randao: accessors::get_randao_mix(&proposal_state, 4),
+            prev_randao: accessors::get_randao_mix(&proposal_state, 3),
             gas_limit: 30_000_000,
             builder_index: 0,
-            slot: 34,
+            slot: 26,
             value: 1,
             execution_requests_root: GloasExecutionRequests::<P>::default().hash_tree_root(),
             ..Default::default()
@@ -3631,16 +3669,22 @@ mod gloas_scoring_tests {
         );
         // Bid validation replies before publishing the store snapshot and has no
         // WaitGroup token. A subsequent tick provides a mutator-queue barrier.
-        controller.on_slot(34);
+        controller.on_slot(26);
         controller.wait_for_tasks();
-        assert!(controller.get_payload_bid_from(34, 0).is_some());
+        assert!(
+            controller
+                .snapshot()
+                .accepted_payload_bids_at_slot(26)
+                .iter()
+                .any(|bid| bid.message.builder_index == 0)
+        );
         let data = AttestationData {
-            slot: 33,
+            slot: 25,
             index: 1,
             beacon_block_root: built_root,
             source: proposal_state.current_justified_checkpoint(),
             target: types::phase0::containers::Checkpoint {
-                epoch: 4,
+                epoch: 3,
                 root: built_root,
             },
         };
@@ -3653,7 +3697,7 @@ mod gloas_scoring_tests {
                 ..data
             };
             for committee_index in 0..2 {
-                let committee = accessors::beacon_committee(&proposal_state, 33, committee_index)?;
+                let committee = accessors::beacon_committee(&proposal_state, 25, committee_index)?;
                 let mut signature = AggregateSignature::default();
                 for index in committee {
                     signature.aggregate_in_place(data.sign(
@@ -3693,11 +3737,11 @@ mod gloas_scoring_tests {
                 ..Default::default()
             },
         );
-        let randao = helper_functions::signing::RandaoEpoch::from(4)
+        let randao = helper_functions::signing::RandaoEpoch::from(3)
             .sign(&config, &proposal_state, &keys[usize::try_from(proposer)?])
             .into();
         let result = context
-            .build_blinded_beacon_block(randao, None, None)
+            .build_blinded_beacon_block(randao, None, None, None)
             .await?
             .expect("external builder proposal must process");
         let ValidatorBlindedBlock::BeaconBlock(BeaconBlock::Gloas(block)) = result.0.value else {
@@ -3730,6 +3774,7 @@ mod gloas_scoring_tests {
             slot: 102,
             ..Default::default()
         };
+        state.latest_block_header.slot = 100;
         state.latest_execution_payload_bid.slot = 100;
         state.latest_execution_payload_bid.block_hash = H256::repeat_byte(2);
         state.latest_execution_payload_bid.execution_requests_root =

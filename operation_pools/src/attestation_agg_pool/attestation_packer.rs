@@ -527,6 +527,7 @@ mod gloas_payload_context_tests {
             slot: 102,
             ..GloasBeaconState::default()
         };
+        state.latest_block_header.slot = 100;
         state.latest_execution_payload_bid.slot = 100;
         state.latest_execution_payload_bid.block_hash = H256::repeat_byte(2);
         *state.block_roots.mod_index_mut(100) = parent_root;
@@ -927,6 +928,7 @@ mod gloas_payload_context_tests {
                 .builder_index = BUILDER_INDEX_SELF_BUILD;
             block.body.signed_execution_payload_bid.signature = bls::SignatureBytes::empty();
             block.body.signed_execution_payload_bid.message.slot = 102;
+            block.body.signed_execution_payload_bid.message.block_hash = H256::repeat_byte(4);
             block
                 .body
                 .signed_execution_payload_bid
@@ -947,7 +949,12 @@ mod gloas_payload_context_tests {
                 &Config::minimal(),
                 &PubkeyCache::default(),
                 &mut scoring_state,
-                &block,
+                block
+                    .body
+                    .signed_execution_payload_bid
+                    .message
+                    .parent_block_hash,
+                &block.body.parent_execution_requests,
             )?;
             let packer = packer(scoring_state)?;
             if builder {
