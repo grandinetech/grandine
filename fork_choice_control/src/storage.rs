@@ -27,7 +27,9 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{SignedBlindedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope},
+    gloas::containers::{
+        ExecutionRequests, SignedBlindedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{
         BlobSidecarWithId, DataColumnSidecarWithId, ExecutionPayloadBody, FinalizedCheckpoint,
         Phase, PubkeyList, StorageMode,
@@ -1495,6 +1497,16 @@ pub enum StoredBlock<P: Preset> {
 pub enum StoredEnvelope<P: Preset> {
     Full(Arc<SignedExecutionPayloadEnvelope<P>>),
     Blinded(Arc<SignedBlindedExecutionPayloadEnvelope<P>>),
+}
+
+impl<P: Preset> StoredEnvelope<P> {
+    #[must_use]
+    pub fn execution_requests(&self) -> &ExecutionRequests<P> {
+        match self {
+            Self::Full(envelope) => &envelope.message.execution_requests,
+            Self::Blinded(envelope) => &envelope.message.execution_requests,
+        }
+    }
 }
 
 impl<P: Preset> StoredBlock<P> {
