@@ -951,6 +951,46 @@ impl Config {
             }
         }
 
+        // The clock splits slots into intervals at these due points.
+        // Out-of-order due points would make intervals overlap and the clock drift.
+        let pre_gloas_due_bps = [self.attestation_due_bps, self.aggregate_due_bps];
+
+        let gloas_due_bps = [
+            self.attestation_due_bps_gloas,
+            self.aggregate_due_bps_gloas,
+            self.payload_attestation_due_bps,
+        ];
+
+        for due_bps in [pre_gloas_due_bps.as_slice(), gloas_due_bps.as_slice()] {
+            let in_order = core::iter::once(&0)
+                .chain(due_bps)
+                .chain(core::iter::once(&BASIS_POINTS))
+                .tuple_windows()
+                .all(|(earlier, later)| earlier <= later);
+
+            if !in_order {
+                return Err(Error::DueBpsOutOfOrder);
+            }
+        }
+
+        // Contributions aggregate this slot's sync committee messages.
+        // They cannot be due before the messages.
+        let sync_committee_due_bps = [
+            (self.sync_message_due_bps, self.contribution_due_bps),
+            (
+                self.sync_message_due_bps_gloas,
+                self.contribution_due_bps_gloas,
+            ),
+        ];
+
+        for (sync_message_due_bps, contribution_due_bps) in sync_committee_due_bps {
+            if !(sync_message_due_bps <= contribution_due_bps
+                && contribution_due_bps <= BASIS_POINTS)
+            {
+                return Err(Error::SyncCommitteeDueBpsOutOfOrder);
+            }
+        }
+
         Ok(())
     }
 
@@ -1037,15 +1077,16 @@ impl Config {
     /// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.0/specs/phase0/fork-choice.md#get_slot_component_duration_ms>
     #[must_use]
     pub fn slot_component_duration(&self, bps: u64) -> Duration {
-        let nanos = self
+        // Rounds down to whole milliseconds, like the spec.
+        let millis = self
             .slot_duration_ms
-            .as_nanos()
+            .as_millis()
             .saturating_mul(bps.into())
             .checked_div(BASIS_POINTS.into())
-            .and_then(|nanos| nanos.try_into().ok())
+            .and_then(|millis| millis.try_into().ok())
             .unwrap_or(u64::MAX);
 
-        Duration::from_nanos(nanos)
+        Duration::from_millis(millis)
     }
 
     #[inline]
@@ -1373,6 +1414,10 @@ pub enum Error {
     NameContainsIllegalCharacters,
     #[error("blob schedule is not defined")]
     BlobScheduleUndefined,
+    #[error("interval due points are not in order between 0 and BASIS_POINTS")]
+    DueBpsOutOfOrder,
+    #[error("sync committee message due point is after the contribution due point or the slot end")]
+    SyncCommitteeDueBpsOutOfOrder,
 }
 
 #[expect(
@@ -1404,6 +1449,24 @@ mod tests {
     #[test_case(Config::holesky_devnet())]
     fn config_is_valid(config: Config) -> Result<(), Error> {
         config.validate()
+    }
+
+    #[test_case(Config { attestation_due_bps: 7000, ..Config::mainnet() };        "attestation after aggregate")]
+    #[test_case(Config { aggregate_due_bps: 12_000, ..Config::mainnet() };        "aggregate after slot end")]
+    #[test_case(Config { aggregate_due_bps_gloas: 8000, ..Config::mainnet() };    "aggregate after payload attestation")]
+    #[test_case(Config { payload_attestation_due_bps: 12_000, ..Config::mainnet() }; "payload attestation after slot end")]
+    fn config_with_due_bps_out_of_order_is_invalid(config: Config) {
+        assert!(matches!(config.validate(), Err(Error::DueBpsOutOfOrder)));
+    }
+
+    #[test_case(Config { sync_message_due_bps: 7000, ..Config::mainnet() };           "sync message after contribution")]
+    #[test_case(Config { contribution_due_bps_gloas: 12_000, ..Config::mainnet() };   "contribution after slot end")]
+    #[test_case(Config { sync_message_due_bps_gloas: 6000, ..Config::mainnet() };     "sync message after contribution post-Gloas")]
+    fn config_with_sync_committee_due_bps_out_of_order_is_invalid(config: Config) {
+        assert!(matches!(
+            config.validate(),
+            Err(Error::SyncCommitteeDueBpsOutOfOrder),
+        ));
     }
 
     #[test_case(Config::mainnet())]
@@ -1568,8 +1631,9 @@ mod tests {
 
     // A custom config's slot duration or bps saturates the duration rather than panicking.
     #[test_case(Duration::from_secs(12), 2_500 => Duration::from_secs(3))]
-    #[test_case(Duration::MAX, BASIS_POINTS => Duration::from_nanos(u64::MAX))]
-    #[test_case(Duration::from_secs(12), u64::MAX => Duration::from_nanos(u64::MAX))]
+    #[test_case(Duration::from_secs(12), 3_333 => Duration::from_millis(3_999); "rounds down to whole milliseconds")]
+    #[test_case(Duration::MAX, BASIS_POINTS => Duration::from_millis(u64::MAX))]
+    #[test_case(Duration::from_secs(12), u64::MAX => Duration::from_millis(u64::MAX))]
     fn slot_component_duration_scales_and_saturates(
         slot_duration_ms: Duration,
         bps: u64,

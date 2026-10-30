@@ -104,7 +104,7 @@ use crate::{
     local_beacon_node::{
         BlindedBlockNotPublished, LocalBeaconNode, LocalContext, proposer_dependent_epoch,
     },
-    messages::{ApiToValidator, InternalMessage},
+    messages::{ApiToValidator, InternalMessage, SyncCommitteeDuty},
     misc::{Aggregator, Chain, ChainSource, LocalChain, OwnDuties, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_proposer_duties::OwnProposerDuties,
@@ -413,6 +413,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 message = self.internal_rx.select_next_some() => match message {
                     InternalMessage::Head { node, slot, block_root } => {
                         self.attest_remote_head(node, slot, block_root).await;
+                    }
+                    InternalMessage::SyncCommitteeDue { slot, duty } => {
+                        if let Err(error) = self.perform_sync_committee_duty(slot, duty).await {
+                            error_with_peers!(
+                                "failed to perform sync committee duty {duty:?} in slot {slot}: \
+                                 {error:?}",
+                            );
+                        }
                     }
                     InternalMessage::FinalizedCheckpoint(finalized_epoch) => {
                         self.spawn_own_validator_index_resolution(
@@ -962,30 +970,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let beacon_nodes = if no_validators {
             None
         } else {
-            match &self.chain_source.chain {
-                Chain::Local(_) => match self.slot_head(slot).await? {
-                    Ok((slot_head, beacon_state)) => {
-                        Some(self.local_beacon_node(slot_head, beacon_state, &wait_group)?)
-                    }
-                    Err(head_far_behind) => {
-                        warn_with_peers!("{head_far_behind}");
-                        None
-                    }
-                },
-                Chain::Remote(remote_beacon_nodes) => {
-                    let nodes = self.remote_nodes_at(remote_beacon_nodes, slot);
-                    let slot_head = nodes.slot_head::<P>(slot);
-
-                    if slot_head.is_none() {
-                        warn_with_peers!(
-                            "no beacon node given with --beacon-node-urls reported a head recent \
-                             enough to perform duties for slot {slot}",
-                        );
-                    }
-
-                    slot_head.map(|slot_head| BeaconNodes::Remote { nodes, slot_head })
-                }
-            }
+            self.beacon_nodes_at(slot, &wait_group).await?
         };
 
         if let Err(error) = self
@@ -1018,6 +1003,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let Some(beacon_nodes) = beacon_nodes else {
             return Ok(());
         };
+
+        self.schedule_sync_committee_duties(tick, &wait_group);
 
         // Late in the slot every node has ticked into the epoch and seen the slot's attestations.
         if tick.kind == TickKind::Aggregate
@@ -1126,7 +1113,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         );
                     }
 
-                    if let Err(error) = self.publish_sync_committee_messages(&beacon_nodes).await {
+                    if self.sync_committee_duty_starts_at(tick, SyncCommitteeDuty::Messages)
+                        && let Err(error) =
+                            self.publish_sync_committee_messages(&beacon_nodes).await
+                    {
                         error_with_peers!(
                             "failed to produce and publish own sync_committee messages: {error:?}"
                         );
@@ -1150,11 +1140,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 {
                     Some(beacon_nodes) => {
                         self.publish_aggregates_and_proofs(&beacon_nodes).await;
-                        self.publish_contributions_and_proofs(&beacon_nodes).await;
+
+                        if self
+                            .sync_committee_duty_starts_at(tick, SyncCommitteeDuty::Contributions)
+                        {
+                            self.publish_messages_then_contributions(&beacon_nodes)
+                                .await;
+                        }
                     }
                     // The messages were signed for a head that was validated, and contributions
                     // aggregate those rather than vote for the head of this tick.
-                    None if self.published_own_sync_committee_messages_for.is_some() => {
+                    None if self.published_own_sync_committee_messages_for.is_some()
+                        && self.sync_committee_duty_starts_at(
+                            tick,
+                            SyncCommitteeDuty::Contributions,
+                        ) =>
+                    {
                         self.publish_contributions_and_proofs(&beacon_nodes).await;
                     }
                     None => {}
@@ -1981,6 +1982,180 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             warn_with_peers!("failed to publish aggregates and proofs: {error:?}");
         }
+    }
+
+    async fn beacon_nodes_at(
+        &self,
+        slot: Slot,
+        wait_group: &W,
+    ) -> Result<Option<BeaconNodes<P, W>>> {
+        let beacon_nodes = match &self.chain_source.chain {
+            Chain::Local(_) => match self.slot_head(slot).await? {
+                Ok((slot_head, beacon_state)) => {
+                    Some(self.local_beacon_node(slot_head, beacon_state, wait_group)?)
+                }
+                Err(head_far_behind) => {
+                    warn_with_peers!("{head_far_behind}");
+                    None
+                }
+            },
+            Chain::Remote(remote_beacon_nodes) => {
+                let nodes = self.remote_nodes_at(remote_beacon_nodes, slot);
+                let slot_head = nodes.slot_head::<P>(slot);
+
+                if slot_head.is_none() {
+                    warn_with_peers!(
+                        "no beacon node given with --beacon-node-urls reported a head recent \
+                         enough to perform duties for slot {slot}",
+                    );
+                }
+
+                slot_head.map(|slot_head| BeaconNodes::Remote { nodes, slot_head })
+            }
+        };
+
+        Ok(beacon_nodes)
+    }
+
+    fn sync_committee_due_bps(&self, slot: Slot, duty: SyncCommitteeDuty) -> u64 {
+        let config = &self.chain_source.chain_config;
+        let phase = config.phase_at_slot::<P>(slot);
+
+        match duty {
+            SyncCommitteeDuty::Messages => config.sync_message_due_bps_at(phase),
+            SyncCommitteeDuty::Contributions => config.contribution_due_bps_at(phase),
+        }
+    }
+
+    // Whether the duty runs on the `Attest` or `Aggregate` tick itself.
+    // It does when its due point is that tick's start, as on every predefined network.
+    fn sync_committee_duty_starts_at(&self, tick: Tick, duty: SyncCommitteeDuty) -> bool {
+        let interval_kind = match duty {
+            SyncCommitteeDuty::Messages => TickKind::Attest,
+            SyncCommitteeDuty::Contributions => TickKind::Aggregate,
+        };
+
+        let interval_tick = Tick {
+            slot: tick.slot,
+            kind: interval_kind,
+        };
+
+        tick == interval_tick
+            && interval_tick.starts_at_due_bps::<P>(
+                &self.chain_source.chain_config,
+                self.sync_committee_due_bps(tick.slot, duty),
+            )
+    }
+
+    // Other due points fall inside some emitted tick.
+    // That tick sets a timer, and the duty runs when it fires.
+    fn schedule_sync_committee_duties(&self, tick: Tick, wait_group: &W) {
+        let config = &self.chain_source.chain_config;
+
+        for duty in [
+            SyncCommitteeDuty::Messages,
+            SyncCommitteeDuty::Contributions,
+        ] {
+            let due_bps = self.sync_committee_due_bps(tick.slot, duty);
+
+            let runs_on_interval_tick =
+                [TickKind::Attest, TickKind::Aggregate]
+                    .into_iter()
+                    .any(|kind| {
+                        self.sync_committee_duty_starts_at(
+                            Tick {
+                                slot: tick.slot,
+                                kind,
+                            },
+                            duty,
+                        )
+                    });
+
+            if runs_on_interval_tick || !tick.spans_due_bps::<P>(config, due_bps) {
+                continue;
+            }
+
+            let delay = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|now| {
+                    clock::duration_until_due_bps(
+                        config,
+                        self.chain_source.genesis_time,
+                        tick.slot,
+                        due_bps,
+                        now,
+                    )
+                })
+                .unwrap_or_default();
+
+            let internal_tx = self.internal_tx.clone();
+            let wait_group = wait_group.clone();
+            let slot = tick.slot;
+
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                InternalMessage::SyncCommitteeDue { slot, duty }.send(&internal_tx);
+                drop(wait_group);
+            });
+        }
+    }
+
+    async fn perform_sync_committee_duty(
+        &mut self,
+        slot: Slot,
+        duty: SyncCommitteeDuty,
+    ) -> Result<()> {
+        // A timer from a slot that has already ended.
+        let Some(tick) = self.last_tick.filter(|tick| tick.slot == slot) else {
+            return Ok(());
+        };
+
+        let wait_group = W::default();
+
+        let Some(beacon_nodes) = self.beacon_nodes_at(slot, &wait_group).await? else {
+            return Ok(());
+        };
+
+        let validated_beacon_nodes = self
+            .wait_for_fully_validated_head(
+                beacon_nodes.clone(),
+                &wait_group,
+                tick,
+                HeadDuty::Attest,
+            )
+            .await;
+
+        match (duty, validated_beacon_nodes) {
+            (SyncCommitteeDuty::Messages, Some(beacon_nodes)) => {
+                self.publish_sync_committee_messages(&beacon_nodes).await?;
+            }
+            (SyncCommitteeDuty::Contributions, Some(beacon_nodes)) => {
+                self.publish_messages_then_contributions(&beacon_nodes)
+                    .await;
+            }
+            // As on the `Aggregate` tick, contributions aggregate messages already signed.
+            (SyncCommitteeDuty::Contributions, None)
+                if self.published_own_sync_committee_messages_for.is_some() =>
+            {
+                self.publish_contributions_and_proofs(&beacon_nodes).await;
+            }
+            (_, None) => {}
+        }
+
+        Ok(())
+    }
+
+    // Contributions aggregate this slot's own messages.
+    // With equal due points the messages may not have run yet, so run them first.
+    // They are published at most once per slot.
+    async fn publish_messages_then_contributions(&mut self, beacon_nodes: &BeaconNodes<P, W>) {
+        if let Err(error) = self.publish_sync_committee_messages(beacon_nodes).await {
+            error_with_peers!(
+                "failed to produce and publish own sync_committee messages: {error:?}"
+            );
+        }
+
+        self.publish_contributions_and_proofs(beacon_nodes).await;
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-message>

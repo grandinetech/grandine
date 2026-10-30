@@ -68,7 +68,7 @@ use types::{
     config::Config,
     nonstandard::Phase,
     phase0::{
-        consts::GENESIS_SLOT,
+        consts::{BASIS_POINTS, GENESIS_SLOT},
         primitives::{Epoch, Slot, UnixSeconds},
     },
     preset::Preset,
@@ -226,6 +226,11 @@ impl Tick {
         )
     }
 
+    // Only these ticks reach the application.
+    const fn is_emitted(self) -> bool {
+        self.is_start_of_interval() || self.is_end_of_interval()
+    }
+
     pub fn delay<P: Preset>(self, config: &Config, genesis_time: UnixSeconds) -> Result<Duration> {
         let duration_since_unix_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         let unix_epoch_to_genesis = Duration::from_secs(genesis_time);
@@ -233,14 +238,12 @@ impl Tick {
         let duration_since_genesis =
             duration_since_unix_epoch.saturating_sub(unix_epoch_to_genesis);
 
-        let Self { slot, kind } = self;
         let slot_duration = config.slot_duration_ms;
-        let tick_duration = tick_duration_at_slot::<P>(config, slot);
 
         let duration_before_slot =
-            slot_duration.saturating_mul(slot.saturating_sub(GENESIS_SLOT).try_into()?);
+            slot_duration.saturating_mul(self.slot.saturating_sub(GENESIS_SLOT).try_into()?);
 
-        let duration_after_slot = tick_duration.saturating_mul(kind as u32);
+        let duration_after_slot = self.offset_in_slot::<P>(config);
         let duration_until_tick = duration_before_slot.saturating_add(duration_after_slot);
 
         Ok(duration_since_genesis.saturating_sub(duration_until_tick))
@@ -270,23 +273,114 @@ impl Tick {
         let slot = GENESIS_SLOT.saturating_add(slots_since_genesis);
 
         // Then, determine which tick within that slot
-        let nanos_per_tick = tick_duration_at_slot::<P>(config, slot).as_nanos();
-        let ticks_per_slot = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))?;
-
-        let ticks_since_genesis = nanos_since_genesis
-            .checked_div(nanos_per_tick)
-            .expect("tick_duration must be at least one nanosecond");
-
-        let ticks_since_slot = usize::try_from(
-            ticks_since_genesis
-                .checked_rem(ticks_per_slot)
-                .expect("slot should have at least one tick"),
+        let nanos_into_slot = u64::try_from(
+            nanos_since_genesis
+                .checked_rem(nanos_per_slot)
+                .expect("slot duration must be at least one nanosecond"),
         )?;
 
-        let kind = TickKind::from_index_at_slot::<P>(config, slot, ticks_since_slot)
-            .expect("more ticks would add up to additional slots");
+        let duration_into_slot = Duration::from_nanos(nanos_into_slot);
+
+        // The last tick that has already started.
+        // Tick offsets grow through the slot, so `take_while` stops at the first future one.
+        let kind = TickKind::all_at_slot::<P>(config, slot)
+            .take_while(|kind| {
+                Self::new(slot, *kind).offset_in_slot::<P>(config) <= duration_into_slot
+            })
+            .last()
+            .expect("the first tick starts at the start of the slot");
 
         Ok(Self::new(slot, kind))
+    }
+
+    /// Time from the start of the slot to the start of this tick.
+    ///
+    /// Interval starts come from the `*_DUE_BPS` config values.
+    /// Each interval is split into `TICKS_PER_INTERVAL` equal ticks.
+    #[must_use]
+    pub fn offset_in_slot<P: Preset>(self, config: &Config) -> Duration {
+        let index = self.kind as u32;
+
+        let interval = index
+            .checked_div(TICKS_PER_INTERVAL)
+            .expect("TICKS_PER_INTERVAL is not zero");
+
+        let tick_in_interval = index
+            .checked_rem(TICKS_PER_INTERVAL)
+            .expect("TICKS_PER_INTERVAL is not zero");
+
+        let start = interval_start::<P>(config, self.slot, interval);
+        let end = interval_start::<P>(config, self.slot, interval.saturating_add(1));
+
+        let offset_in_interval = end
+            .saturating_sub(start)
+            .saturating_mul(tick_in_interval)
+            .checked_div(TICKS_PER_INTERVAL)
+            .expect("TICKS_PER_INTERVAL is not zero");
+
+        start.saturating_add(offset_in_interval)
+    }
+
+    /// Whether this tick ends no later than `due_bps` basis points into the slot.
+    ///
+    /// The tick ends where the next emitted tick starts, not the next tick in the sequence.
+    /// The store holds a tick until the stream emits another one.
+    #[must_use]
+    pub fn ends_by_due_bps<P: Preset>(self, config: &Config, due_bps: u64) -> bool {
+        self.emitted_end_offset_in_slot::<P>(config) <= config.slot_component_duration(due_bps)
+    }
+
+    /// Whether `due_bps` basis points into the slot fall within this emitted tick.
+    ///
+    /// Exactly one emitted tick per slot spans each due point.
+    /// A due point at the very end of the slot belongs to the last emitted tick.
+    #[must_use]
+    pub fn spans_due_bps<P: Preset>(self, config: &Config, due_bps: u64) -> bool {
+        if !self.is_emitted() {
+            return false;
+        }
+
+        let due = config.slot_component_duration(due_bps);
+        let end = self.emitted_end_offset_in_slot::<P>(config);
+
+        self.offset_in_slot::<P>(config) <= due
+            && (due < end || end == config.slot_duration_ms && due == end)
+    }
+
+    /// Whether this tick starts exactly `due_bps` basis points into the slot.
+    #[must_use]
+    pub fn starts_at_due_bps<P: Preset>(self, config: &Config, due_bps: u64) -> bool {
+        self.offset_in_slot::<P>(config) == config.slot_component_duration(due_bps)
+    }
+
+    // Start-of-interval ticks last until the `*Fourth` tick of the interval.
+    // Ending them at the `*Second` tick would make late messages look timely.
+    fn emitted_end_offset_in_slot<P: Preset>(self, config: &Config) -> Duration {
+        let mut kind = self.kind;
+
+        while let Some(next_kind) = kind.next_at_slot::<P>(config, self.slot) {
+            let next_tick = Self::new(self.slot, next_kind);
+
+            if next_tick.is_emitted() {
+                return next_tick.offset_in_slot::<P>(config);
+            }
+
+            kind = next_kind;
+        }
+
+        config.slot_duration_ms
+    }
+
+    fn end_offset_in_slot<P: Preset>(self, config: &Config) -> Duration {
+        match self.kind.next_at_slot::<P>(config, self.slot) {
+            Some(next_kind) => Self::new(self.slot, next_kind).offset_in_slot::<P>(config),
+            None => config.slot_duration_ms,
+        }
+    }
+
+    fn duration<P: Preset>(self, config: &Config) -> Duration {
+        self.end_offset_in_slot::<P>(config)
+            .saturating_sub(self.offset_in_slot::<P>(config))
     }
 
     const fn new(slot: Slot, kind: TickKind) -> Self {
@@ -328,14 +422,6 @@ pub enum TickKind {
 }
 
 impl TickKind {
-    fn from_index_at_slot<P: Preset>(config: &Config, slot: Slot, index: usize) -> Option<Self> {
-        if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
-            enum_iterator::all::<Self>().nth(index)
-        } else {
-            Self::pre_gloas_ticks().nth(index)
-        }
-    }
-
     fn next_at_slot<P: Preset>(self, config: &Config, slot: Slot) -> Option<Self> {
         if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
             self.next()
@@ -361,6 +447,11 @@ impl TickKind {
         } else {
             Self::pre_gloas_ticks().count() // 3 intervals of 4 ticks each
         }
+    }
+
+    fn all_at_slot<P: Preset>(config: &Config, slot: Slot) -> impl Iterator<Item = Self> {
+        // Pre-Gloas ticks are a prefix of post-Gloas ones.
+        enum_iterator::all::<Self>().take(Self::ticks_per_slot::<P>(config, slot))
     }
 
     fn pre_gloas_ticks() -> impl Iterator<Item = Self> {
@@ -405,20 +496,76 @@ pub fn ticks<P: Preset>(
                     let current_tick = next_tick;
                     next_tick = current_tick.next::<P>(config)?;
 
-                    // Recalculate tick duration because it can change at the fork boundary.
-                    let tick_duration = tick_duration_at_slot::<P>(config, current_tick.slot);
+                    // Tick durations differ between intervals and change at the fork boundary.
                     deadline = deadline
-                        .checked_add(tick_duration)
+                        .checked_add(current_tick.duration::<P>(config))
                         .ok_or(ClockError::NextInstantOverflow)?;
 
                     // Emit only ticks that the application currently uses.
-                    if current_tick.is_start_of_interval() || current_tick.is_end_of_interval() {
+                    if current_tick.is_emitted() {
                         return Ok(Some((current_tick, (next_tick, deadline))));
                     }
                 }
             }
         },
     )))
+}
+
+/// Whether `time` falls in `slot`, less than `due_bps` basis points after its start.
+///
+/// Mirrors the spec's `time_into_slot_ms < due_ms` for the current slot.
+/// `time` is measured from the Unix epoch.
+///
+/// Use this for deadlines that are not interval starts, like `PAYLOAD_DUE_BPS`.
+/// The store only knows the current tick, which cannot place such deadlines exactly.
+#[must_use]
+pub fn is_before_due_bps_in_slot(
+    config: &Config,
+    genesis_time: UnixSeconds,
+    slot: Slot,
+    due_bps: u64,
+    time: Duration,
+) -> bool {
+    let Some(slot_start) = slot_start(config, genesis_time, slot) else {
+        return false;
+    };
+
+    // A sender whose clock runs ahead may deliver slightly before the slot starts.
+    // Gossip accepts that much disparity, so it still counts as timely.
+    if time.saturating_add(config.maximum_gossip_clock_disparity) < slot_start {
+        return false;
+    }
+
+    time.saturating_sub(slot_start) < config.slot_component_duration(due_bps)
+}
+
+/// Time left from `time` until `due_bps` basis points into `slot`.
+///
+/// Zero once the due point has passed.
+/// `time` is measured from the Unix epoch.
+#[must_use]
+pub fn duration_until_due_bps(
+    config: &Config,
+    genesis_time: UnixSeconds,
+    slot: Slot,
+    due_bps: u64,
+    time: Duration,
+) -> Duration {
+    slot_start(config, genesis_time, slot)
+        .and_then(|slot_start| slot_start.checked_add(config.slot_component_duration(due_bps)))
+        .map(|due| due.saturating_sub(time))
+        .unwrap_or_default()
+}
+
+// Time from the Unix epoch to the start of `slot`.
+// `None` if it does not fit in a `Duration`.
+fn slot_start(config: &Config, genesis_time: UnixSeconds, slot: Slot) -> Option<Duration> {
+    let slots_since_genesis = u32::try_from(slot.saturating_sub(GENESIS_SLOT)).ok()?;
+
+    config
+        .slot_duration_ms
+        .checked_mul(slots_since_genesis)?
+        .checked_add(Duration::from_secs(genesis_time))
 }
 
 pub fn next_interval_with_remaining_time<P: Preset>(
@@ -499,31 +646,15 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
         next_tick = Tick::start_of_slot(GENESIS_SLOT.saturating_add(slots_since_genesis));
         now_to_next_tick = Duration::ZERO;
 
-        // Cache tick duration, and only update when phase changed
-        let mut tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
-        let mut current_phase = config.phase_at_slot::<P>(next_tick.slot);
-
         while now_to_next_tick < current_slot_to_now {
+            now_to_next_tick = now_to_next_tick.saturating_add(next_tick.duration::<P>(config));
             next_tick = next_tick.next::<P>(config)?;
-            let next_phase = config.phase_at_slot::<P>(next_tick.slot);
-
-            if next_phase != current_phase {
-                tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
-                current_phase = next_phase;
-            }
-            now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
         }
 
         if only_interval_ticks {
             while !next_tick.is_start_of_interval() {
+                now_to_next_tick = now_to_next_tick.saturating_add(next_tick.duration::<P>(config));
                 next_tick = next_tick.next::<P>(config)?;
-                let next_phase = config.phase_at_slot::<P>(next_tick.slot);
-
-                if next_phase != current_phase {
-                    tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
-                    current_phase = next_phase;
-                }
-                now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
             }
         }
 
@@ -537,21 +668,22 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
     Ok((next_tick, next_instant))
 }
 
-fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
-    let slot_duration = config.slot_duration_ms;
+const TICKS_PER_INTERVAL: u32 = 4;
 
-    let ticks_per_slot_u128 = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))
-        .expect("number of ticks per slot should fit in u128");
+// `interval` is 0-based.
+// One past the last interval is the end of the slot.
+fn interval_start<P: Preset>(config: &Config, slot: Slot, interval: u32) -> Duration {
+    let phase = config.phase_at_slot::<P>(slot);
 
-    let tick_duration_in_ms = u64::try_from(
-        slot_duration
-            .as_millis()
-            .checked_div(ticks_per_slot_u128)
-            .expect("there should be at least one tick per slot"),
-    )
-    .expect("tick duration in ms should fit in u64");
+    let due_bps = match interval {
+        0 => 0,
+        1 => config.attestation_due_bps_at(phase),
+        2 => config.aggregate_due_bps_at(phase),
+        3 if phase >= Phase::Gloas => config.payload_attestation_due_bps,
+        _ => BASIS_POINTS,
+    };
 
-    Duration::from_millis(tick_duration_in_ms)
+    config.slot_component_duration(due_bps)
 }
 
 #[cfg(test)]
@@ -729,8 +861,9 @@ mod tests {
         );
 
         // Fast-forward through slots 0-31 (pre-Gloas)
-        // Each slot has 12 ticks at 1000 ms each = 12 000 ms. We skip 31 slots
-        // and 11 ticks in bulk and draining the stream.
+        // Each slot is 12 000 ms.
+        // Its 12 ticks follow the `*_DUE_BPS` values, so they are only roughly 1000 ms apart.
+        // We skip 31 slots and 11 ticks in bulk and drain the stream.
         tokio::time::advance(Duration::from_secs(32 * 12 - 2)).await;
         drain(&mut ticks).await?;
 
@@ -793,6 +926,69 @@ mod tests {
         Ok(())
     }
 
+    // The stream must fire duty ticks at the `*_DUE_BPS` offsets, not at an equal split.
+    // Checks a margin before and after each tick.
+    // The margin absorbs the sub-millisecond gap between the genesis time and `SystemTime::now`.
+    #[tokio::test(start_paused = true)]
+    async fn ticks_follow_due_bps_post_gloas() -> Result<()> {
+        let margin = Duration::from_millis(10);
+
+        let genesis_time_in_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_millis()
+                .add(1000),
+        )
+        .expect("genesis_time_in_ms should fit in u64");
+
+        let config = custom_due_bps_config();
+        let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        assert_eq!(
+            next_tick(&mut ticks)?,
+            Some(Tick::new(0, TickKind::Propose))
+        );
+
+        let mut elapsed = Duration::ZERO;
+
+        for (offset_in_ms, expected_tick) in [
+            (1800, Tick::new(0, TickKind::ProposeFourth)),
+            (2400, Tick::new(0, TickKind::Attest)),
+            (4200, Tick::new(0, TickKind::AttestFourth)),
+            (4800, Tick::new(0, TickKind::Aggregate)),
+            (8400, Tick::new(0, TickKind::AggregateFourth)),
+            (9600, Tick::new(0, TickKind::PayloadAttest)),
+            (11_400, Tick::new(0, TickKind::PayloadAttestFourth)),
+            (12_000, Tick::new(1, TickKind::Propose)),
+        ] {
+            let offset = Duration::from_millis(offset_in_ms);
+
+            tokio::time::advance(offset.saturating_sub(elapsed).saturating_sub(margin)).await;
+
+            assert_eq!(
+                next_tick(&mut ticks)?,
+                None,
+                "{expected_tick:?} fired before {offset_in_ms} ms",
+            );
+
+            tokio::time::advance(margin.saturating_mul(2)).await;
+
+            assert_eq!(
+                next_tick(&mut ticks)?,
+                Some(expected_tick),
+                "{expected_tick:?} did not fire at {offset_in_ms} ms",
+            );
+
+            assert_eq!(next_tick(&mut ticks)?, None);
+
+            elapsed = offset.saturating_add(margin);
+        }
+
+        Ok(())
+    }
+
     #[tokio::test(start_paused = true)]
     async fn ticks_with_mainnet_config_iterate_through_every_tick_post_gloas() -> Result<()> {
         let genesis_time_in_ms = u64::try_from(
@@ -804,7 +1000,7 @@ mod tests {
         .expect("genesis_time_in_ms should fit in u64");
 
         let config = Config::mainnet().start_and_stay_in(Phase::Gloas);
-        let tick_duration = Duration::from_millis(750); // tick_duration_at_slot(&config, GENESIS_SLOT);
+        let tick_duration = Duration::from_millis(750);
         let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
@@ -1099,61 +1295,61 @@ mod tests {
         )
     }
 
-    #[test_case(100 => (777, Tick::new(0, TickKind::Propose));         "long before genesis")]
-    #[test_case(777 => (777, Tick::new(0, TickKind::Propose));         "at genesis")]
-    #[test_case(778 => (778, Tick::new(0, TickKind::ProposeSecond));   "1 second after genesis")]
-    #[test_case(779 => (779, Tick::new(0, TickKind::ProposeThird));    "2 seconds after genesis")]
-    #[test_case(780 => (780, Tick::new(0, TickKind::ProposeFourth));   "3 seconds after genesis")]
-    #[test_case(781 => (781, Tick::new(0, TickKind::Attest));          "4 seconds after genesis")]
-    #[test_case(782 => (782, Tick::new(0, TickKind::AttestSecond));    "5 seconds after genesis")]
-    #[test_case(783 => (783, Tick::new(0, TickKind::AttestThird));     "6 seconds after genesis")]
-    #[test_case(784 => (784, Tick::new(0, TickKind::AttestFourth));    "7 seconds after genesis")]
-    #[test_case(785 => (785, Tick::new(0, TickKind::Aggregate));       "8 seconds after genesis")]
-    #[test_case(786 => (786, Tick::new(0, TickKind::AggregateSecond)); "9 seconds after genesis")]
-    #[test_case(787 => (787, Tick::new(0, TickKind::AggregateThird));  "10 seconds after genesis")]
-    #[test_case(788 => (788, Tick::new(0, TickKind::AggregateFourth)); "11 seconds after genesis")]
-    #[test_case(789 => (789, Tick::new(1, TickKind::Propose));         "12 seconds after genesis")]
-    fn next_tick_with_instant_with_mainnet_config(time: UnixSeconds) -> (UnixSeconds, Tick) {
+    #[test_case(100 => (777_000, Tick::new(0, TickKind::Propose));         "long before genesis")]
+    #[test_case(777 => (777_000, Tick::new(0, TickKind::Propose));         "at genesis")]
+    #[test_case(778 => (778_999, Tick::new(0, TickKind::ProposeThird));    "1 second after genesis")]
+    #[test_case(779 => (779_999, Tick::new(0, TickKind::ProposeFourth));   "2 seconds after genesis")]
+    #[test_case(780 => (780_999, Tick::new(0, TickKind::Attest));          "3 seconds after genesis")]
+    #[test_case(781 => (781_999, Tick::new(0, TickKind::AttestSecond));    "4 seconds after genesis")]
+    #[test_case(782 => (782_999, Tick::new(0, TickKind::AttestThird));     "5 seconds after genesis")]
+    #[test_case(783 => (783_999, Tick::new(0, TickKind::AttestFourth));    "6 seconds after genesis")]
+    #[test_case(784 => (785_000, Tick::new(0, TickKind::Aggregate));       "7 seconds after genesis")]
+    #[test_case(785 => (785_000, Tick::new(0, TickKind::Aggregate));       "8 seconds after genesis")]
+    #[test_case(786 => (786_000, Tick::new(0, TickKind::AggregateSecond)); "9 seconds after genesis")]
+    #[test_case(787 => (787_000, Tick::new(0, TickKind::AggregateThird));  "10 seconds after genesis")]
+    #[test_case(788 => (788_000, Tick::new(0, TickKind::AggregateFourth)); "11 seconds after genesis")]
+    #[test_case(789 => (789_000, Tick::new(1, TickKind::Propose));         "12 seconds after genesis")]
+    fn next_tick_with_instant_with_mainnet_config(time: UnixSeconds) -> (u64, Tick) {
         next_tick_with_instant::<Mainnet>(&Config::mainnet(), time, false)
     }
 
-    #[test_case(100 => (777, Tick::new(0, TickKind::Propose));   "long before genesis")]
-    #[test_case(777 => (777, Tick::new(0, TickKind::Propose));   "at genesis")]
-    #[test_case(778 => (781, Tick::new(0, TickKind::Attest));    "1 second after genesis")]
-    #[test_case(779 => (781, Tick::new(0, TickKind::Attest));    "2 seconds after genesis")]
-    #[test_case(780 => (781, Tick::new(0, TickKind::Attest));    "3 seconds after genesis")]
-    #[test_case(781 => (781, Tick::new(0, TickKind::Attest));    "4 seconds after genesis")]
-    #[test_case(782 => (785, Tick::new(0, TickKind::Aggregate)); "5 seconds after genesis")]
-    #[test_case(783 => (785, Tick::new(0, TickKind::Aggregate)); "6 seconds after genesis")]
-    #[test_case(784 => (785, Tick::new(0, TickKind::Aggregate)); "7 seconds after genesis")]
-    #[test_case(785 => (785, Tick::new(0, TickKind::Aggregate)); "8 seconds after genesis")]
-    #[test_case(786 => (789, Tick::new(1, TickKind::Propose));   "9 seconds after genesis")]
-    #[test_case(787 => (789, Tick::new(1, TickKind::Propose));   "10 seconds after genesis")]
-    #[test_case(788 => (789, Tick::new(1, TickKind::Propose));   "11 seconds after genesis")]
-    #[test_case(789 => (789, Tick::new(1, TickKind::Propose));   "12 seconds after genesis")]
+    #[test_case(100 => (777_000, Tick::new(0, TickKind::Propose));   "long before genesis")]
+    #[test_case(777 => (777_000, Tick::new(0, TickKind::Propose));   "at genesis")]
+    #[test_case(778 => (780_999, Tick::new(0, TickKind::Attest));    "1 second after genesis")]
+    #[test_case(779 => (780_999, Tick::new(0, TickKind::Attest));    "2 seconds after genesis")]
+    #[test_case(780 => (780_999, Tick::new(0, TickKind::Attest));    "3 seconds after genesis")]
+    #[test_case(781 => (785_000, Tick::new(0, TickKind::Aggregate)); "4 seconds after genesis")]
+    #[test_case(782 => (785_000, Tick::new(0, TickKind::Aggregate)); "5 seconds after genesis")]
+    #[test_case(783 => (785_000, Tick::new(0, TickKind::Aggregate)); "6 seconds after genesis")]
+    #[test_case(784 => (785_000, Tick::new(0, TickKind::Aggregate)); "7 seconds after genesis")]
+    #[test_case(785 => (785_000, Tick::new(0, TickKind::Aggregate)); "8 seconds after genesis")]
+    #[test_case(786 => (789_000, Tick::new(1, TickKind::Propose));   "9 seconds after genesis")]
+    #[test_case(787 => (789_000, Tick::new(1, TickKind::Propose));   "10 seconds after genesis")]
+    #[test_case(788 => (789_000, Tick::new(1, TickKind::Propose));   "11 seconds after genesis")]
+    #[test_case(789 => (789_000, Tick::new(1, TickKind::Propose));   "12 seconds after genesis")]
     fn next_tick_with_instant_with_mainnet_config_only_interval_ticks_pre_gloas(
         time: UnixSeconds,
-    ) -> (UnixSeconds, Tick) {
+    ) -> (u64, Tick) {
         next_tick_with_instant::<Mainnet>(&Config::mainnet(), time, true)
     }
 
-    #[test_case(100 => (777, Tick::new(0, TickKind::Propose));      "long before genesis")]
-    #[test_case(777 => (777, Tick::new(0, TickKind::Propose));      "at genesis")]
-    #[test_case(778 => (780, Tick::new(0, TickKind::Attest));       "1 second after genesis")]
-    #[test_case(779 => (780, Tick::new(0, TickKind::Attest));       "2 seconds after genesis")]
-    #[test_case(780 => (780, Tick::new(0, TickKind::Attest));       "3 seconds after genesis")]
-    #[test_case(781 => (783, Tick::new(0, TickKind::Aggregate));    "4 seconds after genesis")]
-    #[test_case(782 => (783, Tick::new(0, TickKind::Aggregate));    "5 seconds after genesis")]
-    #[test_case(783 => (783, Tick::new(0, TickKind::Aggregate));    "6 seconds after genesis")]
-    #[test_case(784 => (786, Tick::new(0, TickKind::PayloadAttest)); "7 seconds after genesis")]
-    #[test_case(785 => (786, Tick::new(0, TickKind::PayloadAttest)); "8 seconds after genesis")]
-    #[test_case(786 => (786, Tick::new(0, TickKind::PayloadAttest)); "9 seconds after genesis")]
-    #[test_case(787 => (789, Tick::new(1, TickKind::Propose));   "10 seconds after genesis")]
-    #[test_case(788 => (789, Tick::new(1, TickKind::Propose));   "11 seconds after genesis")]
-    #[test_case(789 => (789, Tick::new(1, TickKind::Propose));   "12 seconds after genesis")]
+    #[test_case(100 => (777_000, Tick::new(0, TickKind::Propose));       "long before genesis")]
+    #[test_case(777 => (777_000, Tick::new(0, TickKind::Propose));       "at genesis")]
+    #[test_case(778 => (780_000, Tick::new(0, TickKind::Attest));        "1 second after genesis")]
+    #[test_case(779 => (780_000, Tick::new(0, TickKind::Attest));        "2 seconds after genesis")]
+    #[test_case(780 => (780_000, Tick::new(0, TickKind::Attest));        "3 seconds after genesis")]
+    #[test_case(781 => (783_000, Tick::new(0, TickKind::Aggregate));     "4 seconds after genesis")]
+    #[test_case(782 => (783_000, Tick::new(0, TickKind::Aggregate));     "5 seconds after genesis")]
+    #[test_case(783 => (783_000, Tick::new(0, TickKind::Aggregate));     "6 seconds after genesis")]
+    #[test_case(784 => (786_000, Tick::new(0, TickKind::PayloadAttest)); "7 seconds after genesis")]
+    #[test_case(785 => (786_000, Tick::new(0, TickKind::PayloadAttest)); "8 seconds after genesis")]
+    #[test_case(786 => (786_000, Tick::new(0, TickKind::PayloadAttest)); "9 seconds after genesis")]
+    #[test_case(787 => (789_000, Tick::new(1, TickKind::Propose));       "10 seconds after genesis")]
+    #[test_case(788 => (789_000, Tick::new(1, TickKind::Propose));       "11 seconds after genesis")]
+    #[test_case(789 => (789_000, Tick::new(1, TickKind::Propose));       "12 seconds after genesis")]
     fn next_tick_with_instant_with_mainnet_config_only_interval_ticks_post_gloas(
         time: UnixSeconds,
-    ) -> (UnixSeconds, Tick) {
+    ) -> (u64, Tick) {
         next_tick_with_instant::<Mainnet>(
             &Config::mainnet().start_and_stay_in(Phase::Gloas),
             time,
@@ -1161,39 +1357,40 @@ mod tests {
         )
     }
 
-    #[test_case(100 => (777, Tick::new(0, TickKind::Propose));        "long before genesis")]
-    #[test_case(777 => (777, Tick::new(0, TickKind::Propose));        "at genesis")]
-    #[test_case(778 => (778, Tick::new(0, TickKind::ProposeThird));   "1 second after genesis")]
-    #[test_case(779 => (779, Tick::new(0, TickKind::Attest));         "2 seconds after genesis")]
-    #[test_case(780 => (780, Tick::new(0, TickKind::AttestThird));    "3 seconds after genesis")]
-    #[test_case(781 => (781, Tick::new(0, TickKind::Aggregate));      "4 seconds after genesis")]
-    #[test_case(782 => (782, Tick::new(0, TickKind::AggregateThird)); "5 seconds after genesis")]
-    #[test_case(783 => (783, Tick::new(1, TickKind::Propose));        "6 seconds after genesis")]
-    fn next_tick_with_instant_with_minimal_config(time: UnixSeconds) -> (UnixSeconds, Tick) {
+    #[test_case(100 => (777_000, Tick::new(0, TickKind::Propose));        "long before genesis")]
+    #[test_case(777 => (777_000, Tick::new(0, TickKind::Propose));        "at genesis")]
+    #[test_case(778 => (778_499, Tick::new(0, TickKind::ProposeFourth));  "1 second after genesis")]
+    #[test_case(779 => (779_499, Tick::new(0, TickKind::AttestSecond));   "2 seconds after genesis")]
+    #[test_case(780 => (780_499, Tick::new(0, TickKind::AttestFourth));   "3 seconds after genesis")]
+    #[test_case(781 => (781_000, Tick::new(0, TickKind::Aggregate));      "4 seconds after genesis")]
+    #[test_case(782 => (782_000, Tick::new(0, TickKind::AggregateThird)); "5 seconds after genesis")]
+    #[test_case(783 => (783_000, Tick::new(1, TickKind::Propose));        "6 seconds after genesis")]
+    fn next_tick_with_instant_with_minimal_config(time: UnixSeconds) -> (u64, Tick) {
         next_tick_with_instant::<Minimal>(&Config::minimal(), time, false)
     }
 
-    #[test_case(100 => (777, Tick::new(0, TickKind::Propose));   "long before genesis")]
-    #[test_case(777 => (777, Tick::new(0, TickKind::Propose));   "at genesis")]
-    #[test_case(778 => (779, Tick::new(0, TickKind::Attest));    "1 second after genesis")]
-    #[test_case(779 => (779, Tick::new(0, TickKind::Attest));    "2 seconds after genesis")]
-    #[test_case(780 => (781, Tick::new(0, TickKind::Aggregate)); "3 seconds after genesis")]
-    #[test_case(781 => (781, Tick::new(0, TickKind::Aggregate)); "4 seconds after genesis")]
-    #[test_case(782 => (783, Tick::new(1, TickKind::Propose));   "5 seconds after genesis")]
-    #[test_case(783 => (783, Tick::new(1, TickKind::Propose));   "6 seconds after genesis")]
+    #[test_case(100 => (777_000, Tick::new(0, TickKind::Propose));   "long before genesis")]
+    #[test_case(777 => (777_000, Tick::new(0, TickKind::Propose));   "at genesis")]
+    #[test_case(778 => (778_999, Tick::new(0, TickKind::Attest));    "1 second after genesis")]
+    #[test_case(779 => (781_000, Tick::new(0, TickKind::Aggregate)); "2 seconds after genesis")]
+    #[test_case(780 => (781_000, Tick::new(0, TickKind::Aggregate)); "3 seconds after genesis")]
+    #[test_case(781 => (781_000, Tick::new(0, TickKind::Aggregate)); "4 seconds after genesis")]
+    #[test_case(782 => (783_000, Tick::new(1, TickKind::Propose));   "5 seconds after genesis")]
+    #[test_case(783 => (783_000, Tick::new(1, TickKind::Propose));   "6 seconds after genesis")]
     fn next_tick_with_instant_with_minimal_config_only_interval_ticks(
         time: UnixSeconds,
-    ) -> (UnixSeconds, Tick) {
+    ) -> (u64, Tick) {
         next_tick_with_instant::<Minimal>(&Config::minimal(), time, true)
     }
 
-    #[test_case(Duration::from_secs(3) => Duration::from_millis(250))]
-    #[test_case(Config::minimal().slot_duration_ms => Duration::from_millis(500))]
-    #[test_case(Config::mainnet().slot_duration_ms => Duration::from_secs(1))]
-    #[test_case(Duration::from_secs(18) => Duration::from_millis(1500))]
+    // `ATTESTATION_DUE_BPS` is 3333, so the first interval is slightly shorter than a third.
+    #[test_case(Duration::from_secs(3) => Duration::from_micros(249_750))]
+    #[test_case(Config::minimal().slot_duration_ms => Duration::from_micros(499_750))]
+    #[test_case(Config::mainnet().slot_duration_ms => Duration::from_micros(999_750))]
+    #[test_case(Duration::from_secs(18) => Duration::from_micros(1_499_750))]
     fn tick_duration_with_custom_slot_duration_pre_gloas(slot_duration: Duration) -> Duration {
         let config = config_with_slot_duration(slot_duration);
-        tick_duration_at_slot::<Mainnet>(&config, GENESIS_SLOT)
+        Tick::start_of_slot(GENESIS_SLOT).duration::<Mainnet>(&config)
     }
 
     #[test_case(Duration::from_secs(2) => Duration::from_millis(125))]
@@ -1205,7 +1402,136 @@ mod tests {
     #[test_case(Duration::from_secs(18) => Duration::from_millis(1125))]
     fn tick_duration_with_seconds_per_slot_post_gloas(slot_duration: Duration) -> Duration {
         let config = config_with_slot_duration(slot_duration).start_and_stay_in(Phase::Gloas);
-        tick_duration_at_slot::<Mainnet>(&config, GENESIS_SLOT)
+        Tick::start_of_slot(GENESIS_SLOT).duration::<Mainnet>(&config)
+    }
+
+    // Duty ticks follow the `*_DUE_BPS` config values.
+    // They are not a fixed split of the slot.
+    #[test_case(TickKind::Propose             => Duration::ZERO)]
+    #[test_case(TickKind::ProposeSecond       => Duration::from_millis(600))]
+    #[test_case(TickKind::Attest              => Duration::from_millis(2400))]
+    #[test_case(TickKind::AttestSecond        => Duration::from_millis(3000))]
+    #[test_case(TickKind::Aggregate           => Duration::from_millis(4800))]
+    #[test_case(TickKind::PayloadAttest       => Duration::from_millis(9600))]
+    #[test_case(TickKind::PayloadAttestFourth => Duration::from_millis(11_400))]
+    fn offset_in_slot_follows_due_bps_post_gloas(kind: TickKind) -> Duration {
+        Tick::new(GENESIS_SLOT, kind).offset_in_slot::<Mainnet>(&custom_due_bps_config())
+    }
+
+    #[test_case(    0 => Tick::new(0, TickKind::Propose);             "at genesis")]
+    #[test_case( 2399 => Tick::new(0, TickKind::ProposeFourth);       "just before attestation due")]
+    #[test_case( 2400 => Tick::new(0, TickKind::Attest);              "at attestation due")]
+    #[test_case( 4800 => Tick::new(0, TickKind::Aggregate);           "at aggregate due")]
+    #[test_case( 9599 => Tick::new(0, TickKind::AggregateFourth);     "just before payload attestation due")]
+    #[test_case( 9600 => Tick::new(0, TickKind::PayloadAttest);       "at payload attestation due")]
+    #[test_case(12000 => Tick::new(1, TickKind::Propose);             "at next slot")]
+    fn tick_at_time_follows_due_bps_post_gloas(offset: i128) -> Tick {
+        tick_at_time_millis_relative_to_genesis::<Mainnet>(&custom_due_bps_config(), offset)
+    }
+
+    #[test_case(778 => (779_400, Tick::new(0, TickKind::Attest));        "before attestation due")]
+    #[test_case(780 => (781_800, Tick::new(0, TickKind::Aggregate));     "before aggregate due")]
+    #[test_case(782 => (786_600, Tick::new(0, TickKind::PayloadAttest)); "before payload attestation due")]
+    fn next_interval_follows_due_bps_post_gloas(time: UnixSeconds) -> (u64, Tick) {
+        next_tick_with_instant::<Mainnet>(&custom_due_bps_config(), time, true)
+    }
+
+    // A tick meets a deadline only if it ends by it.
+    // Start-of-interval ticks end at the `*Fourth` tick, the next one the stream emits.
+    // `Aggregate` runs from 4800 to 8400 ms, so 5000 bps (6000 ms) falls inside it.
+    #[test_case(TickKind::ProposeFourth,   2000 => true)]
+    #[test_case(TickKind::Attest,          2000 => false)]
+    #[test_case(TickKind::Aggregate,       5000 => false; "mid-interval due point")]
+    #[test_case(TickKind::Aggregate,       7000 => true;  "due point at the end of the emitted tick")]
+    #[test_case(TickKind::AggregateFourth, 8000 => true)]
+    #[test_case(TickKind::PayloadAttest,   8000 => false)]
+    fn ends_by_due_bps_follows_due_bps_post_gloas(kind: TickKind, due_bps: u64) -> bool {
+        Tick::new(GENESIS_SLOT, kind).ends_by_due_bps::<Mainnet>(&custom_due_bps_config(), due_bps)
+    }
+
+    // Arrival time decides, not the tick.
+    // 5000 bps of a 12 s slot is 6000 ms.
+    // In `custom_due_bps_config` that is inside the `Aggregate` tick, which runs from 4800 to 8400 ms.
+    // Genesis is at 777 s, so slot 2 starts at 801 s.
+    // Gossip clock disparity is 500 ms.
+    #[test_case(2, 801_000 => true;  "at slot start")]
+    #[test_case(2, 806_000 => true;  "inside the aggregate tick, before the due point")]
+    #[test_case(2, 806_999 => true;  "1 ms before the due point")]
+    #[test_case(2, 807_000 => false; "at the due point")]
+    #[test_case(2, 812_999 => false; "end of slot")]
+    #[test_case(2, 800_500 => true;  "early by the clock disparity")]
+    #[test_case(2, 800_499 => false; "earlier than the clock disparity")]
+    #[test_case(1, 801_000 => false; "after the slot ends")]
+    fn is_before_due_bps_in_slot_uses_arrival_time(slot: Slot, time_in_ms: u64) -> bool {
+        is_before_due_bps_in_slot(
+            &custom_due_bps_config(),
+            777,
+            slot,
+            5000,
+            Duration::from_millis(time_in_ms),
+        )
+    }
+
+    // `Slot::MAX` fails the slot conversion.
+    // `u64::MAX` genesis gets past it and overflows the slot start.
+    #[test_case(777,      Slot::MAX;              "slot too large")]
+    #[test_case(u64::MAX, Slot::from(u32::MAX);   "slot start overflows")]
+    fn due_bps_helpers_do_not_overflow(genesis_time: UnixSeconds, slot: Slot) {
+        let config = custom_due_bps_config();
+
+        assert!(!is_before_due_bps_in_slot(
+            &config,
+            genesis_time,
+            slot,
+            5000,
+            Duration::MAX,
+        ));
+
+        assert_eq!(
+            duration_until_due_bps(&config, genesis_time, slot, 5000, Duration::ZERO),
+            Duration::ZERO,
+        );
+    }
+
+    #[test_case(800_000 => Duration::from_millis(7000); "before the slot")]
+    #[test_case(805_000 => Duration::from_millis(2000); "before the due point")]
+    #[test_case(807_000 => Duration::ZERO;              "at the due point")]
+    #[test_case(808_000 => Duration::ZERO;              "after the due point")]
+    fn duration_until_due_bps_counts_down_to_the_due_point(time_in_ms: u64) -> Duration {
+        duration_until_due_bps(
+            &custom_due_bps_config(),
+            777,
+            2,
+            5000,
+            Duration::from_millis(time_in_ms),
+        )
+    }
+
+    // Each due point falls in exactly one emitted tick.
+    // `custom_due_bps_config` emits ticks at 0, 1800, 2400, 4200, 4800, 8400, 9600 and 11 400 ms.
+    #[test_case(0     => vec![TickKind::Propose];             "slot start")]
+    #[test_case(1000  => vec![TickKind::Propose];             "inside the first tick")]
+    #[test_case(2000  => vec![TickKind::Attest];              "attestation due point")]
+    #[test_case(5000  => vec![TickKind::Aggregate];           "inside the aggregate tick")]
+    #[test_case(7500  => vec![TickKind::AggregateFourth];     "inside the end of the aggregate interval")]
+    #[test_case(10000 => vec![TickKind::PayloadAttestFourth]; "slot end")]
+    fn exactly_one_emitted_tick_spans_a_due_point(due_bps: u64) -> Vec<TickKind> {
+        let config = custom_due_bps_config();
+
+        TickKind::all_at_slot::<Mainnet>(&config, GENESIS_SLOT)
+            .filter(|kind| {
+                Tick::new(GENESIS_SLOT, *kind).spans_due_bps::<Mainnet>(&config, due_bps)
+            })
+            .collect()
+    }
+
+    fn custom_due_bps_config() -> Config {
+        Config {
+            attestation_due_bps_gloas: 2000,
+            aggregate_due_bps_gloas: 4000,
+            payload_attestation_due_bps: 8000,
+            ..Config::mainnet().start_and_stay_in(Phase::Gloas)
+        }
     }
 
     fn tick_at_time_relative_to_genesis<P: Preset>(config: &Config, offset: i64) -> Tick {
@@ -1240,7 +1566,7 @@ mod tests {
         config: &Config,
         time: UnixSeconds,
         only_interval_ticks: bool,
-    ) -> (UnixSeconds, Tick) {
+    ) -> (u64, Tick) {
         let genesis_time_in_ms = 777_000;
         let timespec = Timespec::from_secs(time);
 
@@ -1253,9 +1579,13 @@ mod tests {
         )
         .expect("FakeSystemTime cannot represent times before the Unix epoch");
 
-        assert_eq!(actual_instant.0.subsec_nanos(), 0);
+        let actual_instant_in_ms = actual_instant
+            .0
+            .as_millis()
+            .try_into()
+            .expect("test instants should fit in u64");
 
-        (actual_instant.0.as_secs(), actual_tick)
+        (actual_instant_in_ms, actual_tick)
     }
 
     fn config_with_slot_duration(slot_duration: Duration) -> Config {
