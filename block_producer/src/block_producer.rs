@@ -1286,9 +1286,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             // when payload envelope is not found, though block may be from gloas
                             // phase and envelope is missing (so it should error out).
                             snapshot
-                                .cached_execution_payload_envelope_by_root(parent_root)
-                                .ok_or_else(|| anyhow!("no cached payload envelope"))
-                                .map(|payload| payload.message.execution_requests.clone())
+                                .stored_envelope_by_root(parent_root)?
+                                .map(|envelope| envelope.execution_requests().clone())
                                 .unwrap_or_default()
                         } else {
                             GloasExecutionRequests::default()
@@ -2171,8 +2170,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let snapshot = self.producer_context.controller.snapshot();
 
                 let withdrawals = if snapshot.should_build_on_full(state.slot())
-                    && let Some(envelope) =
-                        snapshot.cached_execution_payload_envelope_by_root(head_root)
+                    && let Some(envelope) = snapshot.stored_envelope_by_root(head_root)?
                 {
                     debug_with_peers!(
                         "applying parent execution payload from envelope for payload attributes \
@@ -2186,7 +2184,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         chain_config,
                         &self.producer_context.pubkey_cache,
                         &mut state_copy,
-                        &envelope.message.execution_requests,
+                        envelope.execution_requests(),
                     )?;
 
                     gloas::get_expected_withdrawals(&state_copy)?.0
