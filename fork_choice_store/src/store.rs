@@ -6651,7 +6651,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 });
 
             if self.last_finalized().payload_status != payload_status {
-                for chain_link in self.finalized.iter_mut() {
+                for chain_link in &mut self.finalized {
                     chain_link.payload_status = payload_status;
                 }
             }

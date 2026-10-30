@@ -8,7 +8,7 @@ use derivative::Derivative;
 use anyhow::Result;
 use bls::PublicKeyBytes;
 #[cfg(not(target_os = "zkvm"))]
-use im::vector::Iter as VectorIter;
+type VectorIter<'a, T> = im::vector::Iter<'a, T, im::shared_ptr::DefaultSharedPtr>;
 use once_cell::race::OnceBox;
 use serde::{
     Deserialize, Serialize,
