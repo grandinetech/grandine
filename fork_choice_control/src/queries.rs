@@ -752,13 +752,17 @@ where
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
     ) -> Vec<Result<Arc<SignedExecutionPayloadEnvelope<P>>, BlockError>> {
-        let envelopes = match block_roots
-            .into_iter()
-            .filter_map(|block_root| self.stored_envelope_by_root(block_root).transpose())
-            .collect()
-        {
-            Ok(envelopes) => envelopes,
-            Err(error) => return vec![Err(error.into())],
+        let envelopes = {
+            let snapshot = self.snapshot();
+
+            match block_roots
+                .into_iter()
+                .filter_map(|block_root| snapshot.stored_envelope_by_root(block_root).transpose())
+                .collect()
+            {
+                Ok(envelopes) => envelopes,
+                Err(error) => return vec![Err(error.into())],
+            }
         };
 
         self.unblind_envelopes(envelopes).await
@@ -768,22 +772,11 @@ where
         &self,
         block_root: H256,
     ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>, BlockError> {
-        let Some(envelope) = self.stored_envelope_by_root(block_root)? else {
+        let Some(envelope) = self.snapshot().stored_envelope_by_root(block_root)? else {
             return Ok(None);
         };
 
         self.unblind_envelope(envelope).await.map(Some)
-    }
-
-    pub fn stored_envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
-        if let Some(envelope) = self
-            .snapshot()
-            .cached_execution_payload_envelope(block_root)
-        {
-            return Ok(Some(StoredEnvelope::Full(envelope.clone_arc())));
-        }
-
-        self.storage().envelope_by_root(block_root)
     }
 
     pub fn indices_of_missing_data_columns(
@@ -1600,16 +1593,6 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     #[must_use]
-    pub fn cached_execution_payload_envelope_by_root(
-        &self,
-        block_root: H256,
-    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
-        self.store_snapshot
-            .cached_execution_payload_envelope_by_root(block_root)
-            .cloned()
-    }
-
-    #[must_use]
     pub fn checkpoint_state_before_or_at(
         &self,
         checkpoint: Checkpoint,
@@ -1883,13 +1866,15 @@ impl<P: Preset> Snapshot<'_, P> {
             .cached_data_column_sidecar_by_id(data_column_id)
     }
 
-    #[must_use]
-    pub(crate) fn cached_execution_payload_envelope(
-        &self,
-        block_root: H256,
-    ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
-        self.store_snapshot
+    pub fn stored_envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
+        if let Some(envelope) = self
+            .store_snapshot
             .cached_execution_payload_envelope_by_root(block_root)
+        {
+            return Ok(Some(StoredEnvelope::Full(envelope.clone_arc())));
+        }
+
+        self.storage.envelope_by_root(block_root)
     }
 
     #[must_use]
