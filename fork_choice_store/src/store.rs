@@ -3687,15 +3687,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
+        // Gloas dropped the slot checks below; they still bound what gets queued.
+        // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot
+        // (a client MAY queue future sidecars for processing at the appropriate slot).
+        if slot
+            > self
+                .slot()
+                .saturating_add(self.chain_config.max_gossip_future_slots())
+        {
+            return Ok(DataColumnSidecarAction::Ignore(false));
+        }
+
+        if self.slot() < slot {
+            return Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar));
+        }
+
+        // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
+        if !origin.is_from_back_sync() && slot <= self.finalized_slot() {
+            return Ok(DataColumnSidecarAction::Ignore(false));
+        }
+
         let kzg_commitments: &[_] = if let Some(sidecar) = data_column_sidecar.pre_gloas() {
             &sidecar.kzg_commitments
         } else {
             // [IGNORE] A valid block for the sidecar's `slot` has been seen (via gossip or non-gossip sources).
             // A client MUST queue the sidecar for processing once the block is received or retrieved.
             let Some(block) = self.block(block_root).map(WithStatus::value) else {
-                return Ok(DataColumnSidecarAction::DelayUntilState(
+                return Ok(DataColumnSidecarAction::DelayUntilBlock(
                     data_column_sidecar,
-                    block_root,
                 ));
             };
 
@@ -3742,25 +3761,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if let Some(signed_block_header) = data_column_sidecar.signed_block_header() {
             let block_header = &signed_block_header.message;
-
-            // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot
-            // (a client MAY queue future sidecars for processing at the appropriate slot).
-            if block_header.slot
-                > self
-                    .slot()
-                    .saturating_add(self.chain_config.max_gossip_future_slots())
-            {
-                return Ok(DataColumnSidecarAction::Ignore(false));
-            }
-
-            if self.slot() < block_header.slot {
-                return Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar));
-            }
-
-            // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
-            if !origin.is_from_back_sync() && block_header.slot <= self.finalized_slot() {
-                return Ok(DataColumnSidecarAction::Ignore(false));
-            }
 
             // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
             // Adjustment: Ignore data column sidecars for unseen blocks only
