@@ -101,6 +101,7 @@ impl Observations {
 struct Job {
     request: Request,
     reply: Option<oneshot::Sender<Result<Value>>>,
+    background: bool,
 }
 
 #[derive(Default)]
@@ -116,7 +117,17 @@ struct Queue {
 impl Queue {
     fn next(&mut self) -> Option<Job> {
         loop {
-            let job = if let Some(job) = self.foreground.take() {
+            // A build FCU must not overtake a payload already waiting for this EL.
+            let payload_before_foreground = self.foreground.as_ref().is_some_and(|job| {
+                job.request.kind == Kind::Forkchoice
+                    && self
+                        .payload
+                        .as_ref()
+                        .is_some_and(|payload| payload.request.sequence < job.request.sequence)
+            });
+            let job = if payload_before_foreground {
+                self.payload.take()?
+            } else if let Some(job) = self.foreground.take() {
                 job
             } else {
                 match (&self.payload, &self.forkchoice) {
@@ -130,7 +141,7 @@ impl Queue {
                     (None, None) => return None,
                 }
             };
-            if job.reply.as_ref().is_some_and(oneshot::Sender::is_canceled) {
+            if !job.background && job.reply.as_ref().is_some_and(oneshot::Sender::is_canceled) {
                 continue;
             }
             if job.request.kind == Kind::Forkchoice {
@@ -174,7 +185,7 @@ impl EndpointRequests {
         let mut worker = self.worker.lock().expect("engine worker poisoned");
         let mut queue = self.queue.lock().expect("engine queue poisoned");
         ensure!(!queue.closed, "engine request dispatcher is stopped");
-        if job.reply.is_some() {
+        if !job.background {
             let pending = match job.request.kind {
                 Kind::Payload => &mut queue.payload,
                 Kind::Forkchoice => &mut queue.forkchoice,
@@ -186,13 +197,13 @@ impl EndpointRequests {
                 *pending = None;
             }
         }
-        let slot = match (job.reply.is_some(), job.request.kind) {
-            (true, _) => &mut queue.foreground,
-            (false, Kind::Payload) => &mut queue.payload,
-            (false, Kind::Forkchoice) => &mut queue.forkchoice,
+        let slot = match (job.background, job.request.kind) {
+            (false, _) => &mut queue.foreground,
+            (true, Kind::Payload) => &mut queue.payload,
+            (true, Kind::Forkchoice) => &mut queue.forkchoice,
         };
         ensure!(
-            job.reply.is_none()
+            job.background
                 || slot
                     .as_ref()
                     .is_none_or(|old| old.reply.as_ref().is_some_and(oneshot::Sender::is_canceled)),
@@ -248,14 +259,17 @@ impl EndpointRequests {
                     observations.check(request.method, request.sequence);
                 }
                 let response = response.map(|(value, _)| value);
-                if let Some(reply) = job.reply {
-                    drop(reply.send(response));
-                } else if let Err(error) = response {
+                if job.background
+                    && let Err(error) = &response
+                {
                     warn_with_peers!(
                         "unable to update fallback EL {} with {}: {error:?}",
                         endpoint.url(),
                         request.method
                     );
+                }
+                if let Some(reply) = job.reply {
+                    drop(reply.send(response));
                 }
             }
         }));
@@ -302,12 +316,19 @@ impl EngineRequests {
         }
     }
 
-    pub fn mirror(&self, endpoint: usize, request: &Request) -> Result<()> {
+    pub fn mirror(
+        &self,
+        endpoint: usize,
+        request: &Request,
+    ) -> Result<oneshot::Receiver<Result<Value>>> {
         // shortcut: coalesce unsent updates and rely on EL sync; add replay if recovery tests require it.
+        let (reply, receiver) = oneshot::channel();
         self.endpoints[endpoint].enqueue(Job {
             request: request.mirror(),
-            reply: None,
-        })
+            reply: Some(reply),
+            background: true,
+        })?;
+        Ok(receiver)
     }
 
     pub async fn request(&self, endpoint: usize, request: &Request) -> Result<Value> {
@@ -315,6 +336,7 @@ impl EngineRequests {
         self.endpoints[endpoint].enqueue(Job {
             request: request.clone(),
             reply: Some(reply),
+            background: false,
         })?;
         receiver
             .await
@@ -349,29 +371,63 @@ mod tests {
     }
 
     #[test]
-    fn foreground_does_not_send_an_older_fcu_after_a_newer_one() {
+    fn foreground_fcu_waits_for_pending_payload_and_discards_older_fcu() {
         let (reply, _receiver) = oneshot::channel();
         let mut queue = Queue {
             foreground: Some(Job {
                 request: request(3, Kind::Forkchoice),
                 reply: Some(reply),
+                background: false,
             }),
             payload: Some(Job {
                 request: request(2, Kind::Payload),
                 reply: None,
+                background: true,
             }),
             forkchoice: Some(Job {
                 request: request(1, Kind::Forkchoice),
                 reply: None,
+                background: true,
             }),
             ..Queue::default()
         };
+        assert_eq!(queue.next().expect("payload").request.sequence, 2);
         assert_eq!(
             queue.next().expect("foreground request").request.sequence,
             3
         );
-        assert_eq!(queue.next().expect("payload").request.sequence, 2);
         assert!(queue.next().is_none());
+    }
+
+    #[test]
+    fn reorg_to_an_older_head_is_ordered_by_request_sequence() {
+        let mut reorg = request(11, Kind::Forkchoice);
+        // The newer event points back to an older head; block hashes are not sequence numbers.
+        Arc::make_mut(&mut reorg.params)[0] = json!({"headBlockHash":format!("0x{:064x}", 1)});
+        let mut queue = Queue {
+            last_forkchoice: 10,
+            forkchoice: Some(Job {
+                request: reorg,
+                reply: None,
+                background: true,
+            }),
+            ..Queue::default()
+        };
+        let job = queue.next().expect("new reorg event must be delivered");
+        assert_eq!(job.request.sequence, 11);
+        assert_eq!(
+            job.request.params[0]["headBlockHash"],
+            format!("0x{:064x}", 1)
+        );
+        queue.forkchoice = Some(Job {
+            request: request(10, Kind::Forkchoice),
+            reply: None,
+            background: true,
+        });
+        assert!(
+            queue.next().is_none(),
+            "superseded event must not undo the reorg"
+        );
     }
 
     #[test]
@@ -390,6 +446,7 @@ mod tests {
             foreground: Some(Job {
                 request: request(1, Kind::Forkchoice),
                 reply: Some(reply),
+                background: false,
             }),
             ..Queue::default()
         };
@@ -440,7 +497,7 @@ mod tests {
             fallback_server.url("/b").parse()?,
         ]);
         let requests = EngineRequests::new(&Client::new(), &Arc::default(), endpoints.shared());
-        requests.mirror(1, &request(1, Kind::Forkchoice))?;
+        drop(requests.mirror(1, &request(1, Kind::Forkchoice))?);
         tokio::time::timeout(Duration::from_secs(5), async {
             while !started.load(core::sync::atomic::Ordering::SeqCst) {
                 tokio::task::yield_now().await;
@@ -454,7 +511,7 @@ mod tests {
                 Kind::Forkchoice
             };
             let request = request(sequence, kind);
-            requests.mirror(1, &request)?;
+            drop(requests.mirror(1, &request)?);
             requests.request(0, &request).await?;
         }
         {
@@ -519,11 +576,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failover_build_receives_pending_payload_before_fcu() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let (release, gate) = std::sync::mpsc::channel();
+        let gate = Mutex::new(gate);
+        let started = Arc::new(core::sync::atomic::AtomicBool::new(false));
+        let gate_started = Arc::clone(&started);
+        let known = Arc::new(core::sync::atomic::AtomicBool::new(false));
+        let received = Arc::clone(&known);
+        server.mock(move |when, then| {
+            when.method(POST);
+            then.respond_with(move |request| {
+                use core::sync::atomic::Ordering::SeqCst;
+                let request: Value =
+                    serde_json::from_slice(&request.body_bytes()).expect("JSON request");
+                let result = if request["params"][0]["headBlockHash"] == format!("0x{:064x}", 1) {
+                    gate_started.store(true, SeqCst);
+                    gate.lock()
+                        .expect("gate poisoned")
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release gate");
+                    json!({"payloadStatus":{"status":"VALID"}, "payloadId":null})
+                } else if request["method"] == "engine_newPayloadV1" {
+                    received.store(true, SeqCst);
+                    json!({"status":"VALID"})
+                } else if received.load(SeqCst) {
+                    assert!(
+                        !request["params"][1].is_null(),
+                        "foreground keeps build attributes"
+                    );
+                    json!({"payloadStatus":{"status":"VALID"}, "payloadId":"0x0000000000000001"})
+                } else {
+                    json!({"payloadStatus":{"status":"SYNCING"}, "payloadId":null})
+                };
+                httpmock::HttpMockResponse::builder()
+                    .status(200)
+                    .body(
+                        json!({
+                            "jsonrpc":"2.0", "id":request["id"], "result":result
+                        })
+                        .to_string(),
+                    )
+                    .build()
+            });
+        });
+        let endpoints = Endpoints::new([server.url("/").parse()?]);
+        let requests = Arc::new(EngineRequests::new(
+            &Client::new(),
+            &Arc::default(),
+            endpoints.shared(),
+        ));
+        drop(requests.mirror(0, &request(1, Kind::Forkchoice))?);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !started.load(core::sync::atomic::Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        drop(requests.mirror(0, &request(2, Kind::Payload))?);
+        let mut build = request(3, Kind::Forkchoice);
+        Arc::make_mut(&mut build.params)[1] = json!({"timestamp":"0x1"});
+        let foreground = Arc::clone(&requests);
+        let result = tokio::spawn(async move { foreground.request(0, &build).await });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if requests.endpoints[0]
+                    .queue
+                    .lock()
+                    .expect("queue poisoned")
+                    .foreground
+                    .is_some()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        release.send(())?;
+        let response = tokio::time::timeout(Duration::from_secs(5), result).await???;
+        assert_eq!(response["payloadStatus"]["status"], "VALID");
+        assert_eq!(response["payloadId"], "0x0000000000000001");
+        assert!(known.load(core::sync::atomic::Ordering::SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn closing_dispatcher_rejects_new_requests() -> Result<()> {
         let endpoints = Endpoints::new(["http://127.0.0.1:1".parse()?]);
         let requests = EngineRequests::new(&Client::new(), &Arc::default(), endpoints.shared());
+        let reply = requests.mirror(0, &request(1, Kind::Forkchoice))?;
         requests.close();
-        assert!(requests.mirror(0, &request(1, Kind::Forkchoice)).is_err());
+        assert!(
+            reply.await.is_err(),
+            "shutdown releases pending response waiters"
+        );
+        requests
+            .mirror(0, &request(1, Kind::Forkchoice))
+            .expect_err("dispatcher is closed");
         requests
             .request(0, &request(2, Kind::Forkchoice))
             .await
@@ -541,7 +691,7 @@ mod tests {
         let endpoints = Endpoints::new([server.url("/").parse()?]);
         let requests = EngineRequests::new(&Client::new(), &Arc::default(), endpoints.shared());
         let queue = Arc::downgrade(&requests.endpoints[0].queue);
-        requests.mirror(0, &request(1, Kind::Forkchoice))?;
+        drop(requests.mirror(0, &request(1, Kind::Forkchoice))?);
         tokio::time::timeout(Duration::from_secs(5), async {
             while mock.calls_async().await == 0 {
                 tokio::task::yield_now().await;

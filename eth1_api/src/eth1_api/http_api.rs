@@ -648,22 +648,43 @@ impl Eth1Api {
             prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
         });
         let sequence = self.engine_requests.begin_request().await?;
+        let reuse_mirror = kind == EngineRequestKind::Payload || params[1].is_null();
         let request = EngineRequest::new(*sequence, kind, method, params, timeout);
         let endpoints = self
             .endpoints
             .endpoints_for_request(None)
             .collect::<Vec<_>>();
+        let mut replies = vec![None];
         for endpoint in endpoints.iter().skip(1) {
-            self.engine_requests.mirror(endpoint.index, &request)?;
+            let reply = self.engine_requests.mirror(endpoint.index, &request)?;
+            // Build attributes are removed from mirrors, so only identical calls can share a result.
+            replies.push(reuse_mirror.then_some(reply));
         }
-        for endpoint in endpoints {
-            let response = self
-                .engine_requests
-                .request(endpoint.index, &request)
-                .await
-                .and_then(|value| web3::helpers::decode(value).map_err(Into::into));
+        let mut first_unvalidated = None;
+        for (endpoint, reply) in endpoints.into_iter().zip(replies) {
+            let response = match reply {
+                Some(reply) => reply
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("engine request worker stopped"))),
+                None => self.engine_requests.request(endpoint.index, &request).await,
+            }
+            .and_then(|value| {
+                let status = match kind {
+                    EngineRequestKind::Payload => &value["status"],
+                    EngineRequestKind::Forkchoice => &value["payloadStatus"]["status"],
+                };
+                let unvalidated = status == "SYNCING"
+                    || (kind == EngineRequestKind::Payload && status == "ACCEPTED");
+                web3::helpers::decode(value)
+                    .map(|response| (response, unvalidated))
+                    .map_err(Into::into)
+            });
             match response {
-                Ok(response) => {
+                Ok((response, true)) => {
+                    // Preserve a provisional response if no EL finishes validation.
+                    first_unvalidated.get_or_insert((endpoint, response));
+                }
+                Ok((response, false)) => {
                     self.on_ok_response(endpoint);
                     request.select(endpoint.index);
                     return Ok((endpoint.index, response));
@@ -676,6 +697,11 @@ impl Eth1Api {
                     );
                 }
             }
+        }
+        if let Some((endpoint, response)) = first_unvalidated {
+            self.on_ok_response(endpoint);
+            request.select(endpoint.index);
+            return Ok((endpoint.index, response));
         }
         if let Some(metrics) = &self.metrics {
             metrics.eth1_api_reset_count.inc();
@@ -1608,6 +1634,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failover_reuses_mirror_results_including_timeouts() -> Result<()> {
+        for kind in [EngineRequestKind::Payload, EngineRequestKind::Forkchoice] {
+            let primary = MockServer::start_async().await;
+            let stalled = MockServer::start_async().await;
+            let healthy = MockServer::start_async().await;
+            let (started, wait_for_start) = std::sync::mpsc::channel();
+            let wait_for_start = std::sync::Mutex::new(wait_for_start);
+            primary.mock(move |when, then| {
+                when.method(Method::POST);
+                then.respond_with(move |_| {
+                    wait_for_start
+                        .lock()
+                        .expect("gate poisoned")
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("mirror started");
+                    httpmock::HttpMockResponse::builder().status(500).build()
+                });
+            });
+            let slow = stalled.mock(move |when, then| {
+                when.method(Method::POST);
+                then.delay(Duration::from_secs(5))
+                    .respond_with(move |_| {
+                        let _ = started.send(());
+                        httpmock::HttpMockResponse::builder()
+                            .status(200)
+                            .body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                                "status":"VALID", "payloadStatus":{"status":"VALID"}, "payloadId":null
+                            }}).to_string())
+                            .build()
+                    });
+            });
+            let fast = healthy.mock(|when, then| {
+                when.method(Method::POST);
+                then.json_body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                    "status":"VALID", "payloadStatus":{"status":"VALID"}, "payloadId":null
+                }}));
+            });
+            let api = Eth1Api::new(
+                Arc::new(Config::mainnet()),
+                Client::new(),
+                Arc::default(),
+                vec![
+                    primary.url("/").parse()?,
+                    stalled.url("/").parse()?,
+                    healthy.url("/").parse()?,
+                ],
+                None,
+                None,
+            );
+            let method = match kind {
+                EngineRequestKind::Payload => ENGINE_NEW_PAYLOAD_V1,
+                EngineRequestKind::Forkchoice => ENGINE_FORKCHOICE_UPDATED_V1,
+            };
+            let (endpoint, _): (_, Value) = api
+                .execute_engine(
+                    method,
+                    vec![json!({}), Value::Null],
+                    Duration::from_secs(1),
+                    kind,
+                )
+                .await?;
+            assert_eq!(endpoint, 2);
+            assert!(!api.endpoints.get(1).expect("stalled endpoint").is_online());
+            slow.assert_calls_async(1).await;
+            fast.assert_calls_async(1).await;
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn fallback_is_updated_without_overriding_primary_invalid_response() -> Result<()> {
         let server = MockServer::start_async().await;
         let primary = server.mock(|when, then| {
@@ -1752,3 +1848,7 @@ mod tests {
         BellatrixExecutionPayload::default().into()
     }
 }
+
+#[cfg(test)]
+#[path = "fallback_tests.rs"]
+mod fallback_tests;
