@@ -16,6 +16,7 @@ use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
+    gloas::containers::Attestation as GloasAttestation,
     phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -25,9 +26,9 @@ use crate::{
     attestation_agg_pool::{
         pool::Pool,
         tasks::{
-            BestProposableAttestationsTask, ComputeProposerIndicesTask, InsertAttestationTask,
-            PackProposableAttestationsTask, SetCommitteesWithAggregatorsTask,
-            SetRegisteredValidatorsTask,
+            BestProposableAttestationsTask, ComputeProposerIndicesTask,
+            GloasProposableAttestationsTask, InsertAttestationTask, PackProposableAttestationsTask,
+            SetCommitteesWithAggregatorsTask, SetRegisteredValidatorsTask,
         },
         types::{AttestationKey, PoolAttestation},
     },
@@ -146,6 +147,20 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             pool: self.pool.clone_arc(),
             beacon_state,
         });
+    }
+
+    /// The state must reflect parent processing for the final proposal bid.
+    pub async fn gloas_proposable_attestations(
+        &self,
+        scoring_state: Arc<BeaconState<P>>,
+    ) -> Result<Vec<GloasAttestation<P>>> {
+        self.spawn_task(GloasProposableAttestationsTask {
+            controller: self.controller.clone_arc(),
+            pool: self.pool.clone_arc(),
+            scoring_state,
+            metrics: self.metrics.clone(),
+        })
+        .await
     }
 
     pub fn insert_attestation(

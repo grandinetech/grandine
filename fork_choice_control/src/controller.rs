@@ -13,7 +13,7 @@ use std::{
     collections::HashSet,
     sync::{Arc, mpsc::Sender},
     thread::{Builder, JoinHandle},
-    time::Instant,
+    time::{Instant, SystemTime},
 };
 
 use anyhow::{Context as _, Result};
@@ -55,7 +55,7 @@ use types::{
         primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
     },
     preset::Preset,
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
 use crate::{
@@ -1029,9 +1029,22 @@ where
     ) {
         let store_snapshot = self.owned_store_snapshot();
 
-        let seen_before_deadline = store_snapshot.slot() == execution_payload_envelope.slot()
-            && store_snapshot
-                .is_before_due_bps_deadline(store_snapshot.chain_config().payload_due_bps);
+        // Use the arrival time, not the store tick.
+        // `PAYLOAD_DUE_BPS` need not be an interval start, so ticks cannot place it exactly.
+        let seen_before_deadline = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .is_ok_and(|now| {
+                clock::is_before_due_bps_in_slot(
+                    store_snapshot.chain_config(),
+                    store_snapshot
+                        .last_finalized()
+                        .state(&store_snapshot)
+                        .genesis_time(),
+                    execution_payload_envelope.slot(),
+                    store_snapshot.chain_config().payload_due_bps,
+                    now,
+                )
+            });
 
         self.spawn(ExecutionPayloadEnvelopeTask {
             store_snapshot,

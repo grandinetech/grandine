@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use bls::{PublicKeyBytes, traits::Signature as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
@@ -13,10 +13,10 @@ use helper_functions::{accessors, misc};
 use logging::{exception, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
-use tap::Pipe as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
+    gloas::containers::Attestation as GloasAttestation,
     phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
@@ -59,6 +59,10 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
 
         let started_at = Instant::now();
 
+        ensure!(
+            !beacon_state.is_post_gloas(),
+            "Gloas requires final-bid packing"
+        );
         let attestations = pool.best_proposable_attestations(beacon_state.slot()).await;
         let slot = controller.slot();
 
@@ -103,6 +107,46 @@ pub struct ComputeProposerIndicesTask<P: Preset> {
     pub beacon_state: Arc<BeaconState<P>>,
 }
 
+pub struct GloasProposableAttestationsTask<P: Preset, W: Wait> {
+    pub pool: Arc<Pool<P>>,
+    pub controller: ApiController<P, W>,
+    pub scoring_state: Arc<BeaconState<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W: Wait> PoolTask for GloasProposableAttestationsTask<P, W> {
+    type Output = Vec<GloasAttestation<P>>;
+
+    async fn run(self) -> Result<Self::Output> {
+        let started_at = Instant::now();
+        ensure!(
+            self.scoring_state.is_post_gloas(),
+            "expected Gloas scoring state"
+        );
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .att_pool_best_proposable_attestations_times
+                .start_timer()
+        });
+        // shortcut: bypass slot-only prepacking, reconsider caching after latency measurements.
+        let candidates =
+            candidates_for_packing(&self.controller, &self.pool, &self.scoring_state).await?;
+        let packer = AttestationPacker::new(
+            self.controller.chain_config().clone_arc(),
+            self.scoring_state,
+            true,
+        )?;
+        let outcome = packer.pack_gloas_attestations_greedily([], &candidates);
+        info_with_peers!(
+            "Gloas packing: {} candidates, {} aggregates, elapsed {} us",
+            candidates.len(),
+            outcome.attestations.len(),
+            started_at.elapsed().as_micros()
+        );
+        Ok(outcome.attestations)
+    }
+}
+
 impl<P: Preset> PoolTask for ComputeProposerIndicesTask<P> {
     type Output = ();
 
@@ -135,15 +179,18 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             metrics,
         } = self;
 
+        let started_at = Instant::now();
+
+        let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
+        // The final bid is not available to this background task.
+        if beacon_state.is_post_gloas() {
+            return Ok(());
+        }
         let _timer = metrics.as_ref().map(|metrics| {
             metrics
                 .att_pool_pack_proposable_attestations_times
                 .start_timer()
         });
-
-        let started_at = Instant::now();
-
-        let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot().saturating_add(1);
 
         // Greedy packing is a single deterministic pass, so — unlike the removed solver path —
@@ -397,7 +444,16 @@ async fn pack_attestations_greedily<P: Preset, W: Wait>(
     attestation_packer: &AttestationPacker<P>,
     pool: &Pool<P>,
     state: &BeaconState<P>,
-) -> Result<PackOutcome<P>> {
+) -> Result<PackOutcome<PoolAttestation<P>>> {
+    let candidates = candidates_for_packing(controller, pool, state).await?;
+    Ok(attestation_packer.pack_proposable_attestations_greedily([], &candidates))
+}
+
+async fn candidates_for_packing<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    pool: &Pool<P>,
+    state: &BeaconState<P>,
+) -> Result<Vec<PoolAttestation<P>>> {
     let previous_epoch = accessors::get_previous_epoch(state);
     let current_epoch = accessors::get_current_epoch(state);
     let dependent_root = controller.dependent_root(state, previous_epoch)?;
@@ -414,20 +470,11 @@ async fn pack_attestations_greedily<P: Preset, W: Wait>(
             .chain(&current_epoch_attestations),
     );
 
-    let previous_epoch_attestations = previous_epoch_attestations
-        .iter()
-        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
-
-    let current_epoch_attestations = current_epoch_attestations
-        .iter()
-        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
-
-    attestation_packer
-        .pack_proposable_attestations_greedily(
-            previous_epoch_attestations,
-            current_epoch_attestations,
-        )
-        .pipe(Ok)
+    Ok(current_epoch_attestations
+        .into_iter()
+        .chain(previous_epoch_attestations)
+        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root))
+        .collect())
 }
 
 fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
