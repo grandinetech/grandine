@@ -332,3 +332,26 @@ impl<P: Preset> From<ExecutionPayloadEnvelope<P>> for BlindedExecutionPayloadEnv
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{preset::Mainnet, traits::ExecutionPayloadEnvelope as _};
+
+    use super::*;
+
+    // Signature verification of a blinded envelope relies on this.
+    #[test]
+    fn blinded_envelope_message_has_same_root_as_full() {
+        let full = SignedExecutionPayloadEnvelope::<Mainnet>::full();
+        let blinded = SignedBlindedExecutionPayloadEnvelope::from(full.clone());
+
+        assert_eq!(
+            blinded.message.hash_tree_root(),
+            full.message.hash_tree_root(),
+        );
+        assert_eq!(
+            blinded.message.withdrawals_root(),
+            full.message.withdrawals_root(),
+        );
+    }
+}

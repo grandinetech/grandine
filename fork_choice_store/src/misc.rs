@@ -1439,18 +1439,15 @@ impl ProposerPreferencesOrigin {
 }
 
 #[derive(Debug)]
-pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
-    Accept(Arc<SignedExecutionPayloadEnvelope<P>>),
+pub enum ExecutionPayloadEnvelopeAction<P: Preset, E = SignedExecutionPayloadEnvelope<P>> {
+    Accept(Arc<E>),
     Ignore(Publishable),
-    DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
-    DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
-    DelayUntilData(
-        Arc<SignedExecutionPayloadEnvelope<P>>,
-        Arc<SignedBeaconBlock<P>>,
-    ),
+    DelayUntilBeaconBlock(Arc<E>, H256),
+    DelayUntilState(Arc<E>, H256),
+    DelayUntilData(Arc<E>, Arc<SignedBeaconBlock<P>>),
 }
 
-impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
+impl<P: Preset, E> ExecutionPayloadEnvelopeAction<P, E> {
     #[must_use]
     pub const fn accepted(&self) -> bool {
         matches!(self, Self::Accept(_))

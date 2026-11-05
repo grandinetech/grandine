@@ -765,26 +765,7 @@ pub fn apply_parent_execution_payload<P: Preset>(
     // > [New in Gloas:EIP7688] Progressive lists are unbounded at the SSZ level.
     // > Request counts are validated during processing instead.
     // > Note that `deposits` intentionally has no limit in the spec.
-    ensure_operation_count::<P>(
-        "withdrawal requests",
-        execution_requests.withdrawals.len_usize(),
-        P::MaxWithdrawalRequestsPerPayload::USIZE,
-    )?;
-    ensure_operation_count::<P>(
-        "consolidation requests",
-        execution_requests.consolidations.len_usize(),
-        P::MaxConsolidationRequestsPerPayload::USIZE,
-    )?;
-    ensure_operation_count::<P>(
-        "builder deposit requests",
-        execution_requests.builder_deposits.len_usize(),
-        P::MaxBuilderDepositRequestsPerPayload::USIZE,
-    )?;
-    ensure_operation_count::<P>(
-        "builder exit requests",
-        execution_requests.builder_exits.len_usize(),
-        P::MaxBuilderExitRequestsPerPayload::USIZE,
-    )?;
+    verify_execution_requests_limits(execution_requests)?;
 
     let parent_bid = state.latest_execution_payload_bid().clone();
     let parent_slot = state.latest_block_header().slot;
@@ -882,6 +863,31 @@ pub fn process_execution_payload_bid<P: Preset>(
     *state.latest_execution_payload_bid_mut() = signed_bid.message.clone();
 
     Ok(())
+}
+
+pub fn verify_execution_requests_limits<P: Preset>(
+    execution_requests: &ExecutionRequests<P>,
+) -> Result<()> {
+    ensure_operation_count::<P>(
+        "withdrawal requests",
+        execution_requests.withdrawals.len_usize(),
+        P::MaxWithdrawalRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "consolidation requests",
+        execution_requests.consolidations.len_usize(),
+        P::MaxConsolidationRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "builder deposit requests",
+        execution_requests.builder_deposits.len_usize(),
+        P::MaxBuilderDepositRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "builder exit requests",
+        execution_requests.builder_exits.len_usize(),
+        P::MaxBuilderExitRequestsPerPayload::USIZE,
+    )
 }
 
 fn ensure_operation_count<P: Preset>(

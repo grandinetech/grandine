@@ -53,7 +53,7 @@ use types::{
         primitives::{DomainType, Epoch, H256, Slot},
     },
     preset::Preset,
-    traits::{BeaconBlock, BeaconState},
+    traits::{self, BeaconBlock, BeaconState},
 };
 
 use crate::{
@@ -388,6 +388,15 @@ impl<P: Preset> SignForSingleFork<P> for CombinedBeaconBlock<P> {
 impl<P: Preset> SignForSingleFork<P> for dyn BeaconBlock<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot())
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for dyn traits::ExecutionPayloadEnvelope<P> + '_ {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_BUILDER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::ExecutionPayloadEnvelope;
 
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.slot())

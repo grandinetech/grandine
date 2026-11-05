@@ -63,7 +63,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
+    gloas::containers::PayloadEnvelopeIdentifier,
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -73,7 +73,7 @@ use types::{
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{self, BeaconState as _, SignedBeaconBlock as _},
 };
 
 use crate::{
@@ -2351,7 +2351,7 @@ where
                         "execution payload envelope accepted (\
                             block root: {beacon_block_root:?}, \
                             slot: {slot}, \
-                            seen before deadline: {seen_before_deadline} \
+                            seen before deadline: {seen_before_deadline}\
                         )",
                     );
                 } else {
@@ -2710,7 +2710,10 @@ where
                 }
 
                 let source = error.to_string();
-                warn_with_peers!("execution payload envelope rejected (error: {error:?})");
+                warn_with_peers!(
+                    "execution payload envelope rejected \
+                     (identifier: {payload_envelope_identifier:?}, error: {error:?})",
+                );
 
                 let (gossip_id, sender) = origin.split();
 
@@ -3895,11 +3898,11 @@ where
     fn accept_execution_payload_envelope(
         &mut self,
         wait_group: &W,
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        envelope: Arc<impl traits::SignedExecutionPayloadEnvelope<P>>,
         is_before_deadline: bool,
     ) {
-        let beacon_block_root = envelope.block_root();
-        let execution_block_hash = envelope.message.payload.block_hash;
+        let beacon_block_root = envelope.message().block_root();
+        let execution_block_hash = envelope.message().block_hash();
 
         self.store_mut()
             .apply_execution_payload_envelope(envelope, is_before_deadline);
@@ -6462,6 +6465,7 @@ fn reply_delayed_data_column_sidecar_validation_result<P: Preset>(
 mod tests {
     use eth2_libp2p::PeerId;
     use types::{
+        gloas::containers::SignedExecutionPayloadEnvelope,
         phase0::primitives::SubnetId,
         preset::{Mainnet, Minimal},
     };
