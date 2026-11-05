@@ -10,8 +10,8 @@ pub use crate::{
         ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse,
         MAX_PAYLOAD_BODIES_PER_REQUEST, PayloadAttributes, PayloadAttributesV1,
         PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatus,
-        PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus, RawExecutionRequests,
-        RequestType, WithdrawalV1,
+        PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus, PreparedPayloadId,
+        RawExecutionRequests, RequestType, WithdrawalV1,
     },
 };
 

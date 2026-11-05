@@ -16,7 +16,7 @@ use types::{
 
 use crate::{
     EngineGetBlobsParams, ExecutionServiceMessage,
-    types::{PayloadAttributes, PayloadId, PayloadStatusV1},
+    types::{PayloadAttributes, PayloadStatusV1, PreparedPayloadId},
 };
 
 pub trait ExecutionEngine<P: Preset> {
@@ -46,7 +46,7 @@ pub trait ExecutionEngine<P: Preset> {
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        sender: Option<Sender<Option<PayloadId>>>,
+        sender: Option<Sender<Option<PreparedPayloadId>>>,
     );
 
     /// [`notify_new_payload`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/beacon-chain.md#notify_new_payload)
@@ -93,7 +93,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        sender: Option<Sender<Option<PayloadId>>>,
+        sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
         (*self).notify_forkchoice_updated(
             head_eth1_block_hash,
@@ -153,7 +153,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        sender: Option<Sender<Option<PayloadId>>>,
+        sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
         self.as_ref().notify_forkchoice_updated(
             head_eth1_block_hash,
@@ -221,7 +221,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        sender: Option<Sender<Option<PayloadId>>>,
+        sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
         self.lock()
             .expect("execution engine mutex is poisoned")
@@ -286,7 +286,7 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
         _safe_eth1_block_hash: ExecutionBlockHash,
         _finalized_eth1_block_hash: ExecutionBlockHash,
         _payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        _sender: Option<Sender<Option<PayloadId>>>,
+        _sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
     }
 
@@ -342,7 +342,7 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
         _safe_eth1_block_hash: ExecutionBlockHash,
         _finalized_eth1_block_hash: ExecutionBlockHash,
         _payload_attributes: Either<Phase, PayloadAttributes<P>>,
-        _sender: Option<Sender<Option<PayloadId>>>,
+        _sender: Option<Sender<Option<PreparedPayloadId>>>,
     ) {
     }
 

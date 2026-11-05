@@ -158,6 +158,8 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
             }
         }
 
+        #[cfg(not(feature = "embed"))]
+        self.api.stop_engine_requests();
         Ok(())
     }
 

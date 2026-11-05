@@ -18,6 +18,8 @@ pub use eth1_api::{EmbedAdapter, RawForkChoiceUpdatedResponse, set_adapter};
 mod auth;
 mod deposit_event;
 mod endpoints;
+#[cfg(not(feature = "embed"))]
+mod engine_requests;
 mod eth1_api;
 mod eth1_block;
 mod eth1_execution_engine;

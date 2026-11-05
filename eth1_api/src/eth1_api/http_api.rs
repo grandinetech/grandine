@@ -10,7 +10,8 @@ use execution_engine::{
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
     ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
-    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, RawExecutionRequests,
+    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, PreparedPayloadId,
+    RawExecutionRequests,
 };
 use futures::{Future, channel::mpsc::UnboundedSender};
 use logging::warn_with_peers;
@@ -43,6 +44,7 @@ use crate::{
     auth::Auth,
     deposit_event::DepositEvent,
     endpoints::{ClientVersions, Endpoint, Endpoints},
+    engine_requests::{EngineRequests, Kind as EngineRequestKind, Request as EngineRequest},
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
@@ -67,6 +69,7 @@ pub struct Eth1Api {
     client: Client,
     pub(crate) auth: Arc<Auth>,
     pub(crate) endpoints: Endpoints,
+    engine_requests: EngineRequests,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     pub(crate) metrics: Option<Arc<Metrics>>,
 }
@@ -81,11 +84,14 @@ impl Eth1Api {
         eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
+        let endpoints = Endpoints::new(eth1_rpc_urls);
+        let engine_requests = EngineRequests::new(&client, &auth, endpoints.shared());
         Self {
             config,
             client,
             auth,
-            endpoints: Endpoints::new(eth1_rpc_urls),
+            endpoints,
+            engine_requests,
             eth1_api_to_metrics_tx,
             metrics,
         }
@@ -265,26 +271,26 @@ impl Eth1Api {
             (ExecutionPayload::Bellatrix(payload), None) => {
                 let payload_v1 = ExecutionPayloadV1::from(payload);
                 let params = vec![serde_json::to_value(payload_v1)?];
-                self.execute(
+                self.execute_engine(
                     ENGINE_NEW_PAYLOAD_V1,
                     params,
-                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_NEW_PAYLOAD_TIMEOUT,
+                    EngineRequestKind::Payload,
                 )
                 .await
-                .map(WithClientVersions::result)
+                .map(|(_, result)| result)
             }
             (ExecutionPayload::Capella(payload), None) => {
                 let payload_v2 = ExecutionPayloadV2::from(payload);
                 let params = vec![serde_json::to_value(payload_v2)?];
-                self.execute(
+                self.execute_engine(
                     ENGINE_NEW_PAYLOAD_V2,
                     params,
-                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_NEW_PAYLOAD_TIMEOUT,
+                    EngineRequestKind::Payload,
                 )
                 .await
-                .map(WithClientVersions::result)
+                .map(|(_, result)| result)
             }
             (
                 ExecutionPayload::Deneb(payload),
@@ -299,14 +305,14 @@ impl Eth1Api {
                     serde_json::to_value(versioned_hashes)?,
                     serde_json::to_value(parent_beacon_block_root)?,
                 ];
-                self.execute(
+                self.execute_engine(
                     ENGINE_NEW_PAYLOAD_V3,
                     params,
-                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_NEW_PAYLOAD_TIMEOUT,
+                    EngineRequestKind::Payload,
                 )
                 .await
-                .map(WithClientVersions::result)
+                .map(|(_, result)| result)
             }
             (
                 ExecutionPayload::Deneb(payload),
@@ -326,14 +332,14 @@ impl Eth1Api {
                     serde_json::to_value(raw_execution_requests)?,
                 ];
 
-                self.execute(
+                self.execute_engine(
                     ENGINE_NEW_PAYLOAD_V4,
                     params,
-                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_NEW_PAYLOAD_TIMEOUT,
+                    EngineRequestKind::Payload,
                 )
                 .await
-                .map(WithClientVersions::result)
+                .map(|(_, result)| result)
             }
             (
                 ExecutionPayload::Gloas(payload),
@@ -353,14 +359,14 @@ impl Eth1Api {
                     serde_json::to_value(raw_execution_requests)?,
                 ];
 
-                self.execute(
+                self.execute_engine(
                     ENGINE_NEW_PAYLOAD_V5,
                     params,
-                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_NEW_PAYLOAD_TIMEOUT,
+                    EngineRequestKind::Payload,
                 )
                 .await
-                .map(WithClientVersions::result)
+                .map(|(_, result)| result)
             }
             _ => bail!(Error::InvalidParameters),
         }
@@ -399,49 +405,48 @@ impl Eth1Api {
             serde_json::to_value(payload_attributes)?,
         ];
 
-        let RawForkChoiceUpdatedResponse {
-            payload_id,
-            payload_status,
-        } = match phase {
+        let (
+            endpoint,
+            RawForkChoiceUpdatedResponse {
+                payload_id,
+                payload_status,
+            },
+        ) = match phase {
             Phase::Bellatrix => {
-                self.execute(
+                self.execute_engine(
                     ENGINE_FORKCHOICE_UPDATED_V1,
                     params,
-                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
-                    None,
+                    ENGINE_FORKCHOICE_UPDATED_TIMEOUT,
+                    EngineRequestKind::Forkchoice,
                 )
                 .await?
-                .result
             }
             Phase::Capella => {
-                self.execute(
+                self.execute_engine(
                     ENGINE_FORKCHOICE_UPDATED_V2,
                     params,
-                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
-                    None,
+                    ENGINE_FORKCHOICE_UPDATED_TIMEOUT,
+                    EngineRequestKind::Forkchoice,
                 )
                 .await?
-                .result
             }
             Phase::Deneb | Phase::Electra | Phase::Fulu => {
-                self.execute(
+                self.execute_engine(
                     ENGINE_FORKCHOICE_UPDATED_V3,
                     params,
-                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
-                    None,
+                    ENGINE_FORKCHOICE_UPDATED_TIMEOUT,
+                    EngineRequestKind::Forkchoice,
                 )
                 .await?
-                .result
             }
             Phase::Gloas => {
-                self.execute(
+                self.execute_engine(
                     ENGINE_FORKCHOICE_UPDATED_V4,
                     params,
-                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
-                    None,
+                    ENGINE_FORKCHOICE_UPDATED_TIMEOUT,
+                    EngineRequestKind::Forkchoice,
                 )
                 .await?
-                .result
             }
             _ => {
                 // This match arm will silently match any new phases.
@@ -470,7 +475,10 @@ impl Eth1Api {
 
         Ok(ForkChoiceUpdatedResponse {
             payload_status,
-            payload_id,
+            payload_id: payload_id.map(|payload_id| PreparedPayloadId {
+                payload_id,
+                endpoint: Some(endpoint),
+            }),
         })
     }
 
@@ -487,17 +495,20 @@ impl Eth1Api {
     /// [`engine_getPayloadV6`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_getpayloadv6
     pub async fn get_payload<P: Preset>(
         &self,
-        payload_id: PayloadId,
+        payload_id: PreparedPayloadId,
     ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
-        match payload_id {
+        let endpoint = payload_id
+            .endpoint
+            .ok_or_else(|| anyhow::anyhow!("payload ID has no HTTP endpoint"))?;
+        match payload_id.payload_id {
             PayloadId::Bellatrix(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV1Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV1Response<P>>(
                     ENGINE_GET_PAYLOAD_V1,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -505,11 +516,11 @@ impl Eth1Api {
             PayloadId::Capella(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV2Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV2Response<P>>(
                     ENGINE_GET_PAYLOAD_V2,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -517,11 +528,11 @@ impl Eth1Api {
             PayloadId::Deneb(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV3Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV3Response<P>>(
                     ENGINE_GET_PAYLOAD_V3,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -529,11 +540,11 @@ impl Eth1Api {
             PayloadId::Electra(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV4Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV4Response<P>>(
                     ENGINE_GET_PAYLOAD_V4,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -541,11 +552,11 @@ impl Eth1Api {
             PayloadId::Fulu(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV5Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV5Response<P>>(
                     ENGINE_GET_PAYLOAD_V5,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -553,11 +564,11 @@ impl Eth1Api {
             PayloadId::Gloas(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
-                self.execute::<EngineGetPayloadV6Response<P>>(
+                self.execute_on_endpoint::<EngineGetPayloadV6Response<P>>(
                     ENGINE_GET_PAYLOAD_V6,
                     params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
+                    ENGINE_GET_PAYLOAD_TIMEOUT,
+                    endpoint,
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
@@ -620,6 +631,123 @@ impl Eth1Api {
         );
 
         Ok(bodies)
+    }
+
+    pub(crate) fn stop_engine_requests(&self) {
+        self.engine_requests.close();
+    }
+
+    async fn execute_engine<T: DeserializeOwned + Send>(
+        &self,
+        method: &'static str,
+        params: Vec<Value>,
+        timeout: Duration,
+        kind: EngineRequestKind,
+    ) -> Result<(usize, T)> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
+        });
+        let sequence = self.engine_requests.begin_request().await?;
+        let reuse_mirror = kind == EngineRequestKind::Payload || params[1].is_null();
+        let request = EngineRequest::new(*sequence, kind, method, params, timeout);
+        let endpoints = self
+            .endpoints
+            .endpoints_for_request(None)
+            .collect::<Vec<_>>();
+        let mut replies = vec![None];
+        for endpoint in endpoints.iter().skip(1) {
+            let reply = self.engine_requests.mirror(endpoint.index, &request)?;
+            // Build attributes are removed from mirrors, so only identical calls can share a result.
+            replies.push(reuse_mirror.then_some(reply));
+        }
+        let mut first_unvalidated = None;
+        for (endpoint, reply) in endpoints.into_iter().zip(replies) {
+            let response = match reply {
+                Some(reply) => reply
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("engine request worker stopped"))),
+                None => self.engine_requests.request(endpoint.index, &request).await,
+            }
+            .and_then(|value| {
+                let status = match kind {
+                    EngineRequestKind::Payload => &value["status"],
+                    EngineRequestKind::Forkchoice => &value["payloadStatus"]["status"],
+                };
+                let unvalidated = status == "SYNCING"
+                    || (kind == EngineRequestKind::Payload && status == "ACCEPTED");
+                web3::helpers::decode(value)
+                    .map(|response| (response, unvalidated))
+                    .map_err(Into::into)
+            });
+            match response {
+                Ok((response, true)) => {
+                    // Preserve a provisional response if no EL finishes validation.
+                    first_unvalidated.get_or_insert((endpoint, response));
+                }
+                Ok((response, false)) => {
+                    self.on_ok_response(endpoint);
+                    request.select(endpoint.index);
+                    return Ok((endpoint.index, response));
+                }
+                Err(error) => {
+                    self.on_error_response(endpoint);
+                    warn_with_peers!(
+                        "Eth1 RPC endpoint {} failed {method}: {error:?}",
+                        endpoint.url()
+                    );
+                }
+            }
+        }
+        if let Some((endpoint, response)) = first_unvalidated {
+            self.on_ok_response(endpoint);
+            request.select(endpoint.index);
+            return Ok((endpoint.index, response));
+        }
+        if let Some(metrics) = &self.metrics {
+            metrics.eth1_api_reset_count.inc();
+        }
+        ensure!(!self.endpoints.is_empty(), Error::NoEndpointsProvided);
+        bail!(Error::EndpointsExhausted)
+    }
+
+    async fn execute_on_endpoint<T: DeserializeOwned + Send>(
+        &self,
+        method: &'static str,
+        params: Vec<Value>,
+        timeout: Duration,
+        index: usize,
+    ) -> Result<WithClientVersions<T>> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
+        });
+        let endpoint = self
+            .endpoints
+            .get(index)
+            .ok_or_else(|| anyhow::anyhow!("payload endpoint {index} is not configured"))?;
+        let api = self.build_api_for_request(endpoint);
+        let result = CallFuture::new(api.transport().execute_with_headers(
+            method,
+            params,
+            self.auth.headers()?,
+            Some(timeout),
+        ))
+        .await;
+        match result {
+            Ok(result) => {
+                self.on_ok_response(endpoint);
+                Ok(WithClientVersions {
+                    client_versions: Some(endpoint.get_client_versions()),
+                    result,
+                })
+            }
+            Err(error) => {
+                // A missing build does not mean that the EL is unreachable.
+                if !matches!(&error, Web3Error::Rpc(error) if error.code.code() == -38001) {
+                    self.on_error_response(endpoint);
+                }
+                Err(error.into())
+            }
+        }
     }
 
     async fn execute<T: DeserializeOwned + Send>(
@@ -954,7 +1082,12 @@ mod tests {
 
         let payload_id = PayloadId::Bellatrix(H64(hex!("a5f7426cdca69a73")));
 
-        eth1_api.get_payload::<Mainnet>(payload_id).await?;
+        eth1_api
+            .get_payload::<Mainnet>(PreparedPayloadId {
+                payload_id,
+                endpoint: Some(0),
+            })
+            .await?;
 
         Ok(())
     }
@@ -1025,7 +1158,13 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Capella(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
+        let payload = eth1_api
+            .get_payload::<Mainnet>(PreparedPayloadId {
+                payload_id,
+                endpoint: Some(0),
+            })
+            .await?
+            .result;
 
         assert_eq!(payload.value.phase(), Phase::Capella);
 
@@ -1102,7 +1241,13 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
+        let payload = eth1_api
+            .get_payload::<Mainnet>(PreparedPayloadId {
+                payload_id,
+                endpoint: Some(0),
+            })
+            .await?
+            .result;
 
         assert_eq!(payload.value.phase(), Phase::Deneb);
         assert_eq!(
@@ -1186,7 +1331,13 @@ mod tests {
         ));
 
         let payload_id = PayloadId::Electra(H64(hex!("a5f7426cdca69a73")));
-        let payload = eth1_api.get_payload::<Mainnet>(payload_id).await?.result;
+        let payload = eth1_api
+            .get_payload::<Mainnet>(PreparedPayloadId {
+                payload_id,
+                endpoint: Some(0),
+            })
+            .await?
+            .result;
 
         assert_eq!(payload.value.phase(), Phase::Deneb);
         assert_eq!(
@@ -1482,7 +1633,222 @@ mod tests {
         Ok(eth1_api)
     }
 
+    #[tokio::test]
+    async fn failover_reuses_mirror_results_including_timeouts() -> Result<()> {
+        for kind in [EngineRequestKind::Payload, EngineRequestKind::Forkchoice] {
+            let primary = MockServer::start_async().await;
+            let stalled = MockServer::start_async().await;
+            let healthy = MockServer::start_async().await;
+            let (started, wait_for_start) = std::sync::mpsc::channel();
+            let wait_for_start = std::sync::Mutex::new(wait_for_start);
+            primary.mock(move |when, then| {
+                when.method(Method::POST);
+                then.respond_with(move |_| {
+                    wait_for_start
+                        .lock()
+                        .expect("gate poisoned")
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("mirror started");
+                    httpmock::HttpMockResponse::builder().status(500).build()
+                });
+            });
+            let slow = stalled.mock(move |when, then| {
+                when.method(Method::POST);
+                then.delay(Duration::from_secs(5))
+                    .respond_with(move |_| {
+                        let _ = started.send(());
+                        httpmock::HttpMockResponse::builder()
+                            .status(200)
+                            .body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                                "status":"VALID", "payloadStatus":{"status":"VALID"}, "payloadId":null
+                            }}).to_string())
+                            .build()
+                    });
+            });
+            let fast = healthy.mock(|when, then| {
+                when.method(Method::POST);
+                then.json_body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                    "status":"VALID", "payloadStatus":{"status":"VALID"}, "payloadId":null
+                }}));
+            });
+            let api = Eth1Api::new(
+                Arc::new(Config::mainnet()),
+                Client::new(),
+                Arc::default(),
+                vec![
+                    primary.url("/").parse()?,
+                    stalled.url("/").parse()?,
+                    healthy.url("/").parse()?,
+                ],
+                None,
+                None,
+            );
+            let method = match kind {
+                EngineRequestKind::Payload => ENGINE_NEW_PAYLOAD_V1,
+                EngineRequestKind::Forkchoice => ENGINE_FORKCHOICE_UPDATED_V1,
+            };
+            let (endpoint, _): (_, Value) = api
+                .execute_engine(
+                    method,
+                    vec![json!({}), Value::Null],
+                    Duration::from_secs(1),
+                    kind,
+                )
+                .await?;
+            assert_eq!(endpoint, 2);
+            assert!(!api.endpoints.get(1).expect("stalled endpoint").is_online());
+            slow.assert_calls_async(1).await;
+            fast.assert_calls_async(1).await;
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fallback_is_updated_without_overriding_primary_invalid_response() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let primary = server.mock(|when, then| {
+            when.method(Method::POST).path("/primary");
+            then.json_body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                "status":"INVALID", "latestValidHash":null, "validationError":"invalid payload"
+            }}));
+        });
+        let fallback = server.mock(|when, then| {
+            when.method(Method::POST).path("/fallback");
+            then.json_body(json!({"jsonrpc":"2.0", "id":1, "result":{
+                "status":"VALID", "latestValidHash":H256::zero(), "validationError":null
+            }}));
+        });
+        let api = Eth1Api::new(
+            Arc::new(Config::mainnet()),
+            Client::new(),
+            Arc::default(),
+            vec![
+                server.url("/primary").parse()?,
+                server.url("/fallback").parse()?,
+            ],
+            None,
+            None,
+        );
+        let response = api.new_payload::<Mainnet>(default_payload(), None).await?;
+        assert!(response.status.is_invalid());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while fallback.calls_async().await == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        primary.assert_calls_async(1).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn payload_id_stays_with_issuing_endpoint_after_primary_recovers() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let primary = server.mock(|when, then| {
+            when.method(Method::POST).path("/primary");
+            then.status(500);
+        });
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let recorded_calls = Arc::clone(&calls);
+        server.mock(move |when, then| {
+            when.method(Method::POST).path("/fallback");
+            then.respond_with(move |request| {
+                let request: Value = serde_json::from_slice(&request.body_bytes()).expect("JSON request");
+                recorded_calls.lock().expect("calls poisoned").push(request.clone());
+                let result = match request["method"].as_str().expect("method") {
+                    ENGINE_FORKCHOICE_UPDATED_V1 => json!({
+                        "payloadStatus":{"status":"VALID", "latestValidHash":H256::zero(), "validationError":null},
+                        "payloadId": if request["params"][1].is_null() { Value::Null } else { json!("0xa5f7426cdca69a73") }
+                    }),
+                    ENGINE_GET_PAYLOAD_V1 => serde_json::to_value(ExecutionPayloadV1::from(BellatrixExecutionPayload::<Mainnet>::default())).expect("payload JSON"),
+                    method => panic!("unexpected method {method}"),
+                };
+                httpmock::HttpMockResponse::builder().status(200)
+                    .body(json!({"jsonrpc":"2.0", "id":request["id"], "result":result}).to_string()).build()
+            });
+        });
+        let api = Eth1Api::new(
+            Arc::new(Config::mainnet()),
+            Client::new(),
+            Arc::default(),
+            vec![
+                server.url("/primary").parse()?,
+                server.url("/fallback").parse()?,
+            ],
+            None,
+            None,
+        );
+        let response = api
+            .forkchoice_updated::<Mainnet>(
+                H256::zero(),
+                H256::zero(),
+                H256::zero(),
+                Either::Right(PayloadAttributes::Bellatrix(
+                    execution_engine::PayloadAttributesV1 {
+                        timestamp: 1,
+                        prev_randao: H256::zero(),
+                        suggested_fee_recipient:
+                            types::phase0::primitives::ExecutionAddress::default(),
+                    },
+                )),
+            )
+            .await?;
+        let payload_id = response.payload_id.expect("build ID");
+        assert_eq!(payload_id.endpoint, Some(1));
+        api.endpoints
+            .get(0)
+            .expect("primary")
+            .set_online_status(true);
+        api.get_payload::<Mainnet>(payload_id).await?;
+        primary.assert_calls_async(1).await;
+        let calls = calls.lock().expect("calls poisoned");
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call["method"] == ENGINE_GET_PAYLOAD_V1)
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unknown_build_does_not_mark_endpoint_offline_or_query_another_el() -> Result<()> {
+        let server = MockServer::start_async().await;
+        let other = server.mock(|when, then| {
+            when.method(Method::POST).path("/other");
+            then.status(500);
+        });
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/owner");
+            then.json_body(json!({"jsonrpc":"2.0", "id":1,
+                "error":{"code":-38001, "message":"Unknown payload"}}));
+        });
+        let api = Eth1Api::new(
+            Arc::new(Config::mainnet()),
+            Client::new(),
+            Arc::default(),
+            vec![server.url("/other").parse()?, server.url("/owner").parse()?],
+            None,
+            None,
+        );
+        let result = api
+            .get_payload::<Mainnet>(PreparedPayloadId {
+                payload_id: PayloadId::Bellatrix(H64::zero()),
+                endpoint: Some(1),
+            })
+            .await;
+        assert!(result.is_err());
+        assert!(api.endpoints.get(1).expect("owner").is_online());
+        other.assert_calls_async(0).await;
+        Ok(())
+    }
+
     fn default_payload<P: Preset>() -> ExecutionPayload<P> {
         BellatrixExecutionPayload::default().into()
     }
 }
+
+#[cfg(test)]
+#[path = "fallback_tests.rs"]
+mod fallback_tests;

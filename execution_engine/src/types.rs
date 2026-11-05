@@ -1043,7 +1043,14 @@ impl PayloadValidationStatus {
 #[derive(Debug)]
 pub struct ForkChoiceUpdatedResponse {
     pub payload_status: PayloadStatusV1,
-    pub payload_id: Option<PayloadId>,
+    pub payload_id: Option<PreparedPayloadId>,
+}
+
+/// A local payload build and the HTTP endpoint that owns it (`None` for embedded execution).
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedPayloadId {
+    pub payload_id: PayloadId,
+    pub endpoint: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]

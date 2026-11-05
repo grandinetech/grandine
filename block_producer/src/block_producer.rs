@@ -20,7 +20,7 @@ use dedicated_executor::{DedicatedExecutor, Job};
 use eth1_api::{ApiController, ClientVersions, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadAttributesV4, PayloadId,
+    PayloadAttributesV3, PayloadAttributesV4, PreparedPayloadId,
 };
 use features::Feature;
 use fork_choice_control::{Snapshot, Wait};
@@ -110,9 +110,7 @@ use types::{
     traits::{BeaconState as _, PostBellatrixBeaconState, PostGloasBeaconState},
 };
 
-use crate::misc::{
-    BlindedBlockPublication, PayloadIdEntry, ProposerData, ValidatorBlindedBlock, build_graffiti,
-};
+use crate::misc::{BlindedBlockPublication, ProposerData, ValidatorBlindedBlock, build_graffiti};
 
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
@@ -820,7 +818,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     attester_slashings: Mutex<Vec<AttesterSlashing<P>>>,
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
     payload_cache: PayloadCache<P>,
-    payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
+    payload_id_cache: Mutex<SizedCache<(H256, Slot), PreparedPayloadId>>,
     // Cached payload root by `BlockBuildContext.head_block_root` for `payload_cache` retrieval
     // used to construct execution payload envelope
     cached_payload_roots: Mutex<SizedCache<H256, H256>>,
@@ -2337,7 +2335,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         safe_block_hash: ExecutionBlockHash,
         finalized_block_hash: ExecutionBlockHash,
         payload_attributes: PayloadAttributes<P>,
-    ) -> Result<Option<PayloadId>> {
+    ) -> Result<Option<PreparedPayloadId>> {
         let chain_config = &self.producer_context.chain_config;
         let state = self.beacon_state.as_ref();
         let epoch = accessors::get_current_epoch(state);
@@ -2660,8 +2658,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .lock()
             .await
             .cache_get(&(self.head_block_root, self.beacon_state.slot()))
-            .copied()
-            .map(PayloadIdEntry::Cached);
+            .copied();
 
         if payload_id.is_none() {
             warn_with_peers!(
@@ -2677,7 +2674,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         payload_attributes,
                     )
                     .await?
-                    .map(PayloadIdEntry::Live)
             }
         }
 
@@ -2692,7 +2688,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let payload = match self
             .producer_context
             .execution_engine
-            .get_execution_payload(payload_id.id())
+            .get_execution_payload(payload_id)
             .await
         {
             Ok(payload) => payload,
@@ -2701,40 +2697,31 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     "unable to retrieve payload with payload_id {payload_id:?}: {error:?}"
                 );
 
-                match payload_id {
-                    PayloadIdEntry::Cached(_) => {
-                        let payload_id = if let Some(payload_attributes) =
-                            self.prepare_execution_payload_attributes().await?
-                        {
-                            self.prepare_execution_payload(
-                                snapshot.safe_execution_payload_hash(),
-                                snapshot.finalized_execution_payload_hash(),
-                                payload_attributes,
-                            )
-                            .await?
-                        } else {
-                            None
-                        };
+                // A payload ID belongs to its issuing EL. Rebuild once instead of
+                // sending the same ID to a different endpoint, including for live builds.
+                let payload_id = if let Some(payload_attributes) =
+                    self.prepare_execution_payload_attributes().await?
+                {
+                    self.prepare_execution_payload(
+                        snapshot.safe_execution_payload_hash(),
+                        snapshot.finalized_execution_payload_hash(),
+                        payload_attributes,
+                    )
+                    .await?
+                } else {
+                    None
+                };
 
-                        if let Some(payload_id) = payload_id {
-                            info_with_peers!(
-                                "successfully retrieved non-cached payload_id: {payload_id:?}"
-                            );
-
-                            self.producer_context
-                                .execution_engine
-                                .get_execution_payload(payload_id)
-                                .await?
-                        } else {
-                            error_with_peers!(
-                                "payload_id from execution layer was not received; This will lead to missed block"
-                            );
-
-                            return Ok(None);
-                        }
-                    }
-                    PayloadIdEntry::Live(_) => return Err(error),
-                }
+                let Some(payload_id) = payload_id else {
+                    error_with_peers!(
+                        "payload_id from execution layer was not received; This will lead to missed block"
+                    );
+                    return Ok(None);
+                };
+                self.producer_context
+                    .execution_engine
+                    .get_execution_payload(payload_id)
+                    .await?
             }
         };
 
@@ -3157,6 +3144,10 @@ fn select_weighted_bid<'bid, P: Preset, S>(
 
     Some((bid, source))
 }
+
+#[cfg(test)]
+#[path = "payload_retry_tests.rs"]
+mod payload_retry_tests;
 
 #[cfg(test)]
 mod gloas_scoring_tests {
