@@ -3749,7 +3749,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     .slot()
                     .saturating_add(self.chain_config.max_gossip_future_slots())
             {
-                return Ok(DataColumnSidecarAction::Ignore(false));
+                return Ok(DataColumnSidecarAction::IgnoreTooFarInFuture);
             }
 
             if self.slot() < block_header.slot {

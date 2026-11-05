@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
@@ -136,6 +136,12 @@ impl<P: Preset> Context<P> {
 
         if phase.is_peerdas_activated() {
             controller.on_store_sampling_columns((0..P::NumberOfColumns::U64).collect());
+
+            // This message has no wait group, so `wait_for_tasks` cannot cover it.
+            // Without this, tasks may validate columns against a snapshot with no sampling columns.
+            while controller.store_snapshot().sampling_columns().is_empty() {
+                std::thread::yield_now();
+            }
         }
 
         Self {
@@ -415,6 +421,28 @@ impl<P: Preset> Context<P> {
 
         self.controller().wait_for_tasks();
         self.next_p2p_message()
+    }
+
+    pub async fn on_requested_data_column_sidecar(
+        &mut self,
+        data_column_sidecar: DataColumnSidecar<P>,
+        peer_id: PeerId,
+    ) -> Option<P2pMessage<P>> {
+        self.controller()
+            .on_requested_data_column_sidecar(Arc::new(data_column_sidecar), false, peer_id)
+            .await;
+
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
+    // A retried column whose block is unknown asks sync for that block.
+    pub fn assert_block_needed(&mut self, expected_root: H256, expected_peer_id: PeerId) {
+        assert!(matches!(
+            self.next_p2p_message(),
+            Some(P2pMessage::BlockNeeded(block_root, Some(peer_id)))
+                if block_root == expected_root && peer_id == expected_peer_id,
+        ));
     }
 
     pub fn on_acceptable_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
@@ -1582,6 +1610,12 @@ impl Context<Minimal> {
     pub fn electra_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Electra))
             .expect("minimal configuration modified to start in Electra is valid")
+    }
+
+    #[must_use]
+    pub fn fulu_minimal() -> Self {
+        Self::with_config(Config::minimal().start_and_stay_in(Phase::Fulu))
+            .expect("minimal configuration modified to start in Fulu is valid")
     }
 
     #[must_use]

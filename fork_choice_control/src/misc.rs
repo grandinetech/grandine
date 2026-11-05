@@ -227,6 +227,12 @@ pub enum MutatorIgnoreReason {
     BlockQueueFull { block_root: H256 },
     #[strum(serialize = "blob_queue_full")]
     BlobQueueFull { blob_identifier: BlobIdentifier },
+    // Fork choice dropped the column without delaying it (slot too far ahead of the store).
+    // Sync must forget it, or it will never fetch the column again.
+    #[strum(serialize = "data_column_ignored")]
+    DataColumnIgnored {
+        data_column_identifier: DataColumnIdentifier,
+    },
     #[strum(serialize = "data_column_queue_full")]
     DataColumnQueueFull {
         data_column_identifier: DataColumnIdentifier,

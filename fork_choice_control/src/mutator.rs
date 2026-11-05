@@ -2087,6 +2087,23 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
+            Ok(DataColumnSidecarAction::IgnoreTooFarInFuture) => {
+                debug_with_peers!(
+                    "data column sidecar ignored: too far in the future \
+                    (identifier: {data_column_identifier:?})"
+                );
+
+                let (gossip_id, sender) = origin.split();
+
+                self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                    gossip_id,
+                    MutatorIgnoreReason::DataColumnIgnored {
+                        data_column_identifier,
+                    },
+                ));
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
+            }
             Ok(DataColumnSidecarAction::DelayUntilState(data_column_sidecar, block_root)) => {
                 let slot = data_column_sidecar.slot();
 

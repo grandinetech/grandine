@@ -1225,6 +1225,10 @@ impl<P: Preset> BlobSidecarAction<P> {
 pub enum DataColumnSidecarAction<P: Preset> {
     Accept(Arc<DataColumnSidecar<P>>),
     Ignore(Publishable),
+    // Slot is too far ahead of the store. The store clock may just be behind,
+    // so the column may still be needed.
+    // Other ignores mean nothing is left to fetch, so they must not trigger a refetch.
+    IgnoreTooFarInFuture,
     DelayUntilState(Arc<DataColumnSidecar<P>>, H256),
     DelayUntilParent(Arc<DataColumnSidecar<P>>),
     DelayUntilSlot(Arc<DataColumnSidecar<P>>),
@@ -1238,7 +1242,7 @@ impl<P: Preset> DataColumnSidecarAction<P> {
 
     #[must_use]
     pub const fn ignored(&self) -> bool {
-        matches!(self, Self::Ignore(_))
+        matches!(self, Self::Ignore(_) | Self::IgnoreTooFarInFuture)
     }
 }
 

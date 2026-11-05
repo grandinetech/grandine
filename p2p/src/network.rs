@@ -504,7 +504,8 @@ impl<P: Preset, W: Wait> Network<P, W> {
                                     P2pToSync::BlobSidecarNotConsidered(blob_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 },
-                                MutatorIgnoreReason::DataColumnQueueFull { data_column_identifier } => {
+                                MutatorIgnoreReason::DataColumnIgnored { data_column_identifier }
+                                | MutatorIgnoreReason::DataColumnQueueFull { data_column_identifier } => {
                                     P2pToSync::DataColumnSidecarNotConsidered(data_column_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 },
