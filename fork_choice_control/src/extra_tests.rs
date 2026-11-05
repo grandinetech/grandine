@@ -17,13 +17,17 @@ use std::sync::Arc;
 use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
+use eth2_libp2p::PeerId;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use spec_test_utils::BlsSetting;
+use ssz::ContiguousList;
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
 use types::{
-    combined::Attestation,
+    combined::{Attestation, DataColumnSidecar},
+    deneb::primitives::{KzgCommitment, KzgProof},
+    fulu::containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
     gloas::consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
     nonstandard::{PayloadStatus, Phase},
     phase0::{
@@ -32,7 +36,7 @@ use types::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint,
             IndexedAttestation,
         },
-        primitives::H256,
+        primitives::{H256, Slot},
     },
     preset::Minimal,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -45,6 +49,7 @@ use fork_choice_store::PayloadPresence;
 use crate::{
     helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
     messages::P2pMessage,
+    misc::MutatorIgnoreReason,
     storage::StoredBlock,
 };
 
@@ -3720,4 +3725,109 @@ fn rejects_single_attestation_from_validator_outside_committee() {
         context.on_gossip_attestation(forged, subnet_id),
         Some(P2pMessage::Reject(_, _)),
     ));
+}
+
+// Passes the structural checks that run before the future slot check. Nothing else is valid.
+fn fulu_data_column_sidecar_at_slot(slot: Slot) -> DataColumnSidecar<Minimal> {
+    let mut sidecar = FuluDataColumnSidecar::<Minimal> {
+        column: ContiguousList::try_from(vec![Box::default()])
+            .expect("one cell is within the limit"),
+        kzg_commitments: ContiguousList::try_from(vec![KzgCommitment::default()])
+            .expect("one commitment is within the limit"),
+        kzg_proofs: ContiguousList::try_from(vec![KzgProof::default()])
+            .expect("one proof is within the limit"),
+        ..Default::default()
+    };
+
+    sidecar.signed_block_header.message.slot = slot;
+
+    DataColumnSidecar::Fulu(sidecar)
+}
+
+// Sync records a requested column before fork choice sees it.
+// If p2p is not told to forget it, sync never fetches it again and its block cannot import.
+// This stops at the mutator's message: `p2p` depends on this crate, so it is out of reach here.
+#[tokio::test(flavor = "multi_thread")]
+async fn requested_data_column_sidecar_too_far_in_future_tells_p2p_to_forget_it() {
+    let mut context = Context::fulu_minimal();
+
+    let data_column_sidecar = fulu_data_column_sidecar_at_slot(2);
+    let expected_identifier = DataColumnIdentifier::from(&data_column_sidecar);
+
+    // Store is at slot 0 and allows 1 future slot.
+    let message = context
+        .on_requested_data_column_sidecar(data_column_sidecar, PeerId::random())
+        .await;
+
+    assert!(matches!(
+        message,
+        Some(P2pMessage::IgnoreWithReason(
+            None,
+            MutatorIgnoreReason::DataColumnIgnored { data_column_identifier },
+        )) if data_column_identifier == expected_identifier,
+    ));
+}
+
+// Gossipsub still needs the validation outcome for this message.
+#[tokio::test(flavor = "multi_thread")]
+async fn gossip_data_column_sidecar_too_far_in_future_reports_outcome_and_tells_p2p_to_forget_it() {
+    let mut context = Context::fulu_minimal();
+
+    let data_column_sidecar = fulu_data_column_sidecar_at_slot(2);
+    let expected_identifier = DataColumnIdentifier::from(&data_column_sidecar);
+
+    let message = context.on_data_column_sidecar(data_column_sidecar).await;
+
+    assert!(matches!(
+        message,
+        Some(P2pMessage::IgnoreWithReason(
+            Some(_),
+            MutatorIgnoreReason::DataColumnIgnored { data_column_identifier },
+        )) if data_column_identifier == expected_identifier,
+    ));
+}
+
+// Shows what a refetch gets once the clock catches up: delayed, then retried on the tick.
+#[tokio::test(flavor = "multi_thread")]
+async fn refetched_data_column_sidecar_is_retried_when_its_slot_arrives() {
+    let mut context = Context::fulu_minimal();
+
+    let data_column_sidecar = fulu_data_column_sidecar_at_slot(2);
+    let block_root = data_column_sidecar.beacon_block_root();
+    let peer_id = PeerId::random();
+
+    let message = context
+        .on_requested_data_column_sidecar(data_column_sidecar.clone(), peer_id)
+        .await;
+
+    assert!(matches!(
+        message,
+        Some(P2pMessage::IgnoreWithReason(
+            None,
+            MutatorIgnoreReason::DataColumnIgnored { .. },
+        )),
+    ));
+
+    context.on_slot(1);
+
+    let message = context
+        .on_requested_data_column_sidecar(data_column_sidecar, peer_id)
+        .await;
+
+    assert!(message.is_none());
+
+    context.on_slot(2);
+    context.assert_block_needed(block_root, peer_id);
+}
+
+// Finalized columns are never needed again. Forgetting them would only cause redownloads.
+#[tokio::test(flavor = "multi_thread")]
+async fn data_column_sidecar_at_finalized_slot_stays_known_to_sync() {
+    let mut context = Context::fulu_minimal();
+
+    let message = context
+        .on_data_column_sidecar(fulu_data_column_sidecar_at_slot(0))
+        .await;
+
+    assert!(matches!(message, Some(P2pMessage::Ignore(_))));
 }
