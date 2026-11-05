@@ -197,7 +197,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                 }
 
                 if response.payload_status.status.is_syncing() {
-                    warn_with_peers!(
+                    debug_with_peers!(
                         "engine_forkchoiceUpdated returned SYNCING status \
                          (head_eth1_block_hash: {head_eth1_block_hash:?}, \
                           safe_eth1_block_hash: {safe_eth1_block_hash:?}, \
@@ -236,7 +236,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         }
 
         if response.status.is_syncing() {
-            warn_with_peers!(
+            debug_with_peers!(
                 "engine_newPayload returned SYNCING status \
                  (beacon_block_root: {beacon_block_root:?}, \
                   block_number: {block_number}, \
