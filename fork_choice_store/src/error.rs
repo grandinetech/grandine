@@ -4,14 +4,13 @@ use anyhow::Error as AnyhowError;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
-    PayloadExpectedWithdrawals,
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{
-        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    gloas::containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
+    phase0::primitives::{
+        Epoch, ExecutionBlockHash, H256, Slot, SubnetId, UnixSeconds, ValidatorIndex,
     },
-    phase0::primitives::{Epoch, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -215,77 +214,76 @@ pub enum Error<P: Preset> {
         builder_version: u8,
         expected: u8,
     },
-    #[error(
-        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
-    )]
+    #[error("execution payload block hash mismatch (expected: {expected:?}, actual: {actual:?})")]
     ExecutionPayloadBlockHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<H256>,
+        expected: Box<ExecutionBlockHash>,
+        actual: Box<ExecutionBlockHash>,
     },
     #[error(
         "execution payload block hash is not computed correctly \
-         (envelope: {envelope:?}, computed: {computed:?})"
+         (envelope: {in_envelope:?}, computed: {computed:?})"
     )]
     ExecutionPayloadBlockHashInvalid {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        in_envelope: Box<H256>,
         computed: Box<H256>,
     },
     #[error(
-        "execution payload beacon block root mismatch (envelope: {envelope:?}, expected: {expected:?})"
+        "execution payload beacon block root mismatch (expected: {expected:?}, actual: {actual:?})"
     )]
     ExecutionPayloadBeaconBlockRootMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
+        actual: Box<H256>,
     },
     #[error(
-        "execution payload parent beacon block root mismatch (envelope: {envelope:?}, expected: {expected:?})"
+        "execution payload parent beacon block root mismatch (expected: {expected:?}, actual: {actual:?})"
     )]
     ExecutionPayloadParentBeaconBlockRootMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
+        actual: Box<H256>,
     },
-    #[error("execution payload gas_limit mismatch (envelope: {envelope:?}, expected: {expected})")]
-    ExecutionPayloadGasLimitMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Gas,
-    },
-    #[error(
-        "execution payload parent hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
-    )]
+    #[error("execution payload gas_limit mismatch (expected: {expected}, actual: {actual})")]
+    ExecutionPayloadGasLimitMismatch { expected: Gas, actual: Gas },
+    #[error("execution payload parent hash mismatch (expected: {expected:?}, actual: {actual:?})")]
     ExecutionPayloadParentHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<H256>,
+        expected: Box<ExecutionBlockHash>,
+        actual: Box<ExecutionBlockHash>,
     },
-    #[error(
-        "execution payload prev randao mismatch (envelope: {envelope:?}, expected: {expected:?})"
-    )]
+    #[error("execution payload prev randao mismatch (expected: {expected:?}, actual: {actual:?})")]
     ExecutionPayloadPrevRandaoMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
+        actual: Box<H256>,
     },
     #[error(
-        "execution payload requests hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+        "execution payload requests hash mismatch (expected: {expected:?}, actual: {actual:?})"
     )]
     ExecutionPayloadRequestsHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
+        actual: Box<H256>,
     },
     #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
     ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error(
-        "execution payload timestamp mismatch (envelope: {envelope:?}, expected: {expected:?})"
+        "execution payload envelope slot does not match the slot of its block: \
+         block slot {block_slot}, envelope slot {envelope_slot}"
     )]
+    ExecutionPayloadEnvelopeBlockSlotMismatch {
+        block_slot: Slot,
+        envelope_slot: Slot,
+    },
+    #[error("execution payload timestamp mismatch (expected: {expected}, actual: {actual})")]
     ExecutionPayloadTimestampMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: u64,
+        expected: UnixSeconds,
+        actual: UnixSeconds,
     },
     #[error(
-        "execution payload withdrawals mismatch (envelope: {envelope:?}, expected: {expected:?})"
+        "execution payload withdrawals root mismatch (expected: {expected:?}, actual: {actual:?})"
     )]
     ExecutionPayloadWithdrawalsHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<PayloadExpectedWithdrawals>,
+        expected: Box<H256>,
+        actual: Box<H256>,
     },
+    #[error("execution payload has too many withdrawals: {in_payload} > {maximum}")]
+    ExecutionPayloadTooManyWithdrawals { in_payload: usize, maximum: usize },
     #[error("proposer preferences has invalid proposal slot: {signed_preferences:?}")]
     InvalidProposerPreferencesProposalSlot {
         signed_preferences: Arc<SignedProposerPreferences>,
@@ -316,10 +314,8 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
-    #[error("payload envelope's block is invalid: {payload_envelope:?}")]
-    PayloadEnvelopeInvalidBlock {
-        payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-    },
+    #[error("payload envelope's block is invalid (block root: {block_root:?})")]
+    PayloadEnvelopeInvalidBlock { block_root: H256 },
     #[error(
         "payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})"
     )]

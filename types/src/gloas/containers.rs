@@ -222,6 +222,7 @@ pub struct ExecutionPayload<P: Preset> {
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Ssz)]
+#[ssz(stable(active = [1; 19]))]
 pub struct ExecutionPayloadHeader<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
     pub fee_recipient: ExecutionAddress,

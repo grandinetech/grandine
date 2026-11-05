@@ -45,6 +45,7 @@ use tap::Pipe as _;
 use tracing::{debug_span, instrument};
 use transition_functions::{
     combined,
+    gloas::verify_execution_requests_limits,
     unphased::{self, ProcessSlots, StateRootPolicy},
 };
 use typenum::Unsigned as _;
@@ -3995,14 +3996,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    pub fn validate_execution_payload_envelope(
+    pub fn validate_execution_payload_envelope<E>(
         &self,
-        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        envelope: &Arc<E>,
         origin: &ExecutionPayloadEnvelopeOrigin,
         execution_engine: &(impl ExecutionEngine<P> + Send),
         _verifier: impl Verifier + Send,
-    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let block_root = envelope.block_root();
+    ) -> Result<ExecutionPayloadEnvelopeAction<P, E>>
+    where
+        E: traits::SignedExecutionPayloadEnvelope<P>,
+    {
+        let block_root = envelope.message().block_root();
         let chain_link = self.chain_link(block_root);
 
         let block_info = || chain_link.map(|chain_link| chain_link.block.clone_arc());
@@ -4011,7 +4015,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // > Make a copy of the state to avoid mutability issues
             self
                 .state_cache
-                .before_or_at_slot(self, block_root, envelope.slot())
+                .before_or_at_slot(self, block_root, envelope.message().slot())
                 .or_else(|| {
                     if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
                     {
@@ -4020,7 +4024,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         warn_with_peers!(
                             "processing slots for beacon state not found in state cache before state transition \
                             (block root: {block_root:?} at slot {})\n{}",
-                            envelope.slot(),
+                            envelope.message().slot(),
                             Backtrace::force_capture(),
                         );
                     }
@@ -4038,14 +4042,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         )
     }
 
-    pub fn validate_execution_payload_envelope_for_gossip_rules(
+    pub fn validate_execution_payload_envelope_for_gossip_rules<E>(
         &self,
-        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        envelope: &Arc<E>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-    ) -> Option<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.slot();
-        let beacon_block_root = envelope.block_root();
-        let builder_index = envelope.builder_index();
+    ) -> Option<ExecutionPayloadEnvelopeAction<P, E>>
+    where
+        E: traits::SignedExecutionPayloadEnvelope<P>,
+    {
+        let slot = envelope.message().slot();
+        let beacon_block_root = envelope.message().block_root();
+        let builder_index = envelope.message().builder_index();
 
         if slot
             > self
@@ -4075,17 +4082,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn validate_execution_payload_envelope_with_state(
+    pub fn validate_execution_payload_envelope_with_state<E>(
         &self,
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        envelope: Arc<E>,
         origin: &ExecutionPayloadEnvelopeOrigin,
         block_info: impl FnOnce() -> Option<Arc<SignedBeaconBlock<P>>>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         execution_engine: &(impl ExecutionEngine<P> + Send),
-    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.slot();
-        let beacon_block_root = envelope.block_root();
-        let builder_index = envelope.builder_index();
+    ) -> Result<ExecutionPayloadEnvelopeAction<P, E>>
+    where
+        E: traits::SignedExecutionPayloadEnvelope<P>,
+    {
+        let slot = envelope.message().slot();
+        let beacon_block_root = envelope.message().block_root();
+        let builder_index = envelope.message().builder_index();
 
         if let Some(payload_action) =
             self.validate_execution_payload_envelope_for_gossip_rules(&envelope, origin)
@@ -4097,7 +4107,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ensure!(
             !self.rejected_block_roots.contains(&beacon_block_root),
             Error::<P>::PayloadEnvelopeInvalidBlock {
-                payload_envelope: envelope
+                block_root: beacon_block_root,
             },
         );
 
@@ -4117,11 +4127,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .with_payload_bid()
             .map(|body| &body.signed_execution_payload_bid().message)
         else {
-            return Err(Error::PayloadEnvelopeInvalidBlock {
-                payload_envelope: envelope,
+            return Err(Error::<P>::PayloadEnvelopeInvalidBlock {
+                block_root: beacon_block_root,
             }
             .into());
         };
+
+        // [REJECT] block.slot == payload.slot_number
+        ensure!(
+            block.message().slot() == slot,
+            Error::<P>::ExecutionPayloadEnvelopeBlockSlotMismatch {
+                block_slot: block.message().slot(),
+                envelope_slot: slot,
+            },
+        );
 
         // [REJECT] envelope.builder_index == bid.builder_index
         ensure!(
@@ -4133,27 +4152,41 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         ensure!(
-            envelope.message.payload.prev_randao == bid.prev_randao,
+            envelope.message().prev_randao() == bid.prev_randao,
             Error::<P>::ExecutionPayloadPrevRandaoMismatch {
-                envelope,
                 expected: Box::new(bid.prev_randao),
+                actual: Box::new(envelope.message().prev_randao()),
             },
         );
 
         ensure!(
-            envelope.message.payload.gas_limit == bid.gas_limit,
+            envelope.message().gas_limit() == bid.gas_limit,
             Error::<P>::ExecutionPayloadGasLimitMismatch {
-                envelope,
                 expected: bid.gas_limit,
+                actual: envelope.message().gas_limit(),
             },
         );
 
         // [REJECT] payload.block_hash == bid.block_hash
         ensure!(
-            envelope.message.payload.block_hash == bid.block_hash,
+            envelope.message().block_hash() == bid.block_hash,
             Error::<P>::ExecutionPayloadBlockHashMismatch {
-                envelope,
                 expected: Box::new(bid.block_hash),
+                actual: Box::new(envelope.message().block_hash()),
+            },
+        );
+
+        // [REJECT] The execution request counts are within their limits
+        verify_execution_requests_limits(envelope.message().execution_requests())?;
+
+        // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
+        let execution_requests_root = envelope.message().execution_requests().hash_tree_root();
+
+        ensure!(
+            execution_requests_root == bid.execution_requests_root,
+            Error::<P>::ExecutionPayloadRequestsHashMismatch {
+                expected: Box::new(bid.execution_requests_root),
+                actual: Box::new(execution_requests_root),
             },
         );
 
@@ -4175,12 +4208,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         };
 
-        // [REJECT] block.slot equals envelope.slot
         ensure!(
             state.slot() == slot,
             Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
                 expected: state.slot(),
                 actual: slot,
+            },
+        );
+
+        let expected_timestamp =
+            misc::compute_timestamp_at_slot(&self.chain_config, &state, state.slot())?;
+
+        ensure!(
+            envelope.message().timestamp() == expected_timestamp,
+            Error::<P>::ExecutionPayloadTimestampMismatch {
+                expected: expected_timestamp,
+                actual: envelope.message().timestamp(),
             },
         );
 
@@ -4191,29 +4234,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let header_root = header.hash_tree_root();
 
         ensure!(
-            envelope.message.beacon_block_root == header_root,
+            envelope.message().block_root() == header_root,
             Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
-                envelope,
                 expected: Box::new(header_root),
+                actual: Box::new(beacon_block_root),
             },
         );
 
         let parent_beacon_block_root = state.latest_block_header().parent_root;
 
         ensure!(
-            envelope.message.parent_beacon_block_root == parent_beacon_block_root,
+            envelope.message().parent_root() == parent_beacon_block_root,
             Error::<P>::ExecutionPayloadParentBeaconBlockRootMismatch {
-                envelope,
                 expected: Box::new(parent_beacon_block_root),
-            },
-        );
-
-        // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
-        ensure!(
-            envelope.message.execution_requests.hash_tree_root() == bid.execution_requests_root,
-            Error::<P>::ExecutionPayloadRequestsHashMismatch {
-                envelope,
-                expected: Box::new(bid.execution_requests_root),
+                actual: Box::new(envelope.message().parent_root()),
             },
         );
 
@@ -4226,32 +4260,36 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         ensure!(
-            envelope.message.payload.parent_hash == post_gloas_state.latest_block_hash(),
+            envelope.message().parent_hash() == post_gloas_state.latest_block_hash(),
             Error::<P>::ExecutionPayloadParentHashMismatch {
-                envelope,
                 expected: Box::new(post_gloas_state.latest_block_hash()),
+                actual: Box::new(envelope.message().parent_hash()),
             },
         );
 
-        let expected_timestamp =
-            misc::compute_timestamp_at_slot(&self.chain_config, &state, state.slot())?;
+        // [REJECT] The number of withdrawals is within the limit
+        if let Some(payload) = envelope.message().execution_payload() {
+            let withdrawal_count = payload.withdrawals.len_usize();
+
+            ensure!(
+                withdrawal_count <= P::MaxWithdrawalsPerPayload::USIZE,
+                Error::<P>::ExecutionPayloadTooManyWithdrawals {
+                    in_payload: withdrawal_count,
+                    maximum: P::MaxWithdrawalsPerPayload::USIZE,
+                },
+            );
+        }
+
+        let withdrawals_root = envelope.message().withdrawals_root();
+        let expected_withdrawals_root = post_gloas_state
+            .payload_expected_withdrawals()
+            .hash_tree_root();
 
         ensure!(
-            envelope.message.payload.timestamp == expected_timestamp,
-            Error::<P>::ExecutionPayloadTimestampMismatch {
-                envelope,
-                expected: expected_timestamp,
-            },
-        );
-
-        ensure!(
-            envelope.message.payload.withdrawals.hash_tree_root()
-                == post_gloas_state
-                    .payload_expected_withdrawals()
-                    .hash_tree_root(),
+            withdrawals_root == expected_withdrawals_root,
             Error::<P>::ExecutionPayloadWithdrawalsHashMismatch {
-                envelope,
-                expected: Box::new(post_gloas_state.payload_expected_withdrawals().clone()),
+                expected: Box::new(expected_withdrawals_root),
+                actual: Box::new(withdrawals_root),
             },
         );
 
@@ -4265,49 +4303,55 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             // [REJECT] The builder signature envelope.signature is valid
             SingleVerifier.verify_singular(
-                envelope.message.signing_root(&self.chain_config, &state),
-                envelope.signature,
+                envelope.message().signing_root(&self.chain_config, &state),
+                envelope.signature(),
                 self.pubkey_cache.get_or_insert(pubkey)?,
                 SignatureKind::ExecutionPayloadEnvelope,
             )?;
         }
 
-        if origin.verify_block_hash() {
-            // > assert execution_engine.verify_and_notify_new_payload(...)
-            // That includes `is_valid_block_hash`. It is checked here, without the execution layer.
-            // It runs after the signature check, so unsigned junk payloads are not hashed.
-            let computed_block_hash = compute_block_hash(
-                &envelope.message.payload,
-                envelope.message.parent_beacon_block_root,
-                &envelope.message.execution_requests,
+        // A blinded envelope comes from storage, so its payload was already sent to the EL.
+        if let Some(payload) = envelope.message().execution_payload() {
+            if origin.verify_block_hash() {
+                // > assert execution_engine.verify_and_notify_new_payload(...)
+                // That includes `is_valid_block_hash`. It is checked here, without the execution layer.
+                // It runs after the signature check, so unsigned junk payloads are not hashed.
+                let computed_block_hash = compute_block_hash(
+                    payload,
+                    envelope.message().parent_root(),
+                    envelope.message().execution_requests(),
+                )?;
+
+                ensure!(
+                    computed_block_hash == envelope.message().block_hash(),
+                    Error::<P>::ExecutionPayloadBlockHashInvalid {
+                        in_envelope: Box::new(envelope.message().block_hash()),
+                        computed: Box::new(computed_block_hash),
+                    },
+                );
+            }
+
+            let versioned_hashes = bid
+                .blob_kzg_commitments
+                .iter()
+                .copied()
+                .map(misc::kzg_commitment_to_versioned_hash)
+                .collect();
+
+            let params = Some(ExecutionPayloadParams::Gloas {
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests: envelope.message().execution_requests().clone(),
+            });
+
+            // TODO(Gloas): review envelope validation for HTTP API
+            execution_engine.notify_new_payload(
+                beacon_block_root,
+                payload.clone().into(),
+                params,
+                None,
             )?;
-
-            ensure!(
-                computed_block_hash == envelope.message.payload.block_hash,
-                Error::<P>::ExecutionPayloadBlockHashInvalid {
-                    envelope,
-                    computed: Box::new(computed_block_hash),
-                },
-            );
         }
-
-        let versioned_hashes = bid
-            .blob_kzg_commitments
-            .iter()
-            .copied()
-            .map(misc::kzg_commitment_to_versioned_hash)
-            .collect();
-
-        let params = Some(ExecutionPayloadParams::Gloas {
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests: envelope.message.execution_requests.clone(),
-        });
-
-        let payload = envelope.message.payload.clone().into();
-
-        // TODO(Gloas): review envelope validation for HTTP API
-        execution_engine.notify_new_payload(beacon_block_root, payload, params, None)?;
 
         Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
@@ -4940,14 +4984,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .pipe(Ok)
     }
 
-    pub fn apply_execution_payload_envelope(
+    pub fn apply_execution_payload_envelope<E: traits::SignedExecutionPayloadEnvelope<P>>(
         &mut self,
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        envelope: Arc<E>,
         is_before_deadline: bool,
     ) {
-        let slot = envelope.slot();
-        let beacon_block_root = envelope.block_root();
-        let builder_index = envelope.builder_index();
+        let slot = envelope.message().slot();
+        let beacon_block_root = envelope.message().block_root();
+        let builder_index = envelope.message().builder_index();
 
         let is_block_invalid = self.is_block_invalid(beacon_block_root);
         let first_delivery = self.payloads.insert(beacon_block_root).is_none();
@@ -4961,7 +5005,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if let Some(location) = self.unfinalized_locations.get(&beacon_block_root).copied() {
             self.execution_payload_locations
-                .insert(envelope.message.payload.block_hash, location);
+                .insert(envelope.message().block_hash(), location);
 
             // On first delivery the status says nothing about this payload.
             // It was inherited, caught up, or set for an envelope the execution engine rejected.
@@ -4974,7 +5018,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        if !is_block_invalid {
+        if !is_block_invalid && let Some(envelope) = envelope.into_full() {
             self.execution_payload_envelope_cache.insert(envelope);
         }
     }

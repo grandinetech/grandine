@@ -106,8 +106,14 @@ use crate::{
         containers::{
             Attestation as GloasAttestation, AttesterSlashing as GloasAttesterSlashing,
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, IndexedAttestation as GloasIndexedAttestation, PayloadAttestation,
+            BlindedExecutionPayloadEnvelope as GloasBlindedExecutionPayloadEnvelope,
+            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
+            ExecutionPayloadEnvelope as GloasExecutionPayloadEnvelope,
+            ExecutionRequests as GloasExecutionRequests,
+            IndexedAttestation as GloasIndexedAttestation, PayloadAttestation,
+            SignedBlindedExecutionPayloadEnvelope as GloasSignedBlindedExecutionPayloadEnvelope,
             SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -1100,6 +1106,110 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBlindedBeaconBlock<P> {
             Self::Electra(block) => block.signature,
             Self::Fulu(block) => block.signature,
         }
+    }
+}
+
+pub trait SignedExecutionPayloadEnvelope<P: Preset>: Debug + Send + Sync {
+    fn message(&self) -> &dyn ExecutionPayloadEnvelope<P>;
+    fn signature(&self) -> SignatureBytes;
+
+    // `None` when the payload body has been stripped.
+    fn into_full(self: Arc<Self>) -> Option<Arc<GloasSignedExecutionPayloadEnvelope<P>>>;
+}
+
+impl<P: Preset> SignedExecutionPayloadEnvelope<P> for GloasSignedExecutionPayloadEnvelope<P> {
+    fn message(&self) -> &dyn ExecutionPayloadEnvelope<P> {
+        &self.message
+    }
+
+    fn signature(&self) -> SignatureBytes {
+        self.signature
+    }
+
+    fn into_full(self: Arc<Self>) -> Option<Arc<Self>> {
+        Some(self)
+    }
+}
+
+impl<P: Preset> SignedExecutionPayloadEnvelope<P>
+    for GloasSignedBlindedExecutionPayloadEnvelope<P>
+{
+    fn message(&self) -> &dyn ExecutionPayloadEnvelope<P> {
+        &self.message
+    }
+
+    fn signature(&self) -> SignatureBytes {
+        self.signature
+    }
+
+    fn into_full(self: Arc<Self>) -> Option<Arc<GloasSignedExecutionPayloadEnvelope<P>>> {
+        None
+    }
+}
+
+pub trait ExecutionPayloadEnvelope<P: Preset>: SszHash<PackingFactor = U1> {
+    fn slot(&self) -> Slot;
+    fn block_root(&self) -> H256;
+    fn builder_index(&self) -> BuilderIndex;
+    fn parent_root(&self) -> H256;
+    fn execution_requests(&self) -> &GloasExecutionRequests<P>;
+    fn parent_hash(&self) -> ExecutionBlockHash;
+    fn block_hash(&self) -> ExecutionBlockHash;
+    fn prev_randao(&self) -> H256;
+    fn gas_limit(&self) -> Gas;
+    fn timestamp(&self) -> UnixSeconds;
+    fn withdrawals_root(&self) -> H256;
+
+    // `None` when the payload body has been stripped.
+    fn execution_payload(&self) -> Option<&GloasExecutionPayload<P>>;
+}
+
+#[duplicate_item(
+    implementor
+    payload
+    execution_requests_body
+    withdrawals_root_body
+    execution_payload_body;
+
+    [GloasExecutionPayloadEnvelope<P>]
+    [payload]
+    [&self.execution_requests]
+    [self.payload.withdrawals.hash_tree_root()]
+    [Some(&self.payload)];
+
+    [GloasBlindedExecutionPayloadEnvelope<P>]
+    [payload_header]
+    [&self.execution_requests]
+    [self.payload_header.withdrawals_root]
+    [None];
+)]
+impl<P: Preset> ExecutionPayloadEnvelope<P> for implementor {
+    fn execution_requests(&self) -> &GloasExecutionRequests<P> {
+        execution_requests_body
+    }
+
+    fn withdrawals_root(&self) -> H256 {
+        withdrawals_root_body
+    }
+
+    fn execution_payload(&self) -> Option<&GloasExecutionPayload<P>> {
+        execution_payload_body
+    }
+
+    #[duplicate_item(
+        method          field                      return_type;
+        [slot]          [payload.slot_number]      [Slot];
+        [block_root]    [beacon_block_root]        [H256];
+        [builder_index] [builder_index]            [BuilderIndex];
+        [parent_root]   [parent_beacon_block_root] [H256];
+        [parent_hash]   [payload.parent_hash]      [ExecutionBlockHash];
+        [block_hash]    [payload.block_hash]       [ExecutionBlockHash];
+        [prev_randao]   [payload.prev_randao]      [H256];
+        [gas_limit]     [payload.gas_limit]        [Gas];
+        [timestamp]     [payload.timestamp]        [UnixSeconds];
+    )]
+    fn method(&self) -> return_type {
+        self.field
     }
 }
 

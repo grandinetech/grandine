@@ -249,7 +249,7 @@ pub mod fulu {
 pub mod gloas {
     pub use block_processing::{
         apply_parent_execution_payload, get_expected_withdrawals, process_parent_execution_payload,
-        process_withdrawals, validate_execution_payload_bid,
+        process_withdrawals, validate_execution_payload_bid, verify_execution_requests_limits,
     };
 
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
