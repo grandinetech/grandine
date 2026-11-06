@@ -32,8 +32,10 @@ enum Error {
 struct Head {
     slot: Slot,
     block_root: H256,
-    /// When the node was seen holding this head.
+    /// When the node was seen holding this head, so that the answer to a poll sent before a
+    /// streamed head arrived does not replace that newer head.
     seen_at: Instant,
+    optimistic: bool,
 }
 
 /// The roots the duties of an epoch and the next depend on, as reported with a head.
@@ -66,11 +68,31 @@ pub enum HeadStatus {
     /// Nothing has been reported yet.
     Unknown,
     /// The head to sign for.
-    Usable(H256),
+    Verified(H256),
+    /// The head the node follows, not yet verified by an execution engine.
+    Optimistic(H256),
     /// Older than the empty slot limit allows.
     Stale { head_slot: Slot },
     /// Past the slot, which asking a node would not fix.
     Future { head_slot: Slot },
+}
+
+impl HeadStatus {
+    pub fn block_root(self, at_slot: Slot) -> Result<Option<H256>> {
+        match self {
+            Self::Verified(block_root) | Self::Optimistic(block_root) => Ok(Some(block_root)),
+            Self::Unknown => Ok(None),
+            Self::Stale { head_slot } => {
+                debug_with_peers!(
+                    "cached head at slot {head_slot} is too old to sign for slot {at_slot}",
+                );
+
+                Ok(None)
+            }
+            // Asking a beacon node would not fix a head past the slot being signed for.
+            Self::Future { head_slot } => Err(Error::BeyondSlot { head_slot, at_slot }.into()),
+        }
+    }
 }
 
 /// The head a beacon node last reported, over the event stream or when asked.
@@ -129,25 +151,20 @@ impl ChainHead {
             };
         }
 
-        HeadStatus::Usable(head.block_root)
+        if head.optimistic {
+            return HeadStatus::Optimistic(head.block_root);
+        }
+
+        HeadStatus::Verified(head.block_root)
     }
 
-    pub fn get(&self, at_slot: Slot, max_empty_slots: u64) -> Result<Option<H256>> {
-        match self.status(at_slot, max_empty_slots) {
-            HeadStatus::Usable(block_root) => Ok(Some(block_root)),
-            HeadStatus::Unknown => Ok(None),
-            HeadStatus::Stale { head_slot } => {
-                debug_with_peers!(
-                    "cached head at slot {head_slot} is too old to sign for slot {at_slot}",
-                );
-
-                Ok(None)
-            }
-            // Asking a beacon node would not fix a head past the slot being signed for.
-            HeadStatus::Future { head_slot } => {
-                Err(Error::BeyondSlot { head_slot, at_slot }.into())
-            }
-        }
+    /// The head the node follows, verified or not, to schedule duties by; not a root to sign over.
+    pub fn verified_or_optimistic(
+        &self,
+        at_slot: Slot,
+        max_empty_slots: u64,
+    ) -> Result<Option<H256>> {
+        self.status(at_slot, max_empty_slots).block_root(at_slot)
     }
 
     pub fn cached(&self) -> Option<(Slot, H256)> {
@@ -157,7 +174,7 @@ impl ChainHead {
             .map(|head| (head.slot, head.block_root))
     }
 
-    pub fn update(&self, slot: Slot, block_root: H256) {
+    pub fn update(&self, slot: Slot, block_root: H256, optimistic: bool) {
         // The latest report is the node's head whatever its slot; a reorg can move it back.
         *self
             .head
@@ -166,10 +183,17 @@ impl ChainHead {
             slot,
             block_root,
             seen_at: Instant::now(),
+            optimistic,
         });
     }
 
-    pub fn update_seen_at(&self, asked_at: Instant, slot: Slot, block_root: H256) -> bool {
+    pub fn update_seen_at(
+        &self,
+        asked_at: Instant,
+        slot: Slot,
+        block_root: H256,
+        optimistic: bool,
+    ) -> bool {
         let mut head = self
             .head
             .write()
@@ -193,6 +217,7 @@ impl ChainHead {
             slot,
             block_root,
             seen_at: asked_at,
+            optimistic,
         });
         true
     }
@@ -297,12 +322,13 @@ fn accept(
     node.chain_head()
         .record_dependent_roots(event.dependent_roots);
 
-    // An optimistic validator must not sign across the sync committee domains.
+    node.chain_head()
+        .update(event.slot, event.block, event.execution_optimistic);
+
+    // An optimistic head triggers no early duties; they wait for the attest tick.
     if event.execution_optimistic {
         return;
     }
-
-    node.chain_head().update(event.slot, event.block);
 
     InternalMessage::Head {
         node: node.clone_arc(),
@@ -322,7 +348,7 @@ mod tests {
 
     const MAX_EMPTY_SLOTS: u64 = 8;
 
-    // Only a head the node reports as not optimistic is offered for signing.
+    // An optimistic head is followed for duties, but is not verified and fires no early duty.
     #[test]
     fn an_optimistic_head_records_its_roots_but_is_not_offered_for_signing() -> Result<()> {
         let node = Arc::new(RemoteBeaconNode::new(
@@ -348,14 +374,29 @@ mod tests {
         accept(&node, update, &tx);
 
         assert_eq!(node.chain_head().dependent_root_for(1), Some(roots.current));
-        assert_eq!(node.chain_head().cached(), None);
+
+        assert_eq!(
+            node.chain_head().status(40, MAX_EMPTY_SLOTS),
+            HeadStatus::Optimistic(update.block),
+        );
+
+        assert_eq!(
+            node.chain_head()
+                .verified_or_optimistic(40, MAX_EMPTY_SLOTS)?,
+            Some(update.block),
+        );
+
         assert!(rx.try_recv().is_err());
 
         update.execution_optimistic = false;
 
         accept(&node, update, &tx);
 
-        assert_eq!(node.chain_head().cached(), Some((40, update.block)));
+        assert_eq!(
+            node.chain_head().status(40, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(update.block),
+        );
+
         assert!(matches!(
             rx.try_recv()?,
             InternalMessage::Head { slot: 40, block_root, .. } if block_root == update.block
@@ -364,75 +405,117 @@ mod tests {
         Ok(())
     }
 
+    // A node does not stream its head again once verified; polling it finds out.
     #[test]
-    fn a_head_at_or_before_the_slot_is_signed_for() -> Result<()> {
+    fn a_poll_that_finds_the_optimistic_head_verified_offers_it_for_signing() {
+        let chain_head = ChainHead::new();
+        chain_head.update(6, H256::repeat_byte(1), true);
+
+        // Stamped later than the delivery, which a coarse clock could otherwise tie.
+        let asked_after = Instant::now()
+            .checked_add(Duration::from_millis(1))
+            .expect("an instant a millisecond away is representable");
+
+        assert!(chain_head.update_seen_at(asked_after, 6, H256::repeat_byte(1), false));
+
+        assert_eq!(
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(1)),
+        );
+    }
+
+    // The answer may predate the optimistic head, which stays optimistic until verified.
+    #[test]
+    fn an_optimistic_head_streamed_during_a_poll_outlives_the_answer() {
+        let chain_head = ChainHead::new();
+        chain_head.update(5, H256::repeat_byte(1), false);
+
+        let asked_at = Instant::now();
+        chain_head.update(6, H256::repeat_byte(2), true);
+
+        assert!(!chain_head.update_seen_at(asked_at, 5, H256::repeat_byte(1), false));
+
+        assert_eq!(
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Optimistic(H256::repeat_byte(2)),
+        );
+    }
+
+    #[test]
+    fn a_head_at_or_before_the_slot_is_signed_for() {
         let chain_head = ChainHead::new();
 
-        assert_eq!(chain_head.get(6, MAX_EMPTY_SLOTS)?, None);
+        assert_eq!(chain_head.status(6, MAX_EMPTY_SLOTS), HeadStatus::Unknown);
 
-        chain_head.update(6, H256::repeat_byte(1));
+        chain_head.update(6, H256::repeat_byte(1), false);
 
         assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(1))
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(1))
         );
+
         assert_eq!(
-            chain_head.get(7, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(1))
+            chain_head.status(7, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(1))
         );
 
         chain_head
-            .get(5, MAX_EMPTY_SLOTS)
+            .verified_or_optimistic(5, MAX_EMPTY_SLOTS)
             .expect_err("the tracker has moved past slot 5");
-
-        Ok(())
     }
 
     #[test]
-    fn a_head_further_behind_than_max_empty_slots_is_not_signed_for() -> Result<()> {
+    fn a_head_further_behind_than_max_empty_slots_is_not_signed_for() {
         let chain_head = ChainHead::new();
 
-        chain_head.update(6, H256::repeat_byte(1));
-
-        assert!(chain_head.get(14, MAX_EMPTY_SLOTS)?.is_some());
-        assert_eq!(chain_head.get(15, MAX_EMPTY_SLOTS)?, None);
-
-        Ok(())
-    }
-
-    #[test]
-    fn a_polled_head_replaces_a_cached_one_from_the_future() -> Result<()> {
-        let chain_head = ChainHead::new();
-
-        chain_head.update(u64::MAX, H256::repeat_byte(1));
-
-        chain_head
-            .get(6, MAX_EMPTY_SLOTS)
-            .expect_err("the cached head is past slot 6");
-
-        chain_head.update(5, H256::repeat_byte(2));
+        chain_head.update(6, H256::repeat_byte(1), false);
 
         assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(2))
+            chain_head.status(14, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(1))
         );
 
-        Ok(())
+        assert_eq!(
+            chain_head.status(15, MAX_EMPTY_SLOTS),
+            HeadStatus::Stale { head_slot: 6 }
+        );
+    }
+
+    #[test]
+    fn a_polled_head_replaces_a_cached_one_from_the_future() {
+        let chain_head = ChainHead::new();
+
+        chain_head.update(u64::MAX, H256::repeat_byte(1), false);
+
+        assert_eq!(
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Future {
+                head_slot: u64::MAX
+            }
+        );
+
+        chain_head.update(5, H256::repeat_byte(2), false);
+
+        assert_eq!(
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(2))
+        );
     }
 
     // A poll answered after the stream moved the head must not move it back.
     #[test]
-    fn a_head_delivered_since_a_poll_was_sent_outlives_the_answer() -> Result<()> {
+    fn a_head_delivered_since_a_poll_was_sent_outlives_the_answer() {
         let chain_head = ChainHead::new();
-        chain_head.update(5, H256::repeat_byte(1));
+        chain_head.update(5, H256::repeat_byte(1), false);
 
         let asked_at = Instant::now();
-        chain_head.update(6, H256::repeat_byte(2));
+        chain_head.update(6, H256::repeat_byte(2), false);
 
-        assert!(!chain_head.update_seen_at(asked_at, 5, H256::repeat_byte(1)));
+        assert!(!chain_head.update_seen_at(asked_at, 5, H256::repeat_byte(1), false));
+
         assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(2))
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(2))
         );
 
         // Asked after the last delivery, the answer stands, even for an earlier slot.
@@ -440,13 +523,12 @@ mod tests {
             .checked_add(Duration::from_millis(1))
             .expect("an instant a millisecond away is representable");
 
-        assert!(chain_head.update_seen_at(asked_after, 5, H256::repeat_byte(3)));
-        assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(3))
-        );
+        assert!(chain_head.update_seen_at(asked_after, 5, H256::repeat_byte(3), false));
 
-        Ok(())
+        assert_eq!(
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(3))
+        );
     }
 
     #[test]
@@ -478,7 +560,7 @@ mod tests {
             next: H256::repeat_byte(2),
         });
 
-        chain_head.update(40, H256::repeat_byte(3));
+        chain_head.update(40, H256::repeat_byte(3), false);
 
         // Polls are stamped later than the delivery, which a coarse clock could otherwise tie.
         let first_poll = Instant::now()
@@ -490,10 +572,10 @@ mod tests {
             .expect("an instant a millisecond away is representable");
 
         // Polled on the same block, the roots still hold.
-        assert!(chain_head.update_seen_at(first_poll, 40, H256::repeat_byte(3)));
+        assert!(chain_head.update_seen_at(first_poll, 40, H256::repeat_byte(3), false));
         assert_eq!(chain_head.dependent_root_for(5), Some(H256::repeat_byte(1)));
 
-        assert!(chain_head.update_seen_at(second_poll, 41, H256::repeat_byte(4)));
+        assert!(chain_head.update_seen_at(second_poll, 41, H256::repeat_byte(4), false));
         assert_eq!(chain_head.dependent_root_for(5), None);
     }
 
@@ -522,18 +604,16 @@ mod tests {
 
     // A node reorging to a shorter branch reports a lower head, which must not be left behind.
     #[test]
-    fn a_reorg_to_a_lower_slot_replaces_the_cached_head() -> Result<()> {
+    fn a_reorg_to_a_lower_slot_replaces_the_cached_head() {
         let chain_head = ChainHead::new();
 
-        chain_head.update(6, H256::repeat_byte(1));
-        chain_head.update(5, H256::repeat_byte(2));
+        chain_head.update(6, H256::repeat_byte(1), false);
+        chain_head.update(5, H256::repeat_byte(2), false);
 
         assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(2))
+            chain_head.status(6, MAX_EMPTY_SLOTS),
+            HeadStatus::Verified(H256::repeat_byte(2))
         );
-
-        Ok(())
     }
 
     #[test]
@@ -544,18 +624,18 @@ mod tests {
     #[test]
     fn a_head_within_the_empty_slot_limit_is_not_stale() {
         let chain_head = ChainHead::new();
-        chain_head.update(95, H256::repeat_byte(1));
+        chain_head.update(95, H256::repeat_byte(1), false);
 
         assert_eq!(
             chain_head.status(100, 5),
-            HeadStatus::Usable(H256::repeat_byte(1))
+            HeadStatus::Verified(H256::repeat_byte(1))
         );
     }
 
     #[test]
     fn a_head_beyond_the_empty_slot_limit_is_stale() {
         let chain_head = ChainHead::new();
-        chain_head.update(61, H256::repeat_byte(1));
+        chain_head.update(61, H256::repeat_byte(1), false);
 
         assert_eq!(
             chain_head.status(143, 32),

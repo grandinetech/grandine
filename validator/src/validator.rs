@@ -2342,9 +2342,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
-        let beacon_block_root = self
-            .own_sync_committee_message_root
-            .unwrap_or(slot_head.beacon_block_root);
+        // The slot head may be optimistic, so the root gets the same check as a message root.
+        let beacon_block_root = match self.own_sync_committee_message_root {
+            Some(beacon_block_root) => beacon_block_root,
+            None => match beacon_nodes.head_block_root().await {
+                Ok(beacon_block_root) => beacon_block_root,
+                Err(error) => {
+                    warn_with_peers!(
+                        "failed to obtain a head block root for sync committee contributions in \
+                         slot {}: {error:?}",
+                        slot_head.slot(),
+                    );
+                    return;
+                }
+            },
+        };
 
         let contributions = self
             .own_contributions_and_proofs(beacon_nodes, slot_head, beacon_block_root, &members)
@@ -2656,7 +2668,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         };
 
-        // The cache has moved past the event; the newer head arrives with an event of its own.
+        // The cache has moved past the event; a newer verified head or the tick does the duty.
         if slot_head.beacon_block_root != block_root {
             return;
         }
@@ -4057,8 +4069,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    // Waits for the head to become fully validated or for a late current slot block.
-    // For the built-in beacon node it also settles whether the duty uses the head's full node.
+    // Remote beacon nodes return at once. For the built-in beacon node it waits for the head to
+    // become fully validated or for a late current slot block.
+    // It also settles whether the duty uses the head's full node.
     // That is the node whose payload status the wait checked.
     // Returns `None` if the head is still optimistic when the wait times out,
     // or if the block itself turns out to be invalid.
@@ -4074,7 +4087,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
         const PAYLOAD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-        // A remote node serves its head only once it reports it as not optimistic.
+        // A remote head may be optimistic. The node is relied on to refuse attestation data and
+        // blocks over it, and sync committee duties check their root with `head_block_root`.
         let BeaconNodes::Local(node) = beacon_nodes else {
             return Some(beacon_nodes);
         };

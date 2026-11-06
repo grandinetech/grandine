@@ -156,7 +156,8 @@ impl RemoteBeaconNodes {
         join_all(self.nodes.iter().map(|node| node.refresh_health(slot))).await;
         join_all(self.nodes.iter().map(|node| node.refresh_head(slot))).await;
 
-        if self.nodes.iter().any(|node| node.health().is_ready()) {
+        // An optimistic node follows the chain; only its head's payload awaits validation.
+        if self.nodes.iter().any(|node| node.health().is_synced()) {
             return;
         }
 
@@ -176,14 +177,19 @@ impl RemoteBeaconNodes {
 
         self.refresh(slot).await;
 
-        let ready = self
-            .nodes
-            .iter()
-            .filter(|node| node.health().is_ready())
-            .count();
+        let count_at = |health| {
+            self.nodes
+                .iter()
+                .filter(|node| node.health() == health)
+                .count()
+        };
+
+        let ready = count_at(Health::Ready);
+        let optimistic = count_at(Health::Optimistic);
 
         info_with_peers!(
-            "{ready} of {} remote beacon nodes are ready to serve duties",
+            "{ready} of {} remote beacon nodes are ready to serve duties; \
+             {optimistic} more are optimistic",
             self.nodes.len(),
         );
 
@@ -229,9 +235,9 @@ mod tests {
         let second = node("http://second")?;
         let ahead = node("http://ahead")?;
 
-        first.chain_head().update(10, H256::repeat_byte(2));
-        second.chain_head().update(10, H256::repeat_byte(2));
-        ahead.chain_head().update(11, H256::repeat_byte(1));
+        first.chain_head().update(10, H256::repeat_byte(2), false);
+        second.chain_head().update(10, H256::repeat_byte(2), false);
+        ahead.chain_head().update(11, H256::repeat_byte(1), false);
 
         let nodes = RemoteBeaconNodes::new(
             vec![first.clone_arc(), second.clone_arc(), ahead.clone_arc()],
@@ -254,8 +260,8 @@ mod tests {
         let behind = node("http://behind")?;
         let ahead = node("http://ahead")?;
 
-        behind.chain_head().update(10, H256::repeat_byte(1));
-        ahead.chain_head().update(11, H256::repeat_byte(2));
+        behind.chain_head().update(10, H256::repeat_byte(1), false);
+        ahead.chain_head().update(11, H256::repeat_byte(2), false);
 
         let nodes =
             RemoteBeaconNodes::new(vec![behind.clone_arc(), ahead.clone_arc()], vec![], false);
@@ -275,8 +281,11 @@ mod tests {
 
         ready.set_health(Health::Ready);
         unusable.set_health(Health::Unusable);
-        ready.chain_head().update(10, H256::repeat_byte(1));
-        unusable.chain_head().update(11, H256::repeat_byte(2));
+        ready.chain_head().update(10, H256::repeat_byte(1), false);
+
+        unusable
+            .chain_head()
+            .update(11, H256::repeat_byte(2), false);
 
         let nodes =
             RemoteBeaconNodes::new(vec![unusable.clone_arc(), ready.clone_arc()], vec![], false);
