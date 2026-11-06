@@ -169,6 +169,7 @@ pub enum MutatorMessage<P: Preset, W> {
     FinishedPersistingExecutionPayloadEnvelopes {
         wait_group: W,
         persisted_block_roots: Vec<H256>,
+        deleted_block_roots: Vec<H256>,
     },
     FinishedArchivingFinalized {
         wait_group: W,
@@ -258,6 +259,7 @@ pub enum P2pMessage<P: Preset> {
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     PayloadEnvelopeNeeded(H256, Option<PeerId>),
+    PayloadEnvelopeInvalidated(H256),
     FinalizedCheckpoint(Checkpoint),
     HeadChanged(H256),
     Stop,
