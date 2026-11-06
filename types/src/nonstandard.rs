@@ -11,7 +11,9 @@ use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
 #[cfg(not(target_os = "zkvm"))]
-use im::{HashMap, Vector, vector::Iter as VectorIter};
+use im::{HashMap, Vector};
+#[cfg(not(target_os = "zkvm"))]
+type VectorIter<'a, T> = im::vector::Iter<'a, T, im::shared_ptr::DefaultSharedPtr>;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
