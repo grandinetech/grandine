@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{Result, bail, ensure};
 use bls::PublicKeyBytes;
 use futures::{channel::mpsc::UnboundedSender, future::join_all};
-use logging::{info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use std_ext::ArcExt;
 use thiserror::Error;
 use types::{
@@ -105,7 +105,7 @@ impl RemoteBeaconNodes {
                     None => agreed = Some((node, genesis)),
                 },
                 Err(error) => {
-                    warn_with_peers!("{node} beacon node failed to report genesis: {error:?}");
+                    debug_with_peers!("{node} beacon node failed to report genesis: {error:?}");
                 }
             }
         }
