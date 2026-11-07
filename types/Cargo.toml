@@ -39,6 +39,7 @@ url = { workspace = true }
 variant_count = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
+diff = { workspace = true }
 im = { workspace = true }
 
 [dev-dependencies]
@@ -47,3 +48,4 @@ serde_json = { workspace = true }
 spec_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }
+zstd = { workspace = true }

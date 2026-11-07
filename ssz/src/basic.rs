@@ -4,8 +4,9 @@ use typenum::{U2, U4, U8, U32};
 
 use crate::{
     consts::Endianness,
+    cursor::SszCursor,
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -47,6 +48,19 @@ impl SszHash for bool {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for bool {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for bool {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for u8 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -76,6 +90,19 @@ impl SszHash for u8 {
         hash.as_mut()[0] = *self;
         hash
     }
+}
+
+impl TryFrom<SszCursor<'_>> for u8 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for u8 {
+    type View<'cursor> = Self;
 }
 
 #[cfg(test)]
@@ -144,6 +171,19 @@ impl SszHash for u32 {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for u32 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for u32 {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for u64 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -177,6 +217,19 @@ impl SszHash for u64 {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for u64 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for u64 {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for u128 {
     const SIZE: Size = Size::Fixed {
         size: size_of::<Self>(),
@@ -206,4 +259,17 @@ impl SszHash for u128 {
         self.write_fixed(hash.as_bytes_mut());
         hash
     }
+}
+
+impl TryFrom<SszCursor<'_>> for u128 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for u128 {
+    type View<'cursor> = Self;
 }

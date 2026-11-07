@@ -8,7 +8,8 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
-    ContiguousList, ReadError, Size, SszHash, SszList, SszRead, SszSize, SszWrite, WriteError,
+    ContiguousList, ReadError, Size, SszCursor, SszHash, SszList, SszNavigable, SszRead, SszSize,
+    SszWrite, WriteError,
     merkle_tree::{self, ProgressiveMerkleTree},
 };
 
@@ -130,6 +131,24 @@ impl<C, T: SszRead<C>> SszRead<C> for ProgressiveList<T> {
     }
 }
 
+impl<T> TryFrom<SszCursor<'_>> for ProgressiveList<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for ProgressiveList<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
+}
+
 impl<T: SszWrite> SszWrite for ProgressiveList<T> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         self.0.write_variable(bytes)
@@ -178,6 +197,10 @@ where
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
         Box::new(self.0.as_ref().iter())
+    }
+
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a> {
+        Box::new(core::iter::once(self.0.as_ref()))
     }
 
     fn clone_boxed(&self) -> Box<dyn SszList<T>>

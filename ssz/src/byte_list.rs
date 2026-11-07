@@ -8,8 +8,9 @@ use typenum::{U1, Unsigned};
 
 use crate::{
     contiguous_list::ContiguousList,
+    cursor::SszCursor,
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
     type_level::MerkleElements,
 };
@@ -93,4 +94,16 @@ impl<N: MerkleElements<u8>> SszHash for ByteList<N> {
     fn hash_tree_root(&self) -> H256 {
         self.bytes.hash_tree_root()
     }
+}
+
+impl<N: Unsigned> TryFrom<SszCursor<'_>> for ByteList<N> {
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<N: Unsigned> SszNavigable for ByteList<N> {
+    type View<'cursor> = Self;
 }

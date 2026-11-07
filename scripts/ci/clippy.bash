@@ -29,6 +29,7 @@ options=(
     --package database
     --package debug_info
     --package deposit_tree
+    --package diff
     --package directories
     --package doppelganger_protection
     --package eip_2335

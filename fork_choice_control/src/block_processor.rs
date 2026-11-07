@@ -332,3 +332,67 @@ fn calculate_block_rewards(slot_report: &RealSlotReport) -> Result<BlockRewards>
         attester_slashings,
     })
 }
+
+#[cfg(test)]
+mod spec_tests {
+    use duplicate::duplicate_item;
+    use spec_test_utils::Case;
+    use test_generator::test_resources;
+    use types::preset::Mainnet;
+
+    use super::*;
+
+    #[duplicate_item(
+        glob                                                              function_name         phase;
+        ["consensus-spec-tests/tests/mainnet/phase0/sanity/blocks/*/*"]   [phase0_sanity]       [Phase0];
+        ["consensus-spec-tests/tests/mainnet/phase0/random/*/*/*"]        [phase0_random]       [Phase0];
+        ["consensus-spec-tests/tests/mainnet/altair/sanity/blocks/*/*"]   [altair_sanity]       [Altair];
+        ["consensus-spec-tests/tests/mainnet/altair/random/*/*/*"]        [altair_random]       [Altair];
+        ["consensus-spec-tests/tests/mainnet/electra/sanity/blocks/*/*"]  [electra_sanity]      [Electra];
+        ["consensus-spec-tests/tests/mainnet/electra/random/*/*/*"]       [electra_random]      [Electra];
+        ["consensus-spec-tests/tests/mainnet/fulu/sanity/blocks/*/*"]     [fulu_sanity]         [Fulu];
+        ["consensus-spec-tests/tests/mainnet/fulu/random/*/*/*"]          [fulu_random]         [Fulu];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let config = ChainConfig::mainnet().start_and_stay_in(Phase::phase);
+
+        run_case::<Mainnet>(&config, case).expect("every block should be processed");
+    }
+
+    fn run_case<P: Preset>(config: &ChainConfig, case: Case) -> Result<()> {
+        if case.try_ssz::<_, BeaconState<P>>(config, "post").is_none() {
+            return Ok(());
+        }
+
+        let pubkey_cache = PubkeyCache::default();
+        let mut state = case.ssz::<_, BeaconState<P>>(config, "pre");
+        let blocks_count = case.meta().blocks_count;
+
+        for block in case.numbered::<_, SignedBeaconBlock<P>>(config, "blocks", 0..blocks_count) {
+            let mut replayed_state = state.clone();
+            let mut slot_report = RealSlotReport::default();
+            let (message, _) = block.clone().split();
+
+            combined::process_slots(config, &pubkey_cache, &mut replayed_state, message.slot())?;
+            combined::process_trusted_block(
+                config,
+                &pubkey_cache,
+                &mut replayed_state,
+                &message,
+                &mut slot_report,
+            )?;
+
+            let stored_rewards = combined::trusted_state_transition_for_rewards(
+                config,
+                &pubkey_cache,
+                &mut state,
+                &block,
+            )?;
+
+            assert_eq!(stored_rewards, calculate_block_rewards(&slot_report)?);
+        }
+
+        Ok(())
+    }
+}

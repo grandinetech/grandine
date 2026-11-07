@@ -17,9 +17,10 @@ use typenum::{NonZero, U1, Unsigned as _};
 
 use crate::{
     consts::BITS_PER_BYTE,
+    cursor::SszCursor,
     error::ReadError,
     merkle_tree::MerkleTree,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
     type_level::{BitVectorBits, MerkleBits},
 };
@@ -132,6 +133,18 @@ impl<N: BitVectorBits + MerkleBits> SszHash for BitVector<N> {
     fn hash_tree_root(&self) -> H256 {
         MerkleTree::<N::MerkleTreeDepth>::merkleize_bytes(self.bytes)
     }
+}
+
+impl<N: BitVectorBits + NonZero> TryFrom<SszCursor<'_>> for BitVector<N> {
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<N: BitVectorBits + NonZero> SszNavigable for BitVector<N> {
+    type View<'cursor> = Self;
 }
 
 impl<N: BitVectorBits> BitVector<N> {

@@ -9,7 +9,7 @@
 //                      Update the comment at the top of `ssz::traits` if needed.
 // TODO(Grandine Team): GC unused impls for pointers.
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
 use std::sync::Arc;
@@ -111,7 +111,9 @@ use crate::{
         },
         primitives::BuilderIndex,
     },
-    nonstandard::{PartialValidator, Phase, PubkeyList},
+    nonstandard::{
+        EffectiveBalanceList, PartialValidator, PartialValidatorList, Phase, PubkeyList,
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::JustificationBitsLength,
@@ -168,7 +170,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     fn eth1_data_mut(&mut self) -> &mut Eth1Data;
     fn eth1_data_votes_mut(&mut self) -> &mut Eth1DataVotes<P>;
     fn eth1_deposit_index_mut(&mut self) -> &mut DepositIndex;
-    fn validators_mut(&mut self) -> &mut dyn SszValidatorListMut;
+    fn validators_mut(&mut self) -> &mut dyn SszValidatorList;
     fn balances_mut(&mut self) -> &mut dyn SszListMut<Gwei>;
     fn randao_mixes_mut(&mut self) -> &mut RandaoMixes<P>;
     fn slashings_mut(&mut self) -> &mut Slashings<P>;
@@ -181,9 +183,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // These are needed to split borrows in epoch processing.
     // A more general way to do this would be to return a struct containing references to all fields
     // in the state, but that would be unnecessarily verbose for our use case.
-    fn validators_mut_with_balances(
-        &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>);
+    fn validators_mut_with_balances(&mut self) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>);
     fn balances_mut_with_slashings(&mut self) -> (&mut dyn SszListMut<Gwei>, &Slashings<P>);
 
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>>;
@@ -489,7 +489,7 @@ impl<parameters> BeaconState<P> for implementor {
         [eth1_data]                     [eth1_data_mut]                     [Eth1Data];
         [eth1_data_votes]               [eth1_data_votes_mut]               [Eth1DataVotes<P>];
         [eth1_deposit_index]            [eth1_deposit_index_mut]            [DepositIndex];
-        [validators]                    [validators_mut]                    [dyn SszValidatorListMut];
+        [validators]                    [validators_mut]                    [dyn SszValidatorList];
         [balances]                      [balances_mut]                      [dyn SszListMut<Gwei>];
         [randao_mixes]                  [randao_mixes_mut]                  [RandaoMixes<P>];
         [slashings]                     [slashings_mut]                     [Slashings<P>];
@@ -503,9 +503,7 @@ impl<parameters> BeaconState<P> for implementor {
         get_ref_mut([field], [method])
     }
 
-    fn validators_mut_with_balances(
-        &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>) {
+    fn validators_mut_with_balances(&mut self) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>) {
         validators_mut_with_balances_body
     }
 
@@ -554,53 +552,75 @@ pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
     fn inactivity_scores_mut(&mut self) -> &mut dyn SszListMut<u64>;
     fn current_sync_committee_mut(&mut self) -> &mut Arc<Hc<SyncCommittee<P>>>;
     fn next_sync_committee_mut(&mut self) -> &mut Arc<Hc<SyncCommittee<P>>>;
+
+    fn previous_epoch_participation_mut_with_validators(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    );
+    fn current_epoch_participation_mut_with_validators(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    );
 }
 
 #[duplicate_item(
     parameters
     implementor
     get_ref(field)
-    get_ref_mut(field, method);
+    get_ref_mut(field, method)
+    get_ref_mut_with_validators(field, method);
 
     [P: Preset, S: PostAltairBeaconState<P>]
     [Hc<S>]
     [self.as_ref().field()]
+    [self.as_mut().method()]
     [self.as_mut().method()];
 
     [P: Preset]
     [AltairBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [BellatrixBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [CapellaBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [DenebBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [ElectraBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [FuluBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [GloasBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 )]
 impl<parameters> PostAltairBeaconState<P> for implementor {
     #[duplicate_item(
@@ -625,6 +645,20 @@ impl<parameters> PostAltairBeaconState<P> for implementor {
     )]
     fn method(&mut self) -> &mut return_type {
         get_ref_mut([field], [method])
+    }
+
+    #[duplicate_item(
+        field                          method;
+        [previous_epoch_participation] [previous_epoch_participation_mut_with_validators];
+        [current_epoch_participation]  [current_epoch_participation_mut_with_validators];
+    )]
+    fn method(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    ) {
+        get_ref_mut_with_validators([field], [method])
     }
 }
 
@@ -2194,13 +2228,39 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
 
     fn effective_balance(&self, index: u64) -> Result<u64, IndexError>;
 
+    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
+
     fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError>;
 
+    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
+
     fn pubkeys(&self) -> &PubkeyList;
+
+    /// Restores the public keys that were removed by [`Self::clear_pubkeys`].
+    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
+
+    /// Fills in the public keys in `range` from `pubkeys`, leaving the keys outside it as they
+    /// are.
+    fn restore_pubkeys_in(
+        &mut self,
+        pubkeys: &PubkeyList,
+        range: Range<usize>,
+    ) -> Result<(), anyhow::Error>;
+
+    fn clear_pubkeys(&mut self, count: usize);
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator>;
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei>;
+
+    fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList);
+
+    fn update_effective_balances(
+        &mut self,
+        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
+    ) -> Result<(), anyhow::Error>;
+
+    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 
     fn len_usize(&self) -> usize;
 
@@ -2209,21 +2269,4 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a>;
 
     fn clone_boxed(&self) -> Box<dyn SszValidatorList>;
-}
-
-pub trait SszValidatorListMut: SszValidatorList {
-    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
-
-    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
-
-    fn update_effective_balances(
-        &mut self,
-        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
-    ) -> Result<(), anyhow::Error>;
-
-    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
-
-    fn clear_pubkeys(&mut self, count: usize);
-
-    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 }

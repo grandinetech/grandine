@@ -13,6 +13,7 @@ pub use crate::{
     consts::{BYTES_PER_LENGTH_OFFSET, Endianness, Offset},
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
+    cursor::{SszContainerCursor, SszCursor},
     dynamic_list::DynamicList,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
@@ -24,7 +25,7 @@ pub use crate::{
     persistent_list::PersistentList,
     persistent_progressive_list::PersistentProgressiveList,
     persistent_vector::PersistentVector,
-    porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
+    porcelain::{SszContainer, SszHash, SszNavigable, SszRead, SszReadDefault, SszSize, SszWrite},
     progressive_bit_list::ProgressiveBitList,
     progressive_byte_list::ProgressiveByteList,
     progressive_list::ProgressiveList,
@@ -41,6 +42,10 @@ pub use crate::{
     zero_default::ZeroDefault,
 };
 
+// zkVM guests never compress, and zstd is a C library they would otherwise have to cross-compile.
+#[cfg(not(target_os = "zkvm"))]
+pub use crate::compressed::Compressed;
+
 mod arrays;
 mod basic;
 mod bit_list;
@@ -48,9 +53,12 @@ mod bit_vector;
 mod bundle_size;
 mod byte_list;
 mod byte_vector;
+#[cfg(not(target_os = "zkvm"))]
+mod compressed;
 mod consts;
 mod contiguous_list;
 mod contiguous_vector;
+mod cursor;
 mod dynamic_list;
 mod error;
 mod hc;

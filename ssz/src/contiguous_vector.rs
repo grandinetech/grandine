@@ -17,9 +17,10 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned as _};
 
 use crate::{
+    cursor::SszCursor,
     error::{ReadError, WriteError},
     merkle_tree::MerkleTree,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::{ContiguousVectorElements, MerkleElements},
@@ -124,6 +125,24 @@ impl<C, T: SszRead<C>, N: ContiguousVectorElements<T>> SszRead<C> for Contiguous
         let results = shared::read_vector::<_, _, N>(context, bytes)?;
         itertools::process_results(results, |elements| Self::try_from_iter(elements))?
     }
+}
+
+impl<T, N: ContiguousVectorElements<T>> TryFrom<SszCursor<'_>> for ContiguousVector<T, N>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N: ContiguousVectorElements<T>> SszNavigable for ContiguousVector<T, N>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite, N: ContiguousVectorElements<T>> SszWrite for ContiguousVector<T, N> {

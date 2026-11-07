@@ -25,10 +25,11 @@ use typenum::{NonZero, U1, U2, U4, Unsigned};
 use crate::{
     bundle_size::BundleSize,
     contiguous_vector::ContiguousVector,
+    cursor::SszCursor,
     error::{IndexError, ReadError, WriteError},
     hc::Hc,
     iter::{ExactSize, UpTo3},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize, PersistentVectorElements},
@@ -262,6 +263,24 @@ where
     }
 }
 
+impl<T, N, B: BundleSize<T>> TryFrom<SszCursor<'_>> for PersistentVector<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N, B: BundleSize<T>> SszNavigable for PersistentVector<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
+}
+
 impl<T: SszWrite, N: Unsigned + NonZero, B: BundleSize<T>> SszWrite for PersistentVector<T, N, B> {
     fn write_fixed(&self, bytes: &mut [u8]) {
         shared::write_fixed_vector(bytes, self)
@@ -351,7 +370,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
         Ok(&bundle[B::index_in_bundle(index)])
     }
 
-    fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
+    pub fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
     where
         T: Clone,
         N: Unsigned + NonZero,

@@ -10,8 +10,10 @@ use core::{
     fmt::{Debug, Formatter, Result as FmtResult},
     iter::{Flatten, FusedIterator},
     marker::PhantomData,
+    slice,
 };
 
+use anyhow::ensure;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bit_field::BitField as _;
 use derivative::Derivative;
@@ -28,12 +30,13 @@ use typenum::{U1, U2, U4, Unsigned};
 
 use crate::{
     bundle_size::BundleSize,
+    cursor::SszCursor,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
     iter::ExactSize,
     list::{SszList, SszListMut},
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize},
@@ -81,15 +84,18 @@ where
 #[expect(clippy::into_iter_without_iter)]
 impl<'list, T, N, B: BundleSize<T>> IntoIterator for &'list PersistentList<T, N, B> {
     type Item = &'list T;
-    type IntoIter = ExactSize<Flatten<Leaves<'list, T, B>>>;
+    type IntoIter = ExactSize<Leaves<'list, T, B>>;
 
     fn into_iter(self) -> Self::IntoIter {
         let leaves = match self.root.as_ref() {
             Some(node) => Leaves::new(node.as_ref().as_ref()),
-            None => Leaves { stack: vec![] },
+            None => Leaves {
+                stack: vec![],
+                bundle: [].iter(),
+            },
         };
 
-        ExactSize::new(leaves.flatten(), self.length)
+        ExactSize::new(leaves, self.length)
     }
 }
 
@@ -204,6 +210,24 @@ impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentL
         // `validators` field, which upper limit is set to 1099511627776 (2^40).
         shared::read_list(shared::saturating_usize::<N>(), context, bytes)
     }
+}
+
+impl<T, N, B> TryFrom<SszCursor<'_>> for PersistentList<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N, B> SszNavigable for PersistentList<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite, N, B: BundleSize<T>> SszWrite for PersistentList<T, N, B> {
@@ -341,6 +365,15 @@ where
         Box::new(self.into_iter())
     }
 
+    fn bundles<'a>(&'a self) -> Box<dyn Iterator<Item = &'a [T]> + 'a> {
+        let mut leaves = self
+            .root
+            .as_ref()
+            .map(|node| Leaves::new(node.as_ref().as_ref()));
+
+        Box::new(core::iter::from_fn(move || leaves.as_mut()?.next_leaf()))
+    }
+
     fn clone_boxed(&self) -> Box<dyn SszList<T>>
     where
         T: Clone + 'static,
@@ -369,6 +402,68 @@ where
             .as_mut();
 
         Ok(node.get_mut(index))
+    }
+
+    fn extend(&mut self, elements: &[T]) -> Result<(), PushError>
+    where
+        T: Clone,
+    {
+        if elements.len() > shared::saturating_usize::<N>().saturating_sub(self.length) {
+            return Err(PushError::ListFull);
+        }
+
+        match self.root.as_mut() {
+            Some(root) => self.length = Node::append(root, self.length, elements),
+            None => {
+                if let Some((root, length)) =
+                    Node::build(&mut elements.iter().cloned(), elements.len())
+                {
+                    self.root = Some(root);
+                    self.length = length;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn retain_range(&mut self, start: u64, end: u64) -> Result<(), IndexError>
+    where
+        T: Clone,
+    {
+        let (start, end) = shared::validate_range(self.length, start, end)?;
+        let new_length = end.saturating_sub(start);
+
+        if new_length == self.length {
+            return Ok(());
+        }
+
+        if new_length == 0 {
+            *self = Self::default();
+            return Ok(());
+        }
+
+        if B::index_in_bundle(start) != 0 {
+            *self = Self::try_from_iter((&*self).into_iter().skip(start).take(new_length).cloned())
+                .expect("the retained elements fit in the list");
+
+            return Ok(());
+        }
+
+        let root = self
+            .root
+            .as_ref()
+            .expect("a nonzero length means self.root is Some");
+
+        let mut cursor = SubtreeCursor::new(root, self.length, start);
+
+        *self = Self {
+            root: Some(cursor.slice(new_length)),
+            length: new_length,
+            phantom: PhantomData,
+        };
+
+        Ok(())
     }
 
     fn push(&mut self, element: T) -> Result<(), PushError>
@@ -423,6 +518,30 @@ where
     fn try_assign_from_iter(&mut self, iter: &mut dyn Iterator<Item = T>) -> Result<(), ReadError> {
         *self = Self::try_from_iter(iter)?;
         Ok(())
+    }
+
+    fn update_at(
+        &mut self,
+        indices: &[u64],
+        f: &mut dyn FnMut(u64, &mut T) -> Result<(), anyhow::Error>,
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        ensure!(indices.is_sorted(), "indices are not in ascending order");
+
+        let Some(&last) = indices.last() else {
+            return Ok(());
+        };
+
+        shared::validate_index(self.length, last)?;
+
+        self.root
+            .as_mut()
+            .expect("the checks above ensure that self.root is Some")
+            .make_mut()
+            .as_mut()
+            .update_at(0, indices, f)
     }
 }
 
@@ -499,6 +618,50 @@ where
 }
 
 impl<T, B: BundleSize<T>> Node<T, B> {
+    pub(crate) fn update_at(
+        &mut self,
+        start: u64,
+        indices: &[u64],
+        f: &mut (impl FnMut(u64, &mut T) -> Result<(), anyhow::Error> + ?Sized),
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Internal {
+                left,
+                right,
+                left_height,
+                ..
+            } => {
+                let right_start =
+                    start.saturating_add(1_u64 << left_height.saturating_add(B::ilog2()));
+
+                let (left_indices, right_indices) =
+                    indices.split_at(indices.partition_point(|index| *index < right_start));
+
+                if !left_indices.is_empty() {
+                    left.make_mut().as_mut().update_at(start, left_indices, f)?;
+                }
+
+                if !right_indices.is_empty() {
+                    right
+                        .make_mut()
+                        .as_mut()
+                        .update_at(right_start, right_indices, f)?;
+                }
+            }
+            Self::Leaf { bundle, .. } => {
+                for &index in indices {
+                    let element = &mut bundle[usize::try_from(index.saturating_sub(start))?];
+                    f(index, element)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn arc_single(element: T) -> Arc<Hc<Self>> {
         Hc::arc(Self::leaf([element]))
     }
@@ -510,6 +673,15 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         assert!(bundle.len() <= B::USIZE);
 
         Self::Leaf { bundle, phantom }
+    }
+
+    pub(crate) fn internal(left: Arc<Hc<Self>>, right: Arc<Hc<Self>>) -> Self {
+        Self::Internal {
+            left_height: left.height(),
+            right_height: right.height(),
+            left,
+            right,
+        }
     }
 
     pub(crate) const fn height(&self) -> Height {
@@ -761,6 +933,103 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         })
     }
 
+    pub(crate) fn append(node: &mut Arc<Hc<Self>>, length: usize, elements: &[T]) -> usize
+    where
+        T: Clone,
+    {
+        let (length, elements) = Self::fill(node, length, elements);
+
+        Self::grow(node, length, elements)
+    }
+
+    // Appends elements without making `node` taller, so only as many as it has room for:
+    //
+    //               h3                                h3
+    //          /          \                      /          \
+    //       h2              4                 h2              h2
+    //     /    \                + 5..7      /    \          /    \
+    //   h1      h1               -->      h1      h1      h1      h1
+    //  /  \    /  \                      /  \    /  \    /  \    /  \
+    // 0    1  2    3                    0    1  2    3  4    5  6    7
+    fn fill<'elements>(
+        node: &mut Arc<Hc<Self>>,
+        length: usize,
+        elements: &'elements [T],
+    ) -> (usize, &'elements [T])
+    where
+        T: Clone,
+    {
+        let room = (B::USIZE << node.height()).saturating_sub(length);
+
+        if room == 0 || elements.is_empty() {
+            return (length, elements);
+        }
+
+        let (now, later) = elements.split_at(room.min(elements.len()));
+
+        let length = match node.make_mut().as_mut() {
+            // The left child of an internal node is always full, so the elements can only go into
+            // the right one.
+            Self::Internal {
+                right,
+                left_height,
+                right_height,
+                ..
+            } => {
+                let left_length = B::USIZE << *left_height;
+                let right_length = Self::append(right, length.saturating_sub(left_length), now);
+
+                *right_height = right.height();
+
+                left_length.saturating_add(right_length)
+            }
+            Self::Leaf { bundle, .. } => {
+                replace_with::replace_with_or_default(bundle, |bundle| {
+                    let mut vec = Vec::from(bundle);
+                    vec.extend_from_slice(now);
+                    vec.into_boxed_slice()
+                });
+
+                bundle.len()
+            }
+        };
+
+        (length, later)
+    }
+
+    // Makes the full `node` the left child of a new root, until all elements are in:
+    //
+    //                                     h4
+    //                                /          \
+    //     h3      + 8..11         h3              h2
+    //   (0..7)      -->         (0..7)          /    \
+    //                                         h1      h1
+    //                                        /  \    /  \
+    //                                       8    9  10   11
+    fn grow(node: &mut Arc<Hc<Self>>, mut length: usize, mut elements: &[T]) -> usize
+    where
+        T: Clone,
+    {
+        while !elements.is_empty() {
+            let height = node.height();
+
+            assert_eq!(length, B::USIZE << height);
+
+            // The new right child is as tall as its sibling at most, so it holds as many elements.
+            let (now, later) = elements.split_at(length.min(elements.len()));
+
+            let (right, right_length) =
+                Self::build(&mut now.iter().cloned(), now.len()).expect("now is not empty");
+
+            *node = Hc::arc(Self::internal(node.clone_arc(), right));
+
+            length = length.saturating_add(right_length);
+            elements = later;
+        }
+
+        length
+    }
+
     // Mutably borrowing an `FnMut` closure inside a recursive function causes infinite recursion
     // during monomorphization. Borrowing it outside and passing the reference prevents that.
     pub(crate) fn update(&self, updater: &mut impl FnMut(&mut T)) -> Option<Arc<Hc<Self>>>
@@ -800,38 +1069,265 @@ impl<T, B: BundleSize<T>> Node<T, B> {
     }
 }
 
+pub struct SubtreeCursor<'tree, T, B> {
+    // The nodes from the root down to one holding the element at `position`.
+    path: Vec<SubtreeCursorFrame<'tree, T, B>>,
+    position: usize,
+    end: usize,
+}
+
+struct SubtreeCursorFrame<'tree, T, B> {
+    node: &'tree Arc<Hc<Node<T, B>>>,
+    start: usize,
+    end: usize,
+}
+
+impl<'tree, T, B: BundleSize<T>> SubtreeCursor<'tree, T, B> {
+    pub(crate) fn new(root: &'tree Arc<Hc<Node<T, B>>>, length: usize, position: usize) -> Self {
+        Self {
+            path: vec![SubtreeCursorFrame {
+                node: root,
+                start: 0,
+                end: length,
+            }],
+            position,
+            end: length,
+        }
+    }
+
+    pub(crate) const fn remaining(&self) -> usize {
+        self.end.saturating_sub(self.position)
+    }
+
+    pub(crate) fn slice(&mut self, length: usize) -> Arc<Hc<Node<T, B>>>
+    where
+        T: Clone,
+    {
+        if let Some(node) = self.next_subtree(length) {
+            return node;
+        }
+
+        let height = B::depth_of_length(length);
+
+        if height == 0 {
+            let mut bundle = Vec::with_capacity(length);
+            self.copy_elements(length, &mut bundle);
+            return Hc::arc(Node::leaf(bundle));
+        }
+
+        let left_length = B::USIZE << height.saturating_sub(1);
+        let left = self.slice(left_length);
+        let right = self.slice(length.saturating_sub(left_length));
+
+        Hc::arc(Node::internal(left, right))
+    }
+
+    fn next_subtree(&mut self, length: usize) -> Option<Arc<Hc<Node<T, B>>>> {
+        let end = self.position.saturating_add(length);
+
+        self.descend(end);
+
+        let node = self
+            .path
+            .last()
+            .filter(|frame| frame.start == self.position && frame.end == end)?
+            .node
+            .clone_arc();
+
+        self.advance(length);
+
+        Some(node)
+    }
+
+    pub(crate) fn copy_elements(&mut self, count: usize, elements: &mut Vec<T>)
+    where
+        T: Clone,
+    {
+        let end = self.position.saturating_add(count);
+
+        while self.position < end {
+            // No node ends where it starts, so this descends to a leaf.
+            self.descend(self.position);
+
+            let &SubtreeCursorFrame {
+                node,
+                start,
+                end: leaf_end,
+            } = self
+                .path
+                .last()
+                .expect("the cursor is not past the end of the tree");
+
+            let Node::Leaf { bundle, .. } = node.as_ref().as_ref() else {
+                unreachable!("the path was just extended down to a leaf");
+            };
+
+            let first = self.position.saturating_sub(start);
+            let last = end.min(leaf_end).saturating_sub(start);
+
+            elements.extend_from_slice(&bundle[first..last]);
+            self.advance(last.saturating_sub(first));
+        }
+    }
+
+    fn advance(&mut self, count: usize) {
+        self.position = self.position.saturating_add(count);
+
+        while let Some(frame) = self.path.last()
+            && frame.end <= self.position
+        {
+            self.path.pop();
+        }
+    }
+
+    // Descends to the first node that starts at `position` and ends at or before `end`, or to the
+    // leaf holding the element at `position` if there is no such node.
+    fn descend(&mut self, end: usize) {
+        while let Some(&SubtreeCursorFrame {
+            node,
+            start,
+            end: node_end,
+        }) = self.path.last()
+            && (start < self.position || end < node_end)
+            && let Node::Internal {
+                left,
+                right,
+                left_height,
+                ..
+            } = node.as_ref().as_ref()
+        {
+            let middle = start.saturating_add(B::USIZE << left_height);
+
+            let frame = if self.position < middle {
+                SubtreeCursorFrame {
+                    node: left,
+                    start,
+                    end: middle,
+                }
+            } else {
+                SubtreeCursorFrame {
+                    node: right,
+                    start: middle,
+                    end: node_end,
+                }
+            };
+
+            self.path.push(frame);
+        }
+    }
+}
+
 pub struct Leaves<'list, T, B> {
     // This cannot be an array because array sizes cannot depend on generic parameters. Making this
     // a `GenericArray` of size `PersistentList::depth()` would require a huge number of trait
     // bounds which might not even be expressible because of the lifetime in the element type.
     stack: Vec<&'list Node<T, B>>,
+    bundle: slice::Iter<'list, T>,
 }
 
-impl<'list, T, B> Leaves<'list, T, B> {
+impl<'list, T, B: BundleSize<T>> Leaves<'list, T, B> {
     pub(crate) fn new(node: &'list Node<T, B>) -> Self {
-        Self { stack: vec![node] }
+        Self {
+            stack: vec![node],
+            bundle: [].iter(),
+        }
     }
-}
 
-impl<'list, T, B> Iterator for Leaves<'list, T, B> {
-    type Item = &'list [T];
+    // Returns what is left of the current leaf, or the next leaf if nothing is.
+    pub(crate) fn next_leaf(&mut self) -> Option<&'list [T]> {
+        if self.bundle.len() == 0 {
+            let node = self.stack.pop()?;
+            self.descend(node, 0);
+        }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.stack.pop().map(|mut node| {
-            loop {
-                match node {
-                    Node::Internal { left, right, .. } => {
+        Some(core::mem::take(&mut self.bundle).as_slice())
+    }
+
+    // Returns the index of the element within the leaf it descends to.
+    fn descend(&mut self, mut node: &'list Node<T, B>, mut index: usize) -> usize {
+        loop {
+            match node {
+                Node::Internal {
+                    left,
+                    right,
+                    left_height,
+                    ..
+                } => {
+                    let left_length = B::USIZE << left_height;
+
+                    if index < left_length {
                         self.stack.push(right);
                         node = left;
+                    } else {
+                        index = index.saturating_sub(left_length);
+                        node = right;
                     }
-                    Node::Leaf { bundle, .. } => break bundle.as_ref(),
+                }
+                Node::Leaf { bundle, .. } => {
+                    self.bundle = bundle.iter();
+                    return index;
                 }
             }
-        })
+        }
     }
 }
 
-impl<T, B> FusedIterator for Leaves<'_, T, B> {}
+impl<'list, T, B: BundleSize<T>> Iterator for Leaves<'list, T, B> {
+    type Item = &'list T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(element) = self.bundle.next() {
+                return Some(element);
+            }
+
+            let node = self.stack.pop()?;
+            self.descend(node, 0);
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let remaining = self.bundle.len();
+
+        if let Some(element) = self.bundle.nth(n) {
+            return Some(element);
+        }
+
+        let mut n = n.saturating_sub(remaining);
+
+        // Only the last subtree on the stack can be partially filled. Skipping past its capacity
+        // means skipping past the end.
+        while let Some(node) = self.stack.pop() {
+            let length = B::USIZE << node.height();
+
+            if n < length {
+                let index = self.descend(node, n);
+                return self.bundle.nth(index);
+            }
+
+            n = n.saturating_sub(length);
+        }
+
+        None
+    }
+
+    fn fold<A, F: FnMut(A, Self::Item) -> A>(mut self, init: A, mut f: F) -> A {
+        let mut accumulator = init;
+
+        loop {
+            accumulator = core::mem::take(&mut self.bundle).fold(accumulator, &mut f);
+
+            let Some(node) = self.stack.pop() else {
+                return accumulator;
+            };
+
+            self.descend(node, 0);
+        }
+    }
+}
+
+impl<T, B: BundleSize<T>> FusedIterator for Leaves<'_, T, B> {}
 
 // TODO(Grandine Team): `LeavesMut::next` clones `right` nodes earlier than needed.
 //                      Try replacing the `Vec` with a stack of mutable references
@@ -868,3 +1364,553 @@ impl<'list, T: Clone, B> Iterator for LeavesMut<'list, T, B> {
 }
 
 impl<T: Clone, B> FusedIterator for LeavesMut<'_, T, B> {}
+
+#[cfg(test)]
+mod tests {
+    use typenum::{U8, U64};
+
+    use super::*;
+
+    #[test]
+    fn update_at_changes_the_same_elements_as_get_mut() {
+        type List = PersistentList<u64, typenum::U4096, U4>;
+
+        for length in [1_u64, 3, 4, 5, 15, 16, 17, 100, 1023, 1024, 1025, 3000] {
+            let base = List::try_from_iter(0..length).expect("length is below the maximum");
+
+            for step in [1, 2, 3, 7, 64] {
+                let indices = (0..length).step_by(step).collect::<Vec<_>>();
+
+                let mut walked = base.clone();
+                let mut looked_up = base.clone();
+
+                walked
+                    .update_at(&indices, &mut |index, element| {
+                        *element += 1000 + index;
+                        Ok(())
+                    })
+                    .expect("every index is in the list");
+
+                for index in indices.iter().copied() {
+                    *looked_up
+                        .get_mut(index)
+                        .expect("every index is in the list") += 1000 + index;
+                }
+
+                assert_eq!(walked, looked_up, "length {length}, step {step}");
+                assert_eq!(walked.hash_tree_root(), looked_up.hash_tree_root());
+            }
+
+            let mut list = base.clone();
+
+            assert!(
+                list.update_at(&[0, length], &mut |_, element| {
+                    *element += 1000;
+                    Ok(())
+                })
+                .is_err(),
+                "an index past the end is reported",
+            );
+            assert_eq!(list, base, "nothing is changed before the error");
+        }
+    }
+
+    #[test]
+    fn update_at_stops_at_the_first_callback_error() {
+        let mut list = PersistentList::<u64, typenum::U4096, U4>::try_from_iter(0..100)
+            .expect("length is below the maximum");
+
+        let indices = (0..100).collect::<Vec<_>>();
+
+        let result = list.update_at(&indices, &mut |index, element| {
+            ensure!(index != 50, "callback failed");
+            *element += 1000;
+            Ok(())
+        });
+
+        assert!(result.is_err());
+
+        for index in 0..100 {
+            let expected = if index < 50 { index + 1000 } else { index };
+            assert_eq!(*list.get(index).expect("index is in the list"), expected);
+        }
+    }
+
+    #[test]
+    fn update_at_rejects_unsorted_indices() {
+        let mut list = PersistentList::<u64, typenum::U4096, U4>::try_from_iter(0..16)
+            .expect("length is below the maximum");
+
+        assert!(list.update_at(&[1, 0], &mut |_, _| Ok(())).is_err());
+    }
+
+    #[test]
+    fn extend_appends_elements_to_empty_list() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::default();
+        actual.extend(&[1, 2, 3]).expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_appends_elements_to_nonempty_list() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        actual.extend(&[4, 5]).expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_with_no_elements_does_nothing() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        actual.extend(&[]).expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_fills_the_list_to_capacity() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5, 6, 7, 8])
+            .expect("array fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        actual.extend(&[4, 5, 6, 7, 8]).expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_leaves_the_list_unchanged_when_it_would_overflow() {
+        let mut actual =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        actual
+            .extend(&[4, 5, 6, 7, 8, 9])
+            .expect_err("list only has room for 5 more elements");
+
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_does_not_affect_a_cloned_original() {
+        let original =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        let mut extended = original.clone();
+        extended.extend(&[4, 5]).expect("list is not full");
+
+        let expected_original =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        assert_eq!(original, expected_original);
+        assert_eq!(
+            original.hash_tree_root(),
+            expected_original.hash_tree_root(),
+        );
+
+        let expected_extended = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        assert_eq!(extended, expected_extended);
+        assert_eq!(
+            extended.hash_tree_root(),
+            expected_extended.hash_tree_root(),
+        );
+    }
+
+    #[test]
+    fn extend_returns_error_when_list_is_already_full() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5, 6, 7, 8])
+            .expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5, 6, 7, 8])
+            .expect("array fits in the list");
+
+        actual.extend(&[9]).expect_err("list has no room left");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_grows_an_empty_list_across_multiple_levels() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+
+        let mut actual = PersistentList::<u64, U64, U4>::default();
+        actual
+            .extend(&(1..=20).collect::<Vec<_>>())
+            .expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_appends_elements_to_a_multi_level_list() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U64, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        actual
+            .extend(&(4..=20).collect::<Vec<_>>())
+            .expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_in_two_steps_matches_extending_at_once() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U64, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+        actual
+            .extend(&(4..=10).collect::<Vec<_>>())
+            .expect("list is not full");
+        actual
+            .extend(&(11..=20).collect::<Vec<_>>())
+            .expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn extend_leaves_a_multi_level_list_unchanged_when_it_would_overflow() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+
+        let mut actual = expected.clone();
+
+        actual
+            .extend(&(21..=100).collect::<Vec<_>>())
+            .expect_err("list only has room for 44 more elements");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_full_range_keeps_the_whole_list() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(0, 5).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_middle_range_keeps_the_elements_in_that_range() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([2, 3, 4]).expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(1, 4).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_prefix_keeps_the_leading_elements() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(0, 3).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_suffix_keeps_the_trailing_elements() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([3, 4, 5]).expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(2, 5).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_empty_range_empties_the_list() {
+        let expected = PersistentList::<u64, U8, U4>::default();
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(2, 2).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_out_of_bounds_returns_an_error() {
+        let mut list =
+            PersistentList::<u64, U8, U4>::try_from([1, 2, 3]).expect("array fits in the list");
+
+        list.retain_range(0, 10)
+            .expect_err("list only has 3 elements");
+    }
+
+    #[test]
+    fn retain_range_of_empty_list_keeps_it_empty() {
+        let expected = PersistentList::<u64, U8, U4>::default();
+
+        let mut actual = PersistentList::<u64, U8, U4>::default();
+        actual.retain_range(0, 0).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_spanning_multiple_bundles_keeps_the_elements_in_that_range() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([3, 4, 5, 6, 7])
+            .expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5, 6, 7, 8])
+            .expect("array fits in the list");
+        actual.retain_range(2, 7).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_with_start_greater_than_end_returns_an_error() {
+        let mut list = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+
+        list.retain_range(3, 1)
+            .expect_err("start is greater than end");
+    }
+
+    #[test]
+    fn retain_range_starting_at_the_end_empties_the_list() {
+        let expected = PersistentList::<u64, U8, U4>::default();
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(5, 5).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_nonempty_range_of_empty_list_returns_an_error() {
+        let mut list = PersistentList::<u64, U8, U4>::default();
+
+        list.retain_range(0, 1).expect_err("list has no elements");
+    }
+
+    #[test]
+    fn retain_range_of_a_retain_range_keeps_the_elements_in_both_ranges() {
+        let expected =
+            PersistentList::<u64, U8, U4>::try_from([3, 4]).expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(1, 5).expect("range is within bounds");
+        actual.retain_range(1, 3).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_aligned_multi_level_range_keeps_the_elements_in_that_range() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(5..=20).expect("range fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+        actual.retain_range(4, 20).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn retain_range_of_unaligned_multi_level_range_keeps_the_elements_in_that_range() {
+        let expected =
+            PersistentList::<u64, U64, U4>::try_from_iter(6..=17).expect("range fits in the list");
+
+        let mut actual =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+        actual.retain_range(5, 17).expect("range is within bounds");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+
+    #[test]
+    fn nth_matches_a_vec_after_any_number_of_elements() {
+        for length in 0..40 {
+            let list = PersistentList::<u64, U64, U4>::try_from_iter(0..length)
+                .expect("length is below the maximum");
+            let vector = (0..length).collect::<Vec<_>>();
+
+            for consumed in 0..=vector.len() {
+                for n in 0..=vector.len() {
+                    let mut actual = (&list).into_iter();
+                    let mut expected = vector.iter();
+
+                    for _ in 0..consumed {
+                        assert_eq!(actual.next(), expected.next());
+                    }
+
+                    assert_eq!(
+                        actual.nth(n),
+                        expected.nth(n),
+                        "length {length}, {consumed} consumed, nth({n})",
+                    );
+                    assert_eq!(actual.len(), expected.len());
+                    assert!(actual.eq(expected));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retain_range_matches_try_from_iter_for_all_small_ranges() {
+        type Packed = PersistentList<u64, U64, U4>;
+        type Unpacked = PersistentList<H256, U64, U1>;
+
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+
+        for length in 0..40 {
+            let packed = Packed::try_from_iter(0..length).expect("length is below the maximum");
+            let unpacked = Unpacked::try_from_iter((0..length).map(element))
+                .expect("length is below the maximum");
+
+            for start in 0..=length {
+                for end in start..=length {
+                    let mut retained = packed.clone();
+                    retained
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    assert_eq!(
+                        retained,
+                        Packed::try_from_iter(start..end).expect("length is below the maximum"),
+                        "packed tree mismatch at length {length}, range {start}..{end}",
+                    );
+
+                    let mut retained = unpacked.clone();
+                    retained
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    assert_eq!(
+                        retained,
+                        Unpacked::try_from_iter((start..end).map(element))
+                            .expect("length is below the maximum"),
+                        "unpacked tree mismatch at length {length}, range {start}..{end}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retain_range_shares_every_leaf_when_bundles_hold_one_element() {
+        type List = PersistentList<H256, U64, U1>;
+
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+
+        for length in 0..40 {
+            let original =
+                List::try_from_iter((0..length).map(element)).expect("length is below the maximum");
+
+            for start in 0..=length {
+                for end in start..=length {
+                    let mut retained = original.clone();
+                    retained
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    let start = usize::try_from(start).expect("start fits in usize");
+
+                    assert!(
+                        (&retained)
+                            .into_iter()
+                            .zip((&original).into_iter().skip(start))
+                            .all(|(retained, original)| core::ptr::eq(retained, original)),
+                        "an element was copied at length {length}, range {start}..{end}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retain_range_of_an_aligned_full_subtree_shares_it_with_the_original() {
+        let list =
+            PersistentList::<u64, U64, U4>::try_from_iter(1..=20).expect("range fits in the list");
+
+        let mut actual = list.clone();
+        actual.retain_range(0, 16).expect("range is within bounds");
+
+        let Node::Internal { left, .. } = list
+            .root
+            .as_ref()
+            .expect("a list of 20 elements has a root")
+            .as_ref()
+            .as_ref()
+        else {
+            unreachable!("a list of 20 elements has an internal root")
+        };
+
+        let root = actual.root.as_ref().expect("the slice is not empty");
+
+        assert!(Arc::ptr_eq(left, root));
+    }
+
+    #[test]
+    fn extend_after_retain_range_appends_from_the_new_end() {
+        let expected = PersistentList::<u64, U8, U4>::try_from([2, 3, 4, 5, 6, 7])
+            .expect("array fits in the list");
+
+        let mut actual = PersistentList::<u64, U8, U4>::try_from([1, 2, 3, 4, 5])
+            .expect("array fits in the list");
+        actual.retain_range(1, 5).expect("range is within bounds");
+        actual.extend(&[6, 7]).expect("list is not full");
+
+        assert_eq!(actual, expected);
+        assert_eq!(actual.hash_tree_root(), expected.hash_tree_root());
+    }
+}

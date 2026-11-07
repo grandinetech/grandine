@@ -15,6 +15,7 @@
 pub use crate::{
     controller::Controller,
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
+    hierarchy::Hierarchy,
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,
@@ -25,10 +26,17 @@ pub use crate::{
     },
     queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
+    state_field::{
+        CommitteeFields, FinalityCheckpoints, StateBalances, StateField,
+        StatePendingConsolidations, StatePendingDeposits, StatePendingPartialWithdrawals,
+        StateProposerLookahead, StateRandaoMixes, StateValidators, SyncCommittees,
+        ValidatorColumns,
+    },
+    state_storage_config::StateStorageConfig,
     storage::{
-        BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-        DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, EnvelopeByBlockRoot,
-        EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
+        BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        DataColumnSidecarByColumnId, EnvelopeByBlockRoot, EnvelopeRootBySlot,
+        Error as StorageError, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
         FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
         StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
         UnfinalizedBlockByRoot, get, print_beacon_database_info, save,
@@ -40,14 +48,19 @@ pub use crate::{
 pub mod checkpoint_sync;
 pub mod controller;
 
+mod archival_pool;
 mod block_processor;
 mod events;
+mod frame_cache;
+mod hierarchy;
 mod messages;
 mod misc;
 mod mutator;
 mod queries;
 mod specialized;
-mod state_at_slot_cache;
+mod spine;
+mod state_field;
+mod state_storage_config;
 mod storage;
 mod storage_back_sync;
 mod storage_tool;

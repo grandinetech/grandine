@@ -11,7 +11,9 @@ use arithmetic::{ArithmeticError, U64Ext as _};
 use enum_map::EnumMap;
 use serde::Serialize;
 use types::{
-    nonstandard::{AttestationEpoch, AttestationOutcome, GweiVec, Outcome as _, SlashingKind},
+    nonstandard::{
+        AttestationEpoch, AttestationOutcome, BlockRewards, GweiVec, Outcome as _, SlashingKind,
+    },
     phase0::{
         containers::AttestationData,
         primitives::{Gwei, H256, ValidatorIndex},
@@ -103,6 +105,66 @@ impl<D: SlotReport> SlotReport for &mut D {
         attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
     ) -> Result<()> {
         (*self).update_performance(state, data, attesting_indices)
+    }
+}
+
+impl SlotReport for BlockRewards {
+    #[inline]
+    fn set_slashing_penalty(&mut self, _slashed_index: ValidatorIndex, _value: Gwei) {}
+
+    #[inline]
+    fn add_slashing_reward(&mut self, kind: SlashingKind, reward: Gwei) {
+        match kind {
+            SlashingKind::Proposer => {
+                self.proposer_slashings = self.proposer_slashings.saturating_add(reward);
+            }
+            SlashingKind::Attester => {
+                self.attester_slashings = self.attester_slashings.saturating_add(reward);
+            }
+        }
+
+        self.total = self.total.saturating_add(reward);
+    }
+
+    #[inline]
+    fn add_whistleblowing_reward(&mut self, _whistleblower_index: ValidatorIndex, _value: Gwei) {}
+
+    #[inline]
+    fn add_attestation_reward(&mut self, reward: Gwei) {
+        self.attestations = self.attestations.saturating_add(reward);
+        self.total = self.total.saturating_add(reward);
+    }
+
+    #[inline]
+    fn add_deposit(&mut self, _validator_index: ValidatorIndex, _value: Gwei) {}
+
+    #[inline]
+    fn set_sync_committee_delta(
+        &mut self,
+        _participant_index: ValidatorIndex,
+        _delta: Delta,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    #[inline]
+    fn set_sync_aggregate_rewards(&mut self, rewards: SyncAggregateRewards) {
+        let reward = rewards
+            .singular_reward
+            .saturating_mul(rewards.participation);
+
+        self.sync_aggregate = reward;
+        self.total = self.total.saturating_add(reward);
+    }
+
+    #[inline]
+    fn update_performance<P: Preset>(
+        &mut self,
+        _state: &impl BeaconState<P>,
+        _data: AttestationData,
+        _attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
+    ) -> Result<()> {
+        Ok(())
     }
 }
 

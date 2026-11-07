@@ -7,8 +7,9 @@ use typenum::{U1, U48};
 
 use crate::{
     BytesToDepth, MerkleTree,
+    cursor::SszCursor,
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -43,6 +44,19 @@ impl SszHash for H32 {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for H32 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for H32 {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for H160 {
     const SIZE: Size = Size::Fixed {
         size: Self::len_bytes(),
@@ -74,6 +88,19 @@ impl SszHash for H160 {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for H160 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for H160 {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for H256 {
     const SIZE: Size = Size::Fixed {
         size: Self::len_bytes(),
@@ -103,6 +130,19 @@ impl SszHash for H256 {
     }
 }
 
+impl TryFrom<SszCursor<'_>> for H256 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for H256 {
+    type View<'cursor> = Self;
+}
+
 impl SszSize for H384 {
     const SIZE: Size = Size::Fixed {
         size: Self::len_bytes(),
@@ -130,4 +170,17 @@ impl SszHash for H384 {
     fn hash_tree_root(&self) -> H256 {
         MerkleTree::<BytesToDepth<U48>>::merkleize_bytes(self)
     }
+}
+
+impl TryFrom<SszCursor<'_>> for H384 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for H384 {
+    type View<'cursor> = Self;
 }

@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter};
+use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter, ops::Range};
 use std::sync::Arc;
 #[cfg(target_os = "zkvm")]
 use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
@@ -819,7 +819,7 @@ impl PubkeyList {
             .and_then(|index| self.keys.get(index))?;
 
         // `index_map` may hold entries that no longer agree with `keys`: it is
-        // carried over wholesale in `restore_prefix` and left untouched by
+        // carried over wholesale in `restore_range` and left untouched by
         // `clear_prefix`. Only answer for the index that actually holds the key.
         (key == pubkey).then_some(index)
     }
@@ -832,6 +832,21 @@ impl PubkeyList {
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&PublicKeyBytes> {
         self.keys.get(index)
+    }
+
+    /// The first `length` keys, sharing structure with `self`.
+    ///
+    /// The map is shared whole. Entries past `length` stay in it, which `index_of` already
+    /// tolerates, because it only answers for keys that are still in the list.
+    #[must_use]
+    pub fn prefix(&self, length: usize) -> Self {
+        let mut keys = self.keys.clone();
+        keys.truncate(length);
+
+        Self {
+            keys,
+            index_map: self.index_map.clone(),
+        }
     }
 
     #[must_use]
@@ -866,10 +881,10 @@ impl PubkeyList {
             .expect_err("comparator never reports Ordering::Equal")
     }
 
-    /// Replaces the first `count` keys with the ones from `source`, leaving the
+    /// Replaces the keys in `range` with the ones from `source`, leaving the
     /// rest of the list as it is.
-    fn restore_prefix(&mut self, source: &Self, count: usize) {
-        if count == 0 {
+    fn restore_range(&mut self, source: &Self, range: Range<usize>) {
+        if range.is_empty() {
             return;
         }
 
@@ -878,29 +893,64 @@ impl PubkeyList {
         #[allow(
             clippy::allow_attributes,
             unused_mut,
-            reason = "tail needs to be mutable in zkvm environments"
+            reason = "the pieces need to be mutable in zkvm environments"
         )]
-        let mut tail = self.keys.slice(count..length);
+        let mut tail = self.keys.slice(range.end..length);
 
-        let mut index_map = source.index_map.clone();
+        let mut source_keys = source.keys.clone();
 
-        for (key, index) in tail.iter().zip(count..) {
+        #[allow(
+            clippy::allow_attributes,
+            unused_mut,
+            reason = "the pieces need to be mutable in zkvm environments"
+        )]
+        let mut restored = source_keys.slice(range.clone());
+
+        // Every key up to the end of `range` is the key `source` has at the same index, so the map
+        // of `source` already indexes all of them. Only the keys after `range` - normally none -
+        // need adding to it.
+        let (mut index_map, first_unindexed) = if range.start == 0 {
+            (source.index_map.clone(), range.end)
+        } else {
+            (self.index_map.clone(), range.start)
+        };
+
+        let unindexed_keys = restored
+            .iter()
+            .skip(first_unindexed.saturating_sub(range.start))
+            .chain(tail.iter());
+
+        for (key, index) in unindexed_keys.zip(first_unindexed..) {
+            if key.is_zero() {
+                continue;
+            }
+
             let index = ValidatorIndex::try_from(index)
                 .expect("validator count never exceeds ValidatorIndex range");
 
             index_map.insert(*key, index);
         }
 
-        let mut source_keys = source.keys.clone();
-        let mut keys = source_keys.slice(0..count);
+        self.index_map = index_map;
+
+        // The tail is already out of `self.keys`, which now holds the head
+        // followed by the keys being replaced. Take the head out in turn and
+        // put the three pieces back together with the restored keys in the
+        // middle.
+        let mut keys = self.keys.slice(0..range.start);
 
         #[cfg(not(target_os = "zkvm"))]
-        keys.append(tail);
+        {
+            keys.append(restored);
+            keys.append(tail);
+        }
         #[cfg(target_os = "zkvm")]
-        keys.append(&mut tail);
+        {
+            keys.append(&mut restored);
+            keys.append(&mut tail);
+        }
 
         self.keys = keys;
-        self.index_map = index_map;
     }
 
     fn clear_prefix(&mut self, count: usize) {
@@ -981,7 +1031,8 @@ impl<C> SszRead<C> for PubkeyList {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ssz)]
+#[ssz(derive_hash = false)]
 pub struct PartialValidator {
     pub withdrawal_credentials: H256,
     pub slashed: bool,
@@ -1004,6 +1055,10 @@ impl From<&Validator> for PartialValidator {
     }
 }
 
+pub type PartialValidatorList = Vector<PartialValidator>;
+
+pub type EffectiveBalanceList = Vector<Gwei>;
+
 #[expect(clippy::too_long_first_doc_paragraph)]
 /// Low-level validator list implementation, containing only in-memory list
 /// representation and methods for correctly operating on it. This allows
@@ -1020,13 +1075,46 @@ pub struct RawValidatorList {
     /// Validator effective balances change very frequently, comparing to other
     /// fields, so we keep them separately, so that we don't have to clone every
     /// other field when only balance changes.
-    effective_balances: Vector<Gwei>,
+    effective_balances: EffectiveBalanceList,
 
     /// Rest validator fields. These change rarely, so kept separately.
-    items: Vector<PartialValidator>,
+    items: PartialValidatorList,
 }
 
 impl RawValidatorList {
+    /// Puts a list together out of its columns, which must all be of the same length.
+    #[must_use]
+    pub fn from_columns(
+        pubkeys: PubkeyList,
+        effective_balances: EffectiveBalanceList,
+        items: PartialValidatorList,
+    ) -> Self {
+        assert_eq!(pubkeys.len(), effective_balances.len());
+        assert_eq!(pubkeys.len(), items.len());
+
+        Self {
+            pubkeys,
+            effective_balances,
+            items,
+        }
+    }
+
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        let Self {
+            pubkeys,
+            effective_balances,
+            items,
+        } = self;
+
+        (pubkeys, effective_balances, items)
+    }
+
+    #[must_use]
+    pub const fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList) {
+        (&self.pubkeys, &self.effective_balances, &self.items)
+    }
+
     pub fn get(&self, index: u64) -> Result<Validator, IndexError> {
         let index = self.validate_index(index)?;
 
@@ -1150,19 +1238,37 @@ impl RawValidatorList {
     }
 
     /// Restores the public keys that were removed by [`Self::clear_pubkeys`].
-    pub fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
+    ///
+    /// Returns the range that was filled in.
+    pub fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<Range<usize>> {
         let cleared = self.pubkeys.cleared_prefix_len();
 
+        self.restore_pubkeys_in(pubkeys, 0..cleared)
+    }
+
+    /// Fills in the public keys in `range` from `pubkeys`, leaving the keys
+    /// outside it as they are.
+    ///
+    /// Returns the range that was filled in, clamped to the length of the list.
+    pub fn restore_pubkeys_in(
+        &mut self,
+        pubkeys: &PubkeyList,
+        range: Range<usize>,
+    ) -> Result<Range<usize>> {
+        let length = self.pubkeys.len();
+        let range = range.start.min(length)..range.end.min(length);
+
         ensure!(
-            pubkeys.len() >= cleared,
-            "pubkey list is shorter than the cleared prefix \
-                (expected at least {cleared}, got {})",
+            pubkeys.len() >= range.end,
+            "pubkey list is shorter than the range to restore \
+                (expected at least {}, got {})",
+            range.end,
             pubkeys.len(),
         );
 
-        self.pubkeys.restore_prefix(pubkeys, cleared);
+        self.pubkeys.restore_range(pubkeys, range.clone());
 
-        Ok(())
+        Ok(range)
     }
 
     pub fn clear_pubkeys(&mut self, count: usize) {
@@ -1426,6 +1532,79 @@ mod tests {
         }
 
         validators
+    }
+
+    // A state diff records appended validators without their public keys, so it
+    // leaves the zeroes at the end of the registry rather than at the start.
+    // Only that range may be touched: the keys before it are the ones the frame
+    // was already restored with.
+    #[test]
+    fn restore_pubkeys_in_fills_only_the_given_range() {
+        let own_keys = (100..106)
+            .map(test_pubkey)
+            .chain(iter::repeat_n(PublicKeyBytes::zero(), 3))
+            .collect::<Vec<_>>();
+
+        let mut appended_to = test_validators_with(&own_keys);
+
+        let source = test_validators(9);
+
+        let restored = appended_to
+            .restore_pubkeys_in(source.pubkeys(), 6..9)
+            .expect("the source covers the range");
+
+        assert_eq!(restored, 6..9);
+
+        let pubkeys = appended_to.pubkeys();
+
+        for index in 0..6 {
+            let key = test_pubkey(u64::try_from(index).expect("index fits") + 100);
+
+            assert_eq!(pubkeys.get(index), Some(&key));
+        }
+
+        for index in 6..9 {
+            let key = test_pubkey(u64::try_from(index).expect("index fits"));
+
+            assert_eq!(pubkeys.get(index), Some(&key));
+        }
+
+        // The keys the source holds outside the range were never ours.
+        assert!(!pubkeys.contains(&test_pubkey(0)));
+        assert!(!pubkeys.contains(&test_pubkey(5)));
+
+        for (index, key) in pubkeys.iter().enumerate() {
+            let index = ValidatorIndex::try_from(index).expect("index fits");
+
+            assert_eq!(pubkeys.index_of(key), Some(index));
+        }
+    }
+
+    #[test]
+    fn restore_pubkeys_in_clamps_the_range_to_the_list() {
+        let mut validators = test_validators(4);
+
+        validators.clear_pubkeys(4);
+
+        let source = test_validators(4);
+
+        let restored = validators
+            .restore_pubkeys_in(source.pubkeys(), 0..100)
+            .expect("the range is clamped before the source is checked");
+
+        assert_eq!(restored, 0..4);
+    }
+
+    #[test]
+    fn restore_pubkeys_in_rejects_a_source_that_does_not_cover_the_range() {
+        let mut validators =
+            test_validators_with(&[test_pubkey(0), test_pubkey(1), PublicKeyBytes::zero()]);
+
+        let source = test_validators(2);
+
+        validators
+            .restore_pubkeys_in(source.pubkeys(), 2..3)
+            .expect_err("the source is shorter than the range");
     }
 
     #[test]

@@ -249,6 +249,7 @@ pub struct ExecutionPayloadHeader<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 #[ssz(stable(active = [1; 12]))]
+#[ssz(derive_cursor = true)]
 pub struct ExecutionPayloadBid<P: Preset> {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: H256,

@@ -10,12 +10,14 @@ workspace = true
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 bls = { workspace = true }
+bytesize = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
+diff = { workspace = true }
 eth2_libp2p = { workspace = true }
 execution_engine = { workspace = true }
 features = { workspace = true }
@@ -23,12 +25,12 @@ fork_choice_store = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
 genesis = { workspace = true }
+hashing = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }
 logging = { workspace = true }
 mime = { workspace = true }
-nonzero_ext = { workspace = true }
 num-traits = { workspace = true }
 num_cpus = { workspace = true }
 once_cell = { workspace = true }
@@ -47,6 +49,7 @@ ssz = { workspace = true }
 state_cache = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
+sysinfo = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -58,7 +61,6 @@ types = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
-bytesize = { workspace = true }
 duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
@@ -69,6 +71,7 @@ spec_test_utils = { workspace = true }
 tap = { workspace = true }
 tempfile = { workspace = true }
 test-generator = { workspace = true }
+try_from_iterator = { workspace = true }
 unwrap_none = { workspace = true }
 
 [features]

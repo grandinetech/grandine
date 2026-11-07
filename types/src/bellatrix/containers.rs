@@ -107,6 +107,7 @@ pub struct ExecutionPayload<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct ExecutionPayloadHeader<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
     pub fee_recipient: ExecutionAddress,
