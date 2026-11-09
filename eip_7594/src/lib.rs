@@ -177,6 +177,26 @@ pub fn verify_data_column_sidecar<P: Preset>(
     true
 }
 
+/// Check what `verify_data_column_sidecar` can check before the KZG commitments are known.
+///
+/// Gloas sidecars get their commitments from the block's payload bid.
+/// A valid bid commits to at most `max_blobs_per_block` blobs,
+/// so a longer column can never pass `verify_data_column_sidecar` later.
+#[must_use]
+pub fn verify_data_column_sidecar_shape<P: Preset>(
+    config: &Config,
+    data_column_sidecar: &DataColumnSidecar<P>,
+) -> bool {
+    let column_length = data_column_sidecar.column().len_usize();
+    let epoch = misc::compute_epoch_at_slot::<P>(data_column_sidecar.slot());
+    let max_blobs_per_block = config.get_blob_schedule_entry(epoch).max_blobs_per_block;
+
+    data_column_sidecar.index() < P::NumberOfColumns::U64
+        && column_length > 0
+        && column_length <= max_blobs_per_block
+        && column_length == data_column_sidecar.kzg_proofs().len_usize()
+}
+
 /// Verify if the KZG proofs are correct.
 #[instrument(level = "debug", skip_all)]
 pub fn verify_kzg_proofs<P: Preset>(

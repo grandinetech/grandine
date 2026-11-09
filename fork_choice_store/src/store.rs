@@ -17,7 +17,10 @@ use bitvec::vec::BitVec;
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
-use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
+use eip_7594::{
+    verify_data_column_sidecar, verify_data_column_sidecar_shape, verify_kzg_proofs,
+    verify_sidecar_inclusion_proof,
+};
 use execution_engine::ExecutionEngine;
 use features::Feature;
 use hash_hasher::HashedMap;
@@ -3686,6 +3689,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
+        // Structural checks come first, so malformed sidecars are rejected, never queued.
+        // Pre-Gloas sidecars carry their commitments: this is the full check, in spec order.
+        // Gloas commitments come from the block, so only the shape is checked here.
+        // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
+        let well_formed = match data_column_sidecar.pre_gloas() {
+            Some(sidecar) => verify_data_column_sidecar(
+                &self.chain_config,
+                &data_column_sidecar,
+                &sidecar.kzg_commitments,
+            ),
+            None => verify_data_column_sidecar_shape(&self.chain_config, &data_column_sidecar),
+        };
+
+        ensure!(
+            well_formed,
+            Error::DataColumnSidecarInvalid {
+                data_column_sidecar
+            },
+        );
+
+        // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
+        if let Some(actual) = origin.subnet_id() {
+            let expected =
+                misc::compute_subnet_for_data_column_sidecar(&self.chain_config, column_index);
+            ensure!(
+                actual == expected,
+                Error::DataColumnSidecarOnIncorrectSubnet {
+                    data_column_sidecar,
+                    expected,
+                    actual,
+                },
+            );
+        }
+
         // Gloas dropped the slot checks below; they still bound what gets queued.
         // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot
         // (a client MAY queue future sidecars for processing at the appropriate slot).
@@ -3726,37 +3763,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             );
 
-            block
+            let kzg_commitments = block
                 .message()
                 .body()
                 .with_payload_bid()
                 .map(|body| body.signed_execution_payload_bid().blob_kzg_commitments())
                 .ok_or_else(|| Error::DataColumnSidecarBlockWithoutPayloadBid {
                     data_column_sidecar: data_column_sidecar.clone_arc(),
-                })?
-        };
+                })?;
 
-        // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
-        ensure!(
-            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar, kzg_commitments),
-            Error::DataColumnSidecarInvalid {
-                data_column_sidecar
-            },
-        );
-
-        // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
-        if let Some(actual) = origin.subnet_id() {
-            let expected =
-                misc::compute_subnet_for_data_column_sidecar(&self.chain_config, column_index);
+            // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar, bid.blob_kzg_commitments)
             ensure!(
-                actual == expected,
-                Error::DataColumnSidecarOnIncorrectSubnet {
-                    data_column_sidecar,
-                    expected,
-                    actual,
+                verify_data_column_sidecar(
+                    &self.chain_config,
+                    &data_column_sidecar,
+                    kzg_commitments,
+                ),
+                Error::DataColumnSidecarInvalid {
+                    data_column_sidecar
                 },
             );
-        }
+
+            kzg_commitments
+        };
 
         if let Some(signed_block_header) = data_column_sidecar.signed_block_header() {
             let block_header = &signed_block_header.message;
