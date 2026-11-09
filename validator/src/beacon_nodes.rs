@@ -1,4 +1,4 @@
-use core::{fmt::Display, future::Future, ops::Range, ptr};
+use core::{fmt::Display, future::Future, ops::Range};
 use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},
@@ -629,24 +629,9 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
         min_bid: Gwei,
         builders: &ContiguousList<BuilderEntry, MaxBuilderEntries>,
     ) -> Result<ProducedBlock<P>> {
-        // A node whose view differs from the fleet's would build on a parent the others reject;
-        // without a known head there is nothing to judge by, and any block beats a missed slot.
-        let parent_root = match self.head_block_root().await {
-            Ok(parent_root) => Some(parent_root),
-            Err(error) => {
-                warn_with_peers!("producing a block without a known head: {error:?}");
-                None
-            }
-        };
-
-        // The cached head can lag a block every node already has; then no block matches it and
-        // the first one built is still better than a missed slot.
-        let fallback = OnceLock::new();
-        let stash = &fallback;
-
-        let attempt = self
+        let (producer, block) = self
             .first_success("produce a block", |node| async move {
-                let produced_block = BeaconNodeApi::<P>::produce_block(
+                BeaconNodeApi::<P>::produce_block(
                     node,
                     slot,
                     randao_reveal,
@@ -655,62 +640,11 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
                     min_bid,
                     builders,
                 )
-                .await?;
-
-                let built_on = produced_block.block.parent_root();
-
-                // A node sharing the fleet's head still builds on the grandparent when it reorgs
-                // a late parent; only a node whose head differs is passed over.
-                let shares_head = |parent_root| {
-                    node.chain_head()
-                        .cached()
-                        .is_some_and(|(_, head)| head == parent_root)
-                };
-
-                if let Some(parent_root) = parent_root
-                    && built_on != parent_root
-                    && !shares_head(parent_root)
-                {
-                    if stash.set((node, produced_block)).is_err() {
-                        debug_with_peers!(
-                            "the block {node} built on {built_on:?} is not kept as the fallback; \
-                             an earlier node's block already is",
-                        );
-                    }
-
-                    bail!("{node} built on {built_on:?} rather than the head {parent_root:?}");
-                }
-
-                Ok(produced_block)
+                .await
             })
-            .await;
+            .await?;
 
-        let (producer, block) = match attempt {
-            Ok((producer, block)) => (Some(producer), block),
-            Err(error) => {
-                let (Some(parent_root), Some((node, block))) = (parent_root, fallback.into_inner())
-                else {
-                    return Err(error);
-                };
-
-                warn_with_peers!(
-                    "no beacon node built on the head {parent_root:?}; proposing the block \
-                     {node} built on {:?}",
-                    block.block.parent_root(),
-                );
-
-                let producer = self
-                    .nodes
-                    .iter()
-                    .find(|candidate| ptr::eq(candidate.as_ref(), node));
-
-                (producer, block)
-            }
-        };
-
-        if let Some(producer) = producer {
-            self.producer.get_or_init(|| producer.clone_arc());
-        }
+        self.producer.get_or_init(|| producer.clone_arc());
 
         Ok(block)
     }
