@@ -21,14 +21,20 @@ use eth2_libp2p::PeerId;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use spec_test_utils::BlsSetting;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, ProgressiveList};
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
+#[cfg(feature = "eth2-cache")]
+use types::preset::Medalla;
 use types::{
     combined::{Attestation, DataColumnSidecar},
+    config::Config,
     deneb::primitives::{KzgCommitment, KzgProof},
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
-    gloas::consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+    gloas::{
+        consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+        containers::DataColumnSidecar as GloasDataColumnSidecar,
+    },
     nonstandard::{PayloadStatus, Phase},
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
@@ -41,8 +47,6 @@ use types::{
     preset::Minimal,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
-#[cfg(feature = "eth2-cache")]
-use types::{config::Config, preset::Medalla};
 
 use fork_choice_store::PayloadPresence;
 
@@ -3818,6 +3822,105 @@ async fn refetched_data_column_sidecar_is_retried_when_its_slot_arrives() {
 
     context.on_slot(2);
     context.assert_block_needed(block_root, peer_id);
+}
+
+// Malformed sidecars must be rejected before the slot checks can queue them.
+// Rejecting also scores the peer, which an ignore would not.
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_future_fulu_data_column_sidecar_is_rejected_not_queued() {
+    let mut context = Context::fulu_minimal();
+
+    // Store is at slot 0 and allows 1 future slot.
+    // Slot 1 would be delayed and slot 2 ignored, if the sidecar were well formed.
+    // The well-formed case at slot 2 is covered above.
+    let well_formed = fulu_data_column_sidecar_at_slot(1);
+
+    assert!(
+        context
+            .on_requested_data_column_sidecar(well_formed, PeerId::random())
+            .await
+            .is_none(),
+    );
+
+    for slot in [1, 2] {
+        let mut data_column_sidecar = fulu_data_column_sidecar_at_slot(slot);
+
+        let DataColumnSidecar::Fulu(sidecar) = &mut data_column_sidecar else {
+            unreachable!("fulu_data_column_sidecar_at_slot builds a Fulu sidecar");
+        };
+
+        // One cell, one commitment, no proofs.
+        sidecar.kzg_proofs = ContiguousList::default();
+
+        assert!(matches!(
+            context.on_data_column_sidecar(data_column_sidecar).await,
+            Some(P2pMessage::Reject(Some(_), _)),
+        ));
+    }
+}
+
+// Commitments are unknown until the block arrives. Nothing else about a Gloas sidecar is.
+fn gloas_data_column_sidecar(
+    slot: Slot,
+    beacon_block_root: H256,
+    cell_count: usize,
+    proof_count: usize,
+) -> DataColumnSidecar<Minimal> {
+    DataColumnSidecar::Gloas(GloasDataColumnSidecar {
+        column: ProgressiveList::try_from(vec![Box::default(); cell_count])
+            .expect("progressive lists have no practical limit"),
+        kzg_proofs: ProgressiveList::try_from(vec![KzgProof::default(); proof_count])
+            .expect("progressive lists have no practical limit"),
+        slot,
+        beacon_block_root,
+        ..Default::default()
+    })
+}
+
+// A Gloas sidecar for an unknown block is parked until the block arrives.
+// A malformed one must be rejected instead: it would take a queue slot and could evict good ones.
+#[tokio::test(flavor = "multi_thread")]
+async fn malformed_gloas_data_column_sidecar_for_unknown_block_is_rejected_not_queued() {
+    let mut context = Context::gloas_minimal();
+
+    let max_blobs_per_block = Config::minimal()
+        .start_and_stay_in(Phase::Gloas)
+        .get_blob_schedule_entry(GENESIS_EPOCH)
+        .max_blobs_per_block;
+
+    // Past the finalized slot and not in the future, so only the block is missing.
+    let slot = 1;
+
+    context.on_slot(slot);
+
+    let well_formed = [1, max_blobs_per_block];
+
+    for (byte, cell_count) in (1..).zip(well_formed) {
+        let block_root = H256::repeat_byte(byte);
+        let sidecar = gloas_data_column_sidecar(slot, block_root, cell_count, cell_count);
+
+        assert!(matches!(
+            context.on_data_column_sidecar(sidecar).await,
+            Some(P2pMessage::BlockNeeded(needed, _)) if needed == block_root,
+        ));
+    }
+
+    let malformed = [
+        (0, 0),
+        (1, 0),
+        (1, 2),
+        (max_blobs_per_block + 1, max_blobs_per_block + 1),
+    ];
+
+    for (byte, (cell_count, proof_count)) in (0x10..).zip(malformed) {
+        let block_root = H256::repeat_byte(byte);
+        let sidecar = gloas_data_column_sidecar(slot, block_root, cell_count, proof_count);
+
+        assert!(matches!(
+            context.on_data_column_sidecar(sidecar).await,
+            Some(P2pMessage::Reject(Some(_), _)),
+        ));
+    }
 }
 
 // Finalized columns are never needed again. Forgetting them would only cause redownloads.
