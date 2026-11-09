@@ -5270,7 +5270,8 @@ where
 
         self.delayed_until_data
             .retain(|_, pending_payload_envelope| {
-                if pending_payload_envelope.execution_payload_envelope.slot() > finalized_slot {
+                // Envelopes and their columns are still accepted at the finalized slot.
+                if pending_payload_envelope.execution_payload_envelope.slot() >= finalized_slot {
                     return true;
                 }
 
