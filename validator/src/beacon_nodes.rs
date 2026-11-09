@@ -350,7 +350,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
 
         ensure!(
             any_success,
-            "no synced beacon node could report validator liveness for epoch {epoch}",
+            "no ready beacon node could report validator liveness for epoch {epoch}",
         );
 
         Ok(liveness
