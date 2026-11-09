@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bls::{
     AggregatePublicKey, AggregatePublicKeyBytes, PublicKey, PublicKeyBytes, SignatureBytes,
-    traits::PublicKey as _,
+    traits::AggregatePublicKey as _,
 };
 use serde::Deserialize;
 use spec_test_utils::Case;

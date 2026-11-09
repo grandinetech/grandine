@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
-use bls::{AggregatePublicKey, PublicKeyBytes, traits::PublicKey as _};
+use bls::{AggregatePublicKey, PublicKeyBytes, traits::AggregatePublicKey as _};
 use itertools::{EitherOrBoth, Itertools as _};
 use nonzero_ext::nonzero;
 use num_integer::Roots as _;

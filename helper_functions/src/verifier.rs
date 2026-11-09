@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use bls::{
     AggregatePublicKey, AggregateSignature, PublicKey, Signature, SignatureBytes,
-    traits::{PublicKey as _, Signature as _, SignatureBytes as _},
+    traits::{AggregatePublicKey as _, Signature as _, SignatureBytes as _},
 };
 use derive_more::Constructor;
 use enumset::{EnumSet, EnumSetType};
@@ -421,15 +421,17 @@ impl Verifier for Triple {
         let public_key = public_keys
             .into_iter()
             .par_bridge()
-            .fold(AggregatePublicKey::default, |a, b| a.aggregate(&b))
-            .reduce(AggregatePublicKey::default, |a, b| a.aggregate(&b));
+            .fold(AggregatePublicKey::default, |a, b| a.add_public_key(&b))
+            .reduce(AggregatePublicKey::default, |a, b| a.add_aggregate(&b))
+            .to_public_key();
 
         #[cfg(target_os = "zkvm")]
         let public_key = public_keys
             .into_iter()
             .fold(AggregatePublicKey::default(), |acc, pubkey| {
-                acc.aggregate(&pubkey)
-            });
+                acc.add_public_key(&pubkey)
+            })
+            .to_public_key();
 
         *self = Self::new(message, signature_bytes, Arc::new(public_key));
 

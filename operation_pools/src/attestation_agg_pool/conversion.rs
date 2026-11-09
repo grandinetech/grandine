@@ -173,6 +173,10 @@ pub fn compute_on_chain_aggregate<P: Preset>(
         committee_bits.set(index, true);
         signature.aggregate_in_place(aggregate.signature.try_into()?);
     }
+    ensure!(
+        signature != AggregateSignature::default(),
+        "block aggregate signature is the point at infinity",
+    );
     let aggregation_bits = BitList::concatenate(
         aggregates
             .iter()

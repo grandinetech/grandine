@@ -1,3 +1,4 @@
+pub mod aggregate_public_key;
 pub mod public_key;
 pub mod public_key_bytes;
 pub mod secret_key;

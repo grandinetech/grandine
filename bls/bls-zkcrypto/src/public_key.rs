@@ -38,11 +38,6 @@ impl TryFrom<PublicKeyBytes> for PublicKey {
 impl PublicKeyTrait for PublicKey {
     type PublicKeyBytes = PublicKeyBytes;
 
-    #[inline]
-    fn aggregate_in_place(&mut self, other: &Self) {
-        self.0 = self.as_raw().add(other.as_raw());
-    }
-
     fn deserialize_from_decompressed_bytes(bytes: &[u8]) -> Result<Self, Error> {
         Ok(Self(
             G1Affine::from_uncompressed(

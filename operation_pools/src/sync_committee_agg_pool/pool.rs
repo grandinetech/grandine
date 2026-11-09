@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Result, anyhow};
-use bls::traits::Signature as _;
+use bls::{AggregateSignature, traits::Signature as _};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use logging::debug_with_peers;
@@ -138,13 +138,17 @@ impl<P: Preset> Pool<P> {
                     continue;
                 }
 
+                let signature = aggregate.signature.aggregate(message.signature.try_into()?);
+
+                if signature == AggregateSignature::default() {
+                    continue;
+                }
+
                 aggregate
                     .aggregation_bits
                     .set(position_in_subcommittee, true);
 
-                aggregate
-                    .signature
-                    .aggregate_in_place(message.signature.try_into()?);
+                aggregate.signature = signature;
             }
         }
 
@@ -218,13 +222,17 @@ impl<P: Preset> Pool<P> {
                         continue;
                     }
 
+                    let signature = aggregate.signature.aggregate(message.signature.try_into()?);
+
+                    if signature == AggregateSignature::default() {
+                        continue;
+                    }
+
                     aggregate
                         .aggregation_bits
                         .set(position_in_subcommittee, true);
 
-                    aggregate
-                        .signature
-                        .aggregate_in_place(message.signature.try_into()?);
+                    aggregate.signature = signature;
                 }
             }
         }
