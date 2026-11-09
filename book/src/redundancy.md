@@ -61,7 +61,6 @@ Requests for data then go to the nodes in that order until one succeeds: duties,
 
 Some requests are special:
 
-- **Block production.** A block is taken from the first node that builds on the head the other nodes agree on. A node with a different view of the head is passed over. If no node builds on that head, the first block produced is proposed anyway, because any block beats a missed slot.
 - **Attesting on a new head.** When a node streams the slot's block as its new head before attestation time, the validator client attests to it without waiting for the attestation tick, and asks that node first, as it is the one known to have the block.
 - **Doppelganger liveness.** Liveness is asked from every Ready node at once. A validator seen live by any of them counts as live.
 
