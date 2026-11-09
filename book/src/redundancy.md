@@ -37,18 +37,21 @@ Once per slot, the validator client polls every node and gives it one of these h
 |---|---|
 | Ready | Synced, its execution client online, its head verified by the execution client, and its head no more than `--max-empty-slots` slots (default `32`) behind the clock |
 | Unknown | Not polled yet |
-| Unusable | Reachable but syncing, optimistic, with its execution client offline, or with a stale head |
+| Optimistic | Synced, but its head is not yet verified by the execution client. A head is usually optimistic for a moment after each block |
+| Unusable | Reachable but syncing, with its execution client offline, or with a stale head |
 | Unreachable | The node did not answer |
 | Incompatible | The node is on a different network. It is never used |
 
 It also follows each node's head through the node's event stream (`/eth/v1/events`), and reconnects with a growing delay, up to one minute, when the stream drops.
 
-Changes are logged:
+Changes are logged, except that moves between Ready and Optimistic are logged only at debug level, as they are routine:
 
 ```text
 beacon node at http://BN-2:5052/ is now Unusable
 beacon node at http://BN-2:5052/ is now Ready
 ```
+
+A lasting optimistic state gets its own warning, described under [Troubleshooting](#troubleshooting).
 
 ### Order
 
@@ -125,7 +128,8 @@ Combine several beacon nodes with a [Web3Signer](./web3signer.md), so that the k
 
 ## Troubleshooting
 
-- **`no remote beacon node is fully synced`**: no node is Ready. Duties are still attempted on the best node available, but its data may be outdated. Check each node's sync status, execution client and peers.
+- **`no remote beacon node is fully synced`**: no node is Ready or Optimistic. Duties are still attempted on the best node available, but its data may be outdated. Check each node's sync status, execution client and peers.
+- **`no remote beacon node has a head verified by an execution engine`**: for at least three polls in a row, about one per slot, no node was Ready and at least one was Optimistic. Beacon nodes may refuse attestation data and blocks over an optimistic head, so those duties may fail, while sync committee messages are signed over the last verified head. Once that head is more than `--max-empty-slots` slots old, the nodes count as Unusable and `no remote beacon node is fully synced` is warned instead. Nodes optimistic since the validator client started have no verified head to age, so they stay Optimistic. Check each node's execution client.
 - **`no remote beacon node can serve duties`**: no node could be reached. Check the URLs, firewalls and `--http-address` on the nodes.
 - **`beacon nodes at URL-1 and URL-2 are on different chains`**: the nodes disagree on genesis. One of them is on the wrong network.
 - **`URL beacon node failed to ...`** warnings: a request failed on one node and was retried on the next one. Occasional warnings are normal. Constant ones point to a broken node.

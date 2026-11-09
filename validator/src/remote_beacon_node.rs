@@ -598,10 +598,15 @@ impl RemoteBeaconNode {
         let health = self.poll_health(slot).await;
 
         if health != previous {
-            info_with_peers!("beacon node at {} is now {health:?}", self.url);
+            // A head is optimistic for a moment after each block while its payload is validated.
+            if health.is_synced() && previous.is_synced() {
+                debug_with_peers!("beacon node at {} is now {health:?}", self.url);
+            } else {
+                info_with_peers!("beacon node at {} is now {health:?}", self.url);
+            }
 
-            // A node that just became ready may have restarted and forgotten what it was sent.
-            if health.is_ready() {
+            // A node that just caught up may have restarted and forgotten what it was sent.
+            if health.is_synced() && !previous.is_synced() {
                 *self.prepared_proposers.lock().await = None;
                 self.sent_subscriptions.lock().await.clear();
             }
@@ -688,7 +693,7 @@ impl RemoteBeaconNode {
 
         // A node that has fallen behind keeps serving stale duty data while calling itself
         // synced; its own head, held to the wall clock, shows what its sync status cannot.
-        if health == Health::Ready
+        if health.is_synced()
             && matches!(
                 self.chain_head.status(slot, self.max_empty_slots),
                 HeadStatus::Stale { .. }
@@ -2412,6 +2417,94 @@ mod tests {
         }];
 
         assert!(node.needs_proposer_preparation(3, &changed).await);
+
+        Ok(())
+    }
+
+    fn node_reporting_health(server: &MockServer, is_optimistic: bool) -> Result<RemoteBeaconNode> {
+        let chain_config = ChainConfig::mainnet();
+        let genesis_fork_version = chain_config.genesis_fork_version;
+
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/beacon/genesis");
+
+            then.status(200).json_body(json!({
+                "data": {
+                    "genesis_time": "0",
+                    "genesis_validators_root": H256::zero(),
+                    "genesis_fork_version": genesis_fork_version,
+                },
+            }));
+        });
+
+        server.mock(|when, then| {
+            when.method(Method::GET).path("/eth/v1/node/syncing");
+
+            then.status(200).json_body(json!({
+                "data": {
+                    "is_syncing": false,
+                    "is_optimistic": is_optimistic,
+                    "el_offline": false,
+                },
+            }));
+        });
+
+        let node = test_node(chain_config, &server.base_url())?;
+
+        node.seed_genesis_validators_root(H256::zero());
+
+        Ok(node)
+    }
+
+    // A node that catches up may have restarted; one moving between synced states has not.
+    #[tokio::test]
+    async fn only_a_node_catching_up_is_taken_to_have_forgotten_what_it_was_sent() -> Result<()> {
+        let subscription = BeaconCommitteeSubscription {
+            validator_index: 1,
+            committee_index: 2,
+            committees_at_slot: 3,
+            slot: 200,
+            is_aggregator: false,
+        };
+
+        for (previous, is_optimistic, expected, forgotten) in [
+            (Health::Unreachable, true, Health::Optimistic, true),
+            (Health::Unusable, false, Health::Ready, true),
+            (Health::Ready, true, Health::Optimistic, false),
+            (Health::Optimistic, false, Health::Ready, false),
+        ] {
+            let server = MockServer::start_async().await;
+            let node = node_reporting_health(&server, is_optimistic)?;
+
+            node.set_health(previous);
+            *node.prepared_proposers.lock().await = Some((3, vec![]));
+            node.record_sent_subscriptions(100, [subscription]).await;
+
+            node.refresh_health(100).await;
+
+            let proposers_forgotten = node.prepared_proposers.lock().await.is_none();
+            let subscriptions_forgotten = node.sent_subscriptions.lock().await.is_empty();
+
+            assert_eq!(node.health(), expected);
+            assert_eq!(proposers_forgotten, forgotten);
+            assert_eq!(subscriptions_forgotten, forgotten);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_synced_node_with_a_stale_head_is_unusable() -> Result<()> {
+        for is_optimistic in [false, true] {
+            let server = MockServer::start_async().await;
+            let node = node_reporting_health(&server, is_optimistic)?;
+
+            node.chain_head().update(50, H256::repeat_byte(1));
+
+            node.refresh_health(100).await;
+
+            assert_eq!(node.health(), Health::Unusable);
+        }
 
         Ok(())
     }

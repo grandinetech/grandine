@@ -1,4 +1,7 @@
-use core::cmp::Reverse;
+use core::{
+    cmp::Reverse,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, bail, ensure};
@@ -20,6 +23,9 @@ use crate::{
     messages::InternalMessage,
     remote_beacon_node::{Genesis, RemoteBeaconNode},
 };
+
+// A head is optimistic for a moment after each block, which one poll or two can land on.
+const OPTIMISTIC_POLLS_BEFORE_WARNING: u64 = 3;
 
 /// Only possible on startup and not fixed by restarting, so the restart loop exits on these.
 #[derive(Debug, Error)]
@@ -47,6 +53,7 @@ pub struct RemoteBeaconNodes {
     nodes: Vec<Arc<RemoteBeaconNode>>,
     publish_to_every_node: Vec<PublishedDuty>,
     use_builder: bool,
+    optimistic_polls: AtomicU64,
 }
 
 impl RemoteBeaconNodes {
@@ -60,6 +67,7 @@ impl RemoteBeaconNodes {
             nodes,
             publish_to_every_node,
             use_builder,
+            optimistic_polls: AtomicU64::new(0),
         }
     }
 
@@ -156,7 +164,12 @@ impl RemoteBeaconNodes {
         join_all(self.nodes.iter().map(|node| node.refresh_health(slot))).await;
         join_all(self.nodes.iter().map(|node| node.refresh_head(slot))).await;
 
-        if self.nodes.iter().any(|node| node.health().is_ready()) {
+        if self.optimistic_for_too_long() {
+            warn_with_peers!("no remote beacon node has a head verified by an execution engine");
+        }
+
+        // An optimistic node follows the chain; only its head's payload awaits validation.
+        if self.nodes.iter().any(|node| node.health().is_synced()) {
             return;
         }
 
@@ -171,19 +184,41 @@ impl RemoteBeaconNodes {
         }
     }
 
+    /// Counts this poll; true once enough in a row found no node `Ready` and one `Optimistic`.
+    fn optimistic_for_too_long(&self) -> bool {
+        let healths = || self.nodes.iter().map(|node| node.health());
+
+        if healths().any(Health::is_ready) || !healths().any(Health::is_synced) {
+            self.optimistic_polls.store(0, Ordering::Relaxed);
+            return false;
+        }
+
+        let polls = self
+            .optimistic_polls
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+
+        polls >= OPTIMISTIC_POLLS_BEFORE_WARNING
+    }
+
     pub async fn check_on_startup(&self, slot: Slot) -> Result<()> {
         info_with_peers!("checking remote beacon nodes");
 
         self.refresh(slot).await;
 
-        let ready = self
-            .nodes
-            .iter()
-            .filter(|node| node.health().is_ready())
-            .count();
+        let count_at = |health| {
+            self.nodes
+                .iter()
+                .filter(|node| node.health() == health)
+                .count()
+        };
+
+        let ready = count_at(Health::Ready);
+        let optimistic = count_at(Health::Optimistic);
 
         info_with_peers!(
-            "{ready} of {} remote beacon nodes are ready to serve duties",
+            "{ready} of {} remote beacon nodes are ready to serve duties; \
+             {optimistic} more are optimistic",
             self.nodes.len(),
         );
 
@@ -220,6 +255,47 @@ mod tests {
 
     fn order(nodes: &RemoteBeaconNodes) -> Vec<Arc<RemoteBeaconNode>> {
         nodes.serving().map(ArcExt::clone_arc).collect()
+    }
+
+    #[test]
+    fn only_a_lasting_optimistic_state_is_warned_about() -> Result<()> {
+        let optimistic = node("http://optimistic")?;
+        let other = node("http://other")?;
+
+        let nodes = RemoteBeaconNodes::new(
+            vec![optimistic.clone_arc(), other.clone_arc()],
+            vec![],
+            false,
+        );
+
+        optimistic.set_health(Health::Optimistic);
+        other.set_health(Health::Unusable);
+
+        for _ in 1..OPTIMISTIC_POLLS_BEFORE_WARNING {
+            assert!(!nodes.optimistic_for_too_long());
+        }
+
+        assert!(nodes.optimistic_for_too_long());
+        assert!(nodes.optimistic_for_too_long());
+
+        // One `Ready` node ends the state, and the count starts over.
+        other.set_health(Health::Ready);
+        assert!(!nodes.optimistic_for_too_long());
+
+        other.set_health(Health::Unusable);
+
+        for _ in 1..OPTIMISTIC_POLLS_BEFORE_WARNING {
+            assert!(!nodes.optimistic_for_too_long());
+        }
+
+        // With no synced node left, the other warnings take over and the count starts over.
+        optimistic.set_health(Health::Unusable);
+        assert!(!nodes.optimistic_for_too_long());
+
+        optimistic.set_health(Health::Optimistic);
+        assert!(!nodes.optimistic_for_too_long());
+
+        Ok(())
     }
 
     // Nodes stuck on the same block must not outvote the one that follows the chain.

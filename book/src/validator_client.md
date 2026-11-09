@@ -121,7 +121,7 @@ At startup, the validator client asks every beacon node for its genesis. All nod
 no beacon node given with --beacon-node-urls reported genesis; retrying in 2 s
 genesis agreed with the beacon nodes given with --beacon-node-urls (genesis validators root: 0x..., genesis time: ...)
 checking remote beacon nodes
-1 of 1 remote beacon nodes are ready to serve duties
+1 of 1 remote beacon nodes are ready to serve duties; 0 more are optimistic
 ```
 
 After that, the validator client polls each node's health once per slot and follows each node's head through the event stream. How it picks a node for each duty is described in [Redundancy and fallback beacon nodes](./redundancy.md).
@@ -201,7 +201,8 @@ To go back to the integrated validator client, follow the same steps in the othe
 
 - **`--NAME must be specified after vc`**: the option is placed before the command. Move it after `vc` or `bn`.
 - **`beacon node at URL is on a different network`**: `--network` (or the custom configuration) does not match the beacon node. Fix the network or the URL.
-- **`no remote beacon node is fully synced`**: every node is syncing, optimistic, has its execution client offline, or has a head more than `--max-empty-slots` slots behind. Duties are still attempted, but may fail or be late. Check the beacon nodes.
+- **`no remote beacon node is fully synced`**: every node is syncing, has its execution client offline, or has a head more than `--max-empty-slots` slots behind. Duties are still attempted, but may fail or be late. Check the beacon nodes.
+- **`no remote beacon node has a head verified by an execution engine`**: for at least three polls in a row, about one per slot, no node was Ready and at least one was Optimistic. Beacon nodes may refuse attestation data and blocks over an optimistic head, so those duties may fail, while sync committee messages are signed over the last verified head. Once that head is more than `--max-empty-slots` slots old, the nodes count as Unusable and `no remote beacon node is fully synced` is warned instead. Nodes optimistic since the validator client started have no verified head to age, so they stay Optimistic. Check each node's execution client.
 - **`no remote beacon node can serve duties`**: no node could be reached. Check the URLs, firewalls and that the nodes' HTTP API is enabled on a reachable address.
 - **`--track-liveness must be specified for --detect-doppelgangers with the built-in beacon node`**: add `--track-liveness`, or run the validator client separately.
 
