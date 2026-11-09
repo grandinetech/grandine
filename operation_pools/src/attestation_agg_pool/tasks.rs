@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Result, ensure};
-use bls::{PublicKeyBytes, traits::Signature as _};
+use bls::{AggregateSignature, PublicKeyBytes, traits::Signature as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
@@ -430,10 +430,14 @@ fn aggregate_attestation<P: Preset>(
         .aggregation_bits
         .any_not_in(&aggregate.aggregation_bits)
     {
-        aggregate.aggregation_bits |= &attestation.aggregation_bits;
-        aggregate
+        let signature = aggregate
             .signature
-            .aggregate_in_place(attestation.signature.try_into()?);
+            .aggregate(attestation.signature.try_into()?);
+
+        if signature != AggregateSignature::default() {
+            aggregate.aggregation_bits |= &attestation.aggregation_bits;
+            aggregate.signature = signature;
+        }
     }
 
     Ok(())

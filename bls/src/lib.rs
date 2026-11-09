@@ -3,12 +3,12 @@ pub use bls_core::*;
 macro_rules! implement_backend {
     ($backend:path) => {
         pub use $backend::{
-            public_key::PublicKey, public_key_bytes::PublicKeyBytes, secret_key::SecretKey,
+            aggregate_public_key::AggregatePublicKey, public_key::PublicKey,
+            public_key_bytes::PublicKeyBytes, secret_key::SecretKey,
             secret_key_bytes::SecretKeyBytes, signature::Signature,
             signature_bytes::SignatureBytes,
         };
 
-        pub type AggregatePublicKey = PublicKey;
         pub type AggregatePublicKeyBytes = PublicKeyBytes;
         pub type AggregateSignature = Signature;
         pub type AggregateSignatureBytes = SignatureBytes;

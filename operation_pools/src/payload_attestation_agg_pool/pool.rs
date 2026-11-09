@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::traits::Signature as _;
+use bls::{AggregateSignature, traits::Signature as _};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use helper_functions::accessors;
 use itertools::Itertools as _;
@@ -113,11 +113,16 @@ impl<P: Preset> Pool<P> {
                     continue;
                 }
 
-                pool_aggregate.aggregation_bits.set(position, true);
-
-                pool_aggregate
+                let signature = pool_aggregate
                     .signature
-                    .aggregate_in_place(message.signature.try_into()?);
+                    .aggregate(message.signature.try_into()?);
+
+                if signature == AggregateSignature::default() {
+                    continue;
+                }
+
+                pool_aggregate.aggregation_bits.set(position, true);
+                pool_aggregate.signature = signature;
             }
         }
 

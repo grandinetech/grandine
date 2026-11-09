@@ -1973,6 +1973,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             sync_committee_signature.aggregate_in_place(contribution.signature.try_into()?);
         }
 
+        if sync_committee_signature == AggregateSignature::default() {
+            sync_committee_bits = BitVector::default();
+        }
+
         Ok(SyncAggregate {
             sync_committee_bits,
             sync_committee_signature: sync_committee_signature.into(),
