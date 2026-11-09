@@ -3741,7 +3741,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)
-        if !origin.is_from_back_sync() && slot <= self.finalized_slot() {
+        // Post-Gloas the finalized block's envelope is still accepted, so its columns must be too.
+        let finalized = if data_column_sidecar.pre_gloas().is_some() {
+            slot <= self.finalized_slot()
+        } else {
+            slot < self.finalized_slot()
+        };
+
+        if !origin.is_from_back_sync() && finalized {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 

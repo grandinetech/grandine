@@ -40,6 +40,7 @@ use types::{
         BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
         ExecutionPayload as DenebExecutionPayload,
     },
+    deneb::primitives::KzgCommitment,
     electra::containers::{
         Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
         BeaconBlockBody as ElectraBeaconBlockBody,
@@ -280,6 +281,38 @@ pub fn empty_block_extending_parent_payload<P: Preset>(
         sync_aggregate,
         execution_payload,
         true,
+        ProgressiveList::default(),
+    )
+}
+
+// Post-Gloas only. The block's data is unavailable until columns for the commitments arrive.
+pub fn empty_block_with_blob_kzg_commitments<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    pre_state: Arc<BeaconState<P>>,
+    slot: Slot,
+    graffiti: H256,
+    blob_kzg_commitments: ProgressiveList<KzgCommitment>,
+) -> Result<BlockWithState<P>> {
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
+    let eth1_data = advanced_state.eth1_data();
+    let attestations = core::iter::empty();
+    let deposits = ContiguousList::default();
+    let sync_aggregate = SyncAggregate::empty();
+    let execution_payload = None;
+
+    block_with_parent_payload(
+        config,
+        pubkey_cache,
+        advanced_state,
+        eth1_data,
+        graffiti,
+        attestations,
+        deposits,
+        sync_aggregate,
+        execution_payload,
+        false,
+        blob_kzg_commitments,
     )
 }
 
@@ -466,6 +499,7 @@ pub fn singular_attestation<P: Preset>(
 fn signed_execution_payload_bid<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     extend_parent_payload: bool,
+    blob_kzg_commitments: ProgressiveList<KzgCommitment>,
 ) -> SignedExecutionPayloadBid<P> {
     let prev_randao = accessors::get_randao_mix(state, accessors::get_current_epoch(state));
 
@@ -487,7 +521,7 @@ fn signed_execution_payload_bid<P: Preset>(
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments: ProgressiveList::default(),
+            blob_kzg_commitments,
             execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
             ..Default::default()
         },
@@ -575,6 +609,7 @@ fn block<P: Preset>(
         sync_aggregate,
         execution_payload,
         false,
+        ProgressiveList::default(),
     )
 }
 
@@ -593,6 +628,7 @@ fn block_with_parent_payload<P: Preset>(
     sync_aggregate: SyncAggregate<P>,
     mut execution_payload: Option<ExecutionPayload<P>>,
     extend_parent_payload: bool,
+    blob_kzg_commitments: ProgressiveList<KzgCommitment>,
 ) -> Result<BlockWithState<P>> {
     let slot = advanced_state.slot();
     let proposer_index = accessors::get_beacon_proposer_index(config, &advanced_state)?;
@@ -645,9 +681,9 @@ fn block_with_parent_payload<P: Preset>(
         )?);
     }
 
-    let signed_execution_payload_bid = advanced_state
-        .post_gloas()
-        .map(|state| signed_execution_payload_bid(state, extend_parent_payload));
+    let signed_execution_payload_bid = advanced_state.post_gloas().map(|state| {
+        signed_execution_payload_bid(state, extend_parent_payload, blob_kzg_commitments)
+    });
 
     let without_state_root = match advanced_state.phase() {
         Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {

@@ -20,6 +20,7 @@ use eth2_libp2p::GossipId;
 use eth2_libp2p::PeerId;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
+use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
 use ssz::{ContiguousList, ProgressiveList};
 #[cfg(feature = "eth2-cache")]
@@ -4034,4 +4035,53 @@ async fn data_column_sidecar_at_finalized_slot_stays_known_to_sync() {
         .await;
 
     assert!(matches!(message, Some(P2pMessage::Ignore(_))));
+}
+
+// After checkpoint sync the anchor sits at the finalized slot and still needs its columns.
+// Ignoring them leaves its payload unavailable and every child waiting for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn gloas_data_column_sidecar_for_anchor_at_finalized_slot_is_accepted() {
+    let config = Arc::new(Config::minimal().start_and_stay_in(Phase::Gloas));
+    let pubkey_cache = Arc::new(PubkeyCache::default());
+
+    let (genesis_state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)
+        .expect("minimal configuration modified to start in Gloas is valid");
+
+    // The commitment and proof of an all-zero blob are both the point at infinity.
+    let mut point_at_infinity = KzgCommitment::zero();
+    point_at_infinity.as_bytes_mut()[0] = 0xc0;
+
+    let blob_kzg_commitments = ProgressiveList::try_from(vec![point_at_infinity])
+        .expect("progressive lists have no practical limit");
+
+    let slot = start_of_epoch(1);
+
+    let (anchor_block, anchor_state) = factory::empty_block_with_blob_kzg_commitments(
+        &config,
+        &pubkey_cache,
+        genesis_state,
+        slot,
+        H256::default(),
+        blob_kzg_commitments,
+    )
+    .expect("block should be constructed successfully");
+
+    let beacon_block_root = anchor_block.message().hash_tree_root();
+
+    let mut context = Context::new(config, pubkey_cache, anchor_block, anchor_state, true, None);
+
+    let data_column_sidecar = DataColumnSidecar::Gloas(GloasDataColumnSidecar {
+        column: ProgressiveList::try_from(vec![Box::default()])
+            .expect("progressive lists have no practical limit"),
+        kzg_proofs: ProgressiveList::try_from(vec![point_at_infinity])
+            .expect("progressive lists have no practical limit"),
+        slot,
+        beacon_block_root,
+        ..Default::default()
+    });
+
+    assert!(matches!(
+        context.on_data_column_sidecar(data_column_sidecar).await,
+        Some(P2pMessage::Accept(_)),
+    ));
 }
