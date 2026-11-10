@@ -86,7 +86,9 @@ where
             .deref_mut()
             .pipe(core::mem::take);
 
-        wait_group.wait()
+        wait_group.wait();
+
+        self.thread_pool().wait_for_persistence_task();
     }
 }
 
