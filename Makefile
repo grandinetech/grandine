@@ -223,7 +223,6 @@ grandine-nethermind-macos-arm64: ./build/grandine-$(GRANDINE_VERSION)-nethermind
 DOCKER_REPO ?= sifrai/grandine
 DOCKER_LABEL ?=
 DOCKER_SUFFIX ?=
-DOCKER_RELEASE ?=
 
 ifneq ($(strip $(DOCKER_SUFFIX)),)
 override DOCKER_SUFFIX := -$(DOCKER_SUFFIX)
@@ -243,11 +242,9 @@ endif
 	docker buildx imagetools create -t $(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)-amd64$(DOCKER_SUFFIX) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)-arm64$(DOCKER_SUFFIX)
-ifeq ($(DOCKER_RELEASE),true)
+ifeq ($(DOCKER_LABEL),stable)
 	docker buildx imagetools create -t $(DOCKER_REPO):$(GRANDINE_VERSION) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)
-endif
-ifeq ($(DOCKER_LABEL),stable)
 	docker buildx imagetools create -t $(DOCKER_REPO):latest \
 		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)
 endif
@@ -291,7 +288,7 @@ endif
 		$(DOCKER_REPO):$(DOCKER_LABEL)-arm64$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
 	docker buildx imagetools create -t $(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind \
 		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
-ifeq ($(DOCKER_RELEASE),true)
+ifeq ($(DOCKER_LABEL),stable)
 	docker buildx imagetools create -t $(DOCKER_REPO):$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
 endif
