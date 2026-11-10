@@ -606,6 +606,6 @@ lto = false
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 
 [patch.'https://github.com/libp2p/rust-libp2p.git']
-libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
-libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
-libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
+libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "a5abdd2038d68362bdd3c0226ae177fe64a3a3d0" }
+libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "a5abdd2038d68362bdd3c0226ae177fe64a3a3d0" }
+libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "a5abdd2038d68362bdd3c0226ae177fe64a3a3d0" }
