@@ -1129,6 +1129,10 @@ where
         &self.wait_group
     }
 
+    pub(crate) const fn thread_pool(&self) -> &ThreadPool<P, E, W> {
+        &self.thread_pool
+    }
+
     pub(crate) fn owned_wait_group(&self) -> W {
         Wait::load_and_clone(&self.wait_group)
     }

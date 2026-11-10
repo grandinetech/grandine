@@ -81,6 +81,13 @@ impl<P: Preset, E, W> ThreadPool<P, E, W> {
         let low = critical.low_priority_tasks.len();
         (high, mid, low)
     }
+
+    // For tests. A persistence task spawned while the flag is still set would be dropped.
+    pub fn wait_for_persistence_task(&self) {
+        while self.shared.critical.lock().persistence_task_running {
+            std::thread::yield_now();
+        }
+    }
 }
 
 #[derive(Derivative)]
