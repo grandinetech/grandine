@@ -763,7 +763,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
                 }
                 Ok(None) => none_seen = true,
                 Err(error) => {
-                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    debug_with_peers!("{node} beacon node failed to {operation}: {error:?}");
                 }
             }
         }
@@ -1312,7 +1312,7 @@ pub async fn first_success<N: Display, T, F: Future<Output = Result<T>>>(
         match attempt.await {
             Ok(value) => return Ok((name, value)),
             Err(error) => {
-                warn_with_peers!("{name} beacon node failed to {operation}: {error:?}");
+                debug_with_peers!("{name} beacon node failed to {operation}: {error:?}");
             }
         }
     }

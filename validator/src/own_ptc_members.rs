@@ -212,7 +212,6 @@ mod tests {
     use anyhow::bail;
     use bls::traits::SecretKey as _;
     use helper_functions::{accessors, fork};
-    use itertools::Itertools as _;
     use pubkey_cache::PubkeyCache;
     use reqwest::Client;
     use signer::{KeyOrigin, Web3SignerConfig};

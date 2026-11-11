@@ -477,7 +477,6 @@ impl OwnBeaconCommitteeMembers {
 #[cfg(test)]
 mod tests {
     use bls::traits::SecretKey as _;
-    use itertools::Itertools as _;
     use pubkey_cache::PubkeyCache;
     use reqwest::Client;
     use signer::{KeyOrigin, Web3SignerConfig};
