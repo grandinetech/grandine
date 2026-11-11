@@ -344,7 +344,7 @@ async fn build_local_node<P: Preset>(
         chain_config.clone_arc(),
         client.clone(),
         eth1_config.eth1_auth.clone_arc(),
-        eth1_config.eth1_rpc_urls.clone(),
+        eth1_config.execution_endpoint.clone(),
         eth1_api_to_metrics_tx,
         metrics.clone(),
     ));
@@ -448,15 +448,14 @@ async fn build_local_node<P: Preset>(
 
     let node_metrics = metrics_service_enabled.then(|| {
         let eth1_connection_data = Eth1ConnectionData {
-            sync_eth1_connected: cfg!(feature = "embed") || !eth1_config.eth1_rpc_urls.is_empty(),
-            sync_eth1_fallback_connected: false,
+            sync_eth1_connected: cfg!(feature = "embed")
+                || eth1_config.execution_endpoint.is_some(),
         };
 
         NodeMetrics {
             controller: controller.clone_arc(),
             eth1_metrics: Eth1Metrics {
                 eth1_connection_data,
-                sync_eth1_fallback_configured: eth1_config.eth1_rpc_urls.len() > 1,
             },
             slasher_active: slasher_config.is_some(),
         }
@@ -1287,17 +1286,17 @@ impl Context {
             }
         }
 
-        // Load keys early so we can validate `eth1_rpc_urls`.
+        // Load keys early so we can validate `execution_endpoint`.
         self.signer.load_keys_from_web3signer().await;
 
         // An execution layer is for the built-in node's blocks; a validator without it has none.
         if let Some(node) = self.config.beacon_node_config()
             && cfg!(not(feature = "embed"))
-            && node.eth1_rpc_urls.is_empty()
+            && node.execution_endpoint.is_none()
         {
             ensure!(
                 self.signer.load().no_keys(),
-                Error::MissingEth1RpcUrlsWithValidators,
+                Error::MissingExecutionEndpointWithValidators,
             );
         }
 
@@ -1388,7 +1387,7 @@ async fn run_beacon_node<P: Preset>(
 
     let eth1_config = Arc::new(Eth1Config {
         eth1_auth,
-        eth1_rpc_urls: beacon_node.eth1_rpc_urls.clone(),
+        execution_endpoint: beacon_node.execution_endpoint.clone(),
         deposit_contract_starting_block: beacon_node.deposit_contract_starting_block,
         default_deposit_tree: config
             .predefined_network
@@ -1795,8 +1794,8 @@ fn load_validator_keys(
 enum Error {
     #[error("{preset_name} preset is not included in this executable")]
     PresetNotIncluded { preset_name: PresetName },
-    #[error("--eth1-rpc-urls must be specified when validators are present")]
-    MissingEth1RpcUrlsWithValidators,
+    #[error("--execution-endpoint must be specified when validators are present")]
+    MissingExecutionEndpointWithValidators,
     #[error(
         "{service} port ({port}) is unavailable; \
          make sure no other instance of the application is running \

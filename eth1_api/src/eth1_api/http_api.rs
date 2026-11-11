@@ -42,7 +42,7 @@ use crate::{
     Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
-    endpoints::{ClientVersions, Endpoint, Endpoints},
+    endpoints::{ClientVersions, Endpoint},
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
@@ -66,7 +66,7 @@ pub struct Eth1Api {
     config: Arc<Config>,
     client: Client,
     pub(crate) auth: Arc<Auth>,
-    pub(crate) endpoints: Endpoints,
+    pub(crate) endpoint: Option<Endpoint>,
     eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
     pub(crate) metrics: Option<Arc<Metrics>>,
 }
@@ -77,7 +77,7 @@ impl Eth1Api {
         config: Arc<Config>,
         client: Client,
         auth: Arc<Auth>,
-        eth1_rpc_urls: Vec<RedactingUrl>,
+        execution_endpoint: Option<RedactingUrl>,
         eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
@@ -85,26 +85,27 @@ impl Eth1Api {
             config,
             client,
             auth,
-            endpoints: Endpoints::new(eth1_rpc_urls),
+            endpoint: execution_endpoint.map(Endpoint::new),
             eth1_api_to_metrics_tx,
             metrics,
         }
     }
 
-    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
-        self.endpoints.client_versions()
+    #[must_use]
+    pub fn client_versions(&self) -> Option<Arc<ClientVersions>> {
+        self.endpoint.as_ref().map(Endpoint::get_client_versions)
     }
 
     pub async fn current_head_number(&self) -> Result<ExecutionBlockNumber> {
         Ok(self
-            .request_with_fallback(|(api, headers)| Ok(api.block_number(headers)), None)
+            .request(|(api, headers)| Ok(api.block_number(headers)), None)
             .await?
             .result
             .as_u64())
     }
 
     pub async fn get_block(&self, block_id: BlockId) -> Result<Option<Eth1Block>> {
-        self.request_with_fallback(|(api, headers)| Ok(api.block(block_id, headers)), None)
+        self.request(|(api, headers)| Ok(api.block(block_id, headers)), None)
             .await?
             .result
             .map(Eth1Block::try_from)
@@ -139,7 +140,7 @@ impl Eth1Api {
             .build();
 
         let logs = self
-            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
+            .request(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
             .await?
             .result;
 
@@ -225,7 +226,7 @@ impl Eth1Api {
         let mut deposit_events = BTreeMap::<_, Vec<_>>::new();
 
         for log in self
-            .request_with_fallback(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
+            .request(|(api, headers)| Ok(api.logs(filter.clone(), headers)), None)
             .await?
             .result
         {
@@ -580,10 +581,9 @@ impl Eth1Api {
         let params = vec![serde_json::to_value(&block_hashes)?];
 
         let supports_v2 = self
-            .endpoints
-            .endpoints_for_request(Some(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2))
-            .next()
-            .is_some();
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.supports(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2));
 
         let bodies: Vec<Option<ExecutionPayloadBody<P>>> = if supports_v2 {
             self.execute::<Vec<Option<ExecutionPayloadBodyV2<P>>>>(
@@ -633,7 +633,7 @@ impl Eth1Api {
             prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
         });
 
-        self.request_with_fallback(
+        self.request(
             |(api, headers)| {
                 Ok(CallFuture::new(api.transport().execute_with_headers(
                     method,
@@ -649,10 +649,12 @@ impl Eth1Api {
 
     #[must_use]
     pub fn el_offline(&self) -> bool {
-        self.endpoints.el_offline()
+        self.endpoint
+            .as_ref()
+            .is_none_or(|endpoint| !endpoint.is_online())
     }
 
-    async fn request_with_fallback<R, O, F>(
+    async fn request<R, O, F>(
         &self,
         request_from_api: R,
         capability: Option<&str>,
@@ -662,49 +664,53 @@ impl Eth1Api {
         O: DeserializeOwned + Send,
         F: Future<Output = Result<Value, Web3Error>> + Send,
     {
-        let mut endpoints_for_request = self.endpoints.endpoints_for_request(capability).peekable();
+        // Checking this in `Eth1Api::new` would be unnecessarily strict.
+        // Syncing a predefined network without proposing blocks does not require an execution
+        // endpoint (except during the Merge transition).
+        let Some(endpoint) = self.endpoint.as_ref() else {
+            self.on_request_failed();
+            bail!(Error::NoEndpointProvided);
+        };
 
-        while let Some(endpoint) = endpoints_for_request.next() {
-            let api = self.build_api_for_request(endpoint);
-            let query = request_from_api((api, self.auth.headers()?))?.await;
+        if let Some(capability) = capability
+            && !endpoint.supports(capability)
+        {
+            self.on_request_failed();
 
-            match query {
-                Ok(result) => {
-                    self.on_ok_response(endpoint);
-
-                    return Ok(WithClientVersions {
-                        client_versions: Some(endpoint.get_client_versions()),
-                        result,
-                    });
-                }
-                Err(error) => {
-                    self.on_error_response(endpoint);
-
-                    match endpoints_for_request.peek() {
-                        Some(next_endpoint) => warn_with_peers!(
-                            "Eth1 RPC endpoint {} returned an error: {error}; switching to {}",
-                            endpoint.url(),
-                            next_endpoint.url(),
-                        ),
-                        None => warn_with_peers!(
-                            "last available Eth1 RPC endpoint {} returned an error: {error}",
-                            endpoint.url(),
-                        ),
-                    }
-                }
-            }
+            bail!(Error::CapabilityNotSupported {
+                capability: capability.to_owned(),
+            });
         }
 
+        let api = self.build_api_for_request(endpoint);
+
+        match request_from_api((api, self.auth.headers()?))?.await {
+            Ok(result) => {
+                self.on_ok_response(endpoint);
+
+                Ok(WithClientVersions {
+                    client_versions: Some(endpoint.get_client_versions()),
+                    result,
+                })
+            }
+            Err(error) => {
+                self.on_error_response(endpoint);
+                self.on_request_failed();
+
+                warn_with_peers!(
+                    "execution endpoint {} returned an error: {error}",
+                    endpoint.url(),
+                );
+
+                bail!(Error::EndpointUnavailable)
+            }
+        }
+    }
+
+    fn on_request_failed(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.eth1_api_reset_count.inc();
         }
-
-        // Checking this in `Eth1Api::new` would be unnecessarily strict.
-        // Syncing a predefined network without proposing blocks does not require an Eth1 RPC
-        // (except during the Merge transition).
-        ensure!(!self.endpoints.is_empty(), Error::NoEndpointsProvided);
-
-        bail!(Error::EndpointsExhausted)
     }
 
     pub(crate) fn build_api_for_request(&self, endpoint: &Endpoint) -> Eth<Http> {
@@ -718,7 +724,6 @@ impl Eth1Api {
         if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
             Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
                 sync_eth1_connected: true,
-                sync_eth1_fallback_connected: endpoint.is_fallback,
             })
             .send(metrics_tx);
         }
@@ -747,12 +752,14 @@ struct RawForkChoiceUpdatedResponse {
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 enum Error {
-    #[error("all Eth1 RPC endpoints exhausted")]
-    EndpointsExhausted,
-    #[error("attempted to call Eth1 RPC endpoint with misconfigured parameters")]
+    #[error("execution endpoint does not support {capability}")]
+    CapabilityNotSupported { capability: String },
+    #[error("execution endpoint is unavailable")]
+    EndpointUnavailable,
+    #[error("attempted to call execution endpoint with misconfigured parameters")]
     InvalidParameters,
-    #[error("attempted to call Eth1 RPC endpoint but none were provided")]
-    NoEndpointsProvided,
+    #[error("attempted to call execution endpoint but none was provided")]
+    NoEndpointProvided,
     #[error("execution client returned {received} payload bodies for {requested} block hashes")]
     PayloadBodiesCountMismatch { requested: usize, received: usize },
     #[error("pre-Bellatrix phase passed to Eth1Api::forkchoice_updated")]
@@ -777,18 +784,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_eth1_endpoints_error_with_no_endpoints() -> Result<()> {
+    async fn test_execution_endpoint_error_without_endpoint() -> Result<()> {
         let config = Arc::new(Config::mainnet());
         let auth = Arc::default();
 
-        let eth1_api = Arc::new(Eth1Api::new(
-            config,
-            Client::new(),
-            auth,
-            vec![],
-            None,
-            None,
-        ));
+        let eth1_api = Arc::new(Eth1Api::new(config, Client::new(), auth, None, None, None));
 
         assert!(eth1_api.el_offline());
 
@@ -796,16 +796,16 @@ mod tests {
             eth1_api
                 .current_head_number()
                 .await
-                .expect_err("Eth1Api with no endpoints should return an error")
+                .expect_err("Eth1Api without an endpoint should return an error")
                 .downcast::<Error>()?,
-            Error::NoEndpointsProvided,
+            Error::NoEndpointProvided,
         );
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_eth1_endpoints_error_with_single_endpoint() -> Result<()> {
+    async fn test_execution_endpoint_error() -> Result<()> {
         let server = MockServer::start();
 
         server.mock(|when, then| {
@@ -821,7 +821,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -833,7 +833,7 @@ mod tests {
                 .await
                 .expect_err("500 response should be a an error")
                 .downcast::<Error>()?,
-            Error::EndpointsExhausted,
+            Error::EndpointUnavailable,
         );
 
         // Despite the endpoint returning an error, it remains the only available option
@@ -844,58 +844,43 @@ mod tests {
                 .await
                 .expect_err("500 response should be a an error")
                 .downcast::<Error>()?,
-            Error::EndpointsExhausted,
+            Error::EndpointUnavailable,
         );
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_eth1_endpoints_error_with_multiple_endpoints() -> Result<()> {
+    async fn test_execution_endpoint_capability_not_supported() -> Result<()> {
         let server = MockServer::start();
 
-        server.mock(|when, then| {
+        let mock = server.mock(|when, then| {
             when.method(Method::POST).path("/");
-            then.status(500).body("{}");
+            then.status(200).body("{}");
         });
 
-        let body = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": "0x1d243",
-        });
-
-        server.mock(|when, then| {
-            when.method(Method::POST).path("/next");
-            then.status(200).body(body.to_string());
-        });
-
-        let config = Arc::new(Config::mainnet());
-        let auth = Arc::default();
-        let server_url = server.url("/").parse()?;
-        let next_server_url = server.url("/next").parse()?;
-
-        let eth1_api = Arc::new(Eth1Api::new(
-            config,
+        let eth1_api = Eth1Api::new(
+            Arc::new(Config::mainnet()),
             Client::new(),
-            auth,
-            vec![server_url, next_server_url],
+            Arc::default(),
+            Some(server.url("/").parse()?),
             None,
             None,
-        ));
-
-        assert!(!eth1_api.el_offline());
-
-        // Expect to use the fallback endpoint when the primary endpoint returns an error
-        assert_eq!(
-            eth1_api
-                .current_head_number()
-                .await
-                .expect("the fallback endpoint should be working"),
-            119_363,
         );
 
-        // Even though the primary endpoint is offline, eth1_api itself is not offline
+        assert_eq!(
+            eth1_api
+                .get_blobs_v2::<Mainnet>(vec![])
+                .await
+                .err()
+                .expect("an unadvertised method should not be called")
+                .downcast::<Error>()?,
+            Error::CapabilityNotSupported {
+                capability: ENGINE_GET_EL_BLOBS_V2.to_owned(),
+            },
+        );
+
+        mock.assert_calls(0);
         assert!(!eth1_api.el_offline());
 
         Ok(())
@@ -947,7 +932,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1019,7 +1004,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1096,7 +1081,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1180,7 +1165,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1242,7 +1227,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1295,7 +1280,7 @@ mod tests {
             config,
             Client::new(),
             auth,
-            vec![server_url],
+            Some(server_url),
             None,
             None,
         ));
@@ -1470,12 +1455,12 @@ mod tests {
             Arc::new(Config::mainnet()),
             Client::new(),
             Arc::default(),
-            vec![server.url("/").parse()?],
+            Some(server.url("/").parse()?),
             None,
             None,
         );
 
-        for endpoint in eth1_api.endpoints.endpoints_for_request(None) {
+        if let Some(endpoint) = eth1_api.endpoint.as_ref() {
             endpoint.set_capabilities([capability.to_owned()].into());
         }
 

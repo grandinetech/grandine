@@ -191,7 +191,7 @@ impl Eth1Api {
         config: Arc<Config>,
         _client: Client,
         _auth: Arc<Auth>,
-        _eth1_rpc_urls: Vec<RedactingUrl>,
+        _execution_endpoint: Option<RedactingUrl>,
         eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
@@ -212,8 +212,9 @@ impl Eth1Api {
         self.versions.store(Arc::new(versions));
     }
 
-    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
-        core::iter::once(self.versions.load().clone_arc())
+    #[must_use]
+    pub fn client_versions(&self) -> Option<Arc<ClientVersions>> {
+        Some(self.versions.load().clone_arc())
     }
 
     pub async fn exec<T: Send + Sync + 'static>(
@@ -233,7 +234,6 @@ impl Eth1Api {
                 if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
                     Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
                         sync_eth1_connected: true,
-                        sync_eth1_fallback_connected: false,
                     })
                     .send(metrics_tx);
                 }

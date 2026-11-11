@@ -57,7 +57,7 @@ Start Grandine once the beacon node is set up as in the [Quick start](./quick_st
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL \
   --keystore-dir /path/to/validator_keys \
@@ -76,7 +76,7 @@ docker run -d --name grandine \
   -v /path/to/password.txt:/password.txt:ro \
   sifrai/grandine:stable \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL \
   --keystore-dir /validator_keys \
@@ -84,7 +84,7 @@ docker run -d --name grandine \
   --suggested-fee-recipient 0xYOUR-EXECUTION-ADDRESS
 ```
 
-Grandine refuses to run validators without `--eth1-rpc-urls`, because it cannot produce blocks without an execution client.
+Grandine refuses to run validators without `--execution-endpoint`, because it cannot produce blocks without an execution client.
 
 > **Warning:** Without a fee recipient, from `--suggested-fee-recipient` or set per validator, the integrated validator client pays the execution rewards of proposed blocks to the Grandine donation address `0xe7cf7C3BA875Dd3884Ed6a9082d342cb4FBb1f1b`. Always set your own. See [Fee recipient, graffiti and gas limit](./fee_recipient.md).
 
@@ -154,6 +154,6 @@ Go through this list before you deposit on mainnet:
 - `--keystore-password-file` (no default): file with the password for all keystores.
 - `--suggested-fee-recipient` (no default): default fee recipient for all validators.
 - `--use-validator-key-cache` (disabled): cache decrypted keys for faster restarts.
-- `--eth1-rpc-urls` (no default): execution client Engine API URLs; required when validators are loaded.
+- `--execution-endpoint` (no default): execution client Engine API URL; required when validators are loaded.
 
 See [Command line reference](./cli_options.md) for the full list.

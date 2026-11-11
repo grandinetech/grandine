@@ -13,7 +13,7 @@ For `mainnet`, `sepolia`, `holesky` and `hoodi` you need no configuration files.
 with `--network`:
 
 ```bash
-grandine --network hoodi --eth1-rpc-urls http://EL-HOST:8551 --jwt-secret /path/to/jwt.hex
+grandine --network hoodi --execution-endpoint http://EL-HOST:8551 --jwt-secret /path/to/jwt.hex
 ```
 
 The chain configuration, boot nodes and deposit contract data are built into the binary. The mainnet
@@ -37,7 +37,7 @@ the `eth-clients` repositories. Pass it with `--configuration-directory`:
 grandine \
   --network custom \
   --configuration-directory /path/to/network-config \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -70,7 +70,7 @@ grandine \
   --genesis-state-file /path/to/genesis.ssz \
   --deposit-contract-starting-block 0 \
   --boot-nodes ENR1,ENR2 \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -80,7 +80,7 @@ Rules Grandine enforces:
   `--configuration-file must be specified when connecting to custom network`.
 - A custom network needs either a genesis state or an execution client (from which Grandine waits for
   genesis by tracking deposits). Without both, it stops with
-  `--eth1-rpc-urls must be specified when connecting to custom network without --genesis-state-file`.
+  `--execution-endpoint must be specified when connecting to custom network without --genesis-state-file`.
 
 ### The chain configuration file
 
@@ -111,7 +111,7 @@ grandine \
   --verify-configuration-file /path/to/network-config/config.yaml \
   --verify-electra-preset-file /path/to/presets/mainnet/electra.yaml \
   --verify-fulu-preset-file /path/to/presets/mainnet/fulu.yaml \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -165,7 +165,7 @@ grandine \
   --network custom \
   --configuration-directory /path/to/devnet-config \
   --checkpoint-sync-url https://CHECKPOINT-HOST \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -207,8 +207,7 @@ accepted in place of dashes (`http_port` is the same as `http-port`).
 ```yaml
 # /etc/grandine/hoodi.yaml
 network: hoodi
-eth1-rpc-urls:
-  - http://127.0.0.1:8551
+execution-endpoint: http://127.0.0.1:8551
 jwt-secret: /etc/grandine/jwt.hex
 checkpoint-sync-url: https://CHECKPOINT-HOST
 data-dir: /var/lib/grandine
@@ -281,7 +280,7 @@ User=grandine
 ExecStart=/usr/local/bin/grandine \
   --network mainnet \
   --data-dir /var/lib/grandine \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /etc/grandine/jwt.hex \
   --checkpoint-sync-url https://CHECKPOINT-HOST
 Restart=always

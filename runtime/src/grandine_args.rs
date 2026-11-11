@@ -172,9 +172,13 @@ pub struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
 
-    /// List of Eth1 RPC URLs
+    /// [DEPRECATED] List of Eth1 RPC URLs. Only the first one is used
     #[clap(long, num_args = 1..)]
     eth1_rpc_urls: Vec<RedactingUrl>,
+
+    /// Execution client Engine API URL
+    #[clap(long)]
+    execution_endpoint: Option<RedactingUrl>,
 
     /// Max size of the Eth1 database
     #[clap(help_heading = "Storage", long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
@@ -448,6 +452,7 @@ impl BeaconNodeOptions {
             track_liveness,
             kzg_backend,
             eth1_rpc_urls,
+            execution_endpoint,
             eth1_database_size,
             jwt_id,
             jwt_secret,
@@ -529,12 +534,35 @@ impl BeaconNodeOptions {
             }
         }
 
+        let mut eth1_rpc_urls = eth1_rpc_urls.into_iter();
+
+        let execution_endpoint = match (execution_endpoint, eth1_rpc_urls.next()) {
+            (Some(url), _) => Some(url),
+            (None, Some(url)) => {
+                warn_with_peers!(
+                    "--eth1-rpc-urls option is deprecated. Use --execution-endpoint instead."
+                );
+
+                if eth1_rpc_urls.next().is_some() {
+                    warn_with_peers!(
+                        "only one execution endpoint is supported; \
+                         using {url} and ignoring the other --eth1-rpc-urls",
+                    );
+                }
+
+                Some(url)
+            }
+            (None, None) => None,
+        };
+
         // A custom network with no execution layer needs a genesis state it cannot build.
-        if cfg!(not(feature = "embed")) && predefined_network.is_none() && eth1_rpc_urls.is_empty()
+        if cfg!(not(feature = "embed"))
+            && predefined_network.is_none()
+            && execution_endpoint.is_none()
         {
             ensure!(
                 genesis_state_file_given,
-                Error::MissingEth1RpcUrlsForCustomWithoutGenesisState,
+                Error::MissingExecutionEndpointForCustomWithoutGenesisState,
             );
         }
 
@@ -622,7 +650,7 @@ impl BeaconNodeOptions {
             genesis_state_download_url,
             force_checkpoint_sync,
             back_sync_enabled,
-            eth1_rpc_urls,
+            execution_endpoint,
             auth_options,
             network_config: network_config_options.into_config(
                 network,
@@ -2134,10 +2162,10 @@ enum Error {
     #[error("--configuration-file must be specified when connecting to custom network")]
     MissingConfigurationFileForCustom,
     #[error(
-        "--eth1-rpc-urls must be specified when connecting \
+        "--execution-endpoint must be specified when connecting \
          to custom network without --genesis-state-file"
     )]
-    MissingEth1RpcUrlsForCustomWithoutGenesisState,
+    MissingExecutionEndpointForCustomWithoutGenesisState,
     #[error(
         "--track-liveness must be specified for --detect-doppelgangers \
          with the built-in beacon node"
@@ -2903,18 +2931,55 @@ mod tests {
     }
 
     #[test]
-    fn eth1_rpc_urls_single_value() {
+    fn execution_endpoint_single_value() {
+        let config = config_from_args(["--execution-endpoint", "http://localhost:8551"]);
+        let node = beacon_node(&config);
+
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8551/".to_owned()),
+        );
+    }
+
+    #[test]
+    fn execution_endpoint_multiple_values_not_allowed() {
+        try_config_from_args([
+            "--execution-endpoint",
+            "http://localhost:8551",
+            "http://example.com:8551",
+        ])
+        .expect_err("--execution-endpoint should accept only one URL");
+    }
+
+    #[test]
+    fn execution_endpoint_overrides_eth1_rpc_urls() {
+        let config = config_from_args([
+            "--execution-endpoint",
+            "http://localhost:8551",
+            "--eth1-rpc-urls",
+            "http://example.com:8545",
+        ]);
+        let node = beacon_node(&config);
+
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8551/".to_owned()),
+        );
+    }
+
+    #[test]
+    fn deprecated_eth1_rpc_urls_single_value() {
         let config = config_from_args(["--eth1-rpc-urls", "http://localhost:8545"]);
         let node = beacon_node(&config);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://localhost:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8545/".to_owned()),
         );
     }
 
     #[test]
-    fn eth1_rpc_urls_multiple_values() {
+    fn deprecated_eth1_rpc_urls_multiple_values_use_first() {
         let config = config_from_args([
             "--eth1-rpc-urls",
             "http://localhost:8545",
@@ -2922,14 +2987,14 @@ mod tests {
         ]);
         let node = beacon_node(&config);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://localhost:8545/", "http://example.com:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8545/".to_owned()),
         );
     }
 
     #[test]
-    fn eth1_rpc_urls_multiple_occurrences() {
+    fn deprecated_eth1_rpc_urls_multiple_occurrences_use_first() {
         let config = config_from_args([
             "--eth1-rpc-urls",
             "http://localhost:8545",
@@ -2938,9 +3003,9 @@ mod tests {
         ]);
         let node = beacon_node(&config);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://localhost:8545/", "http://example.com:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8545/".to_owned()),
         );
     }
 
@@ -3307,14 +3372,14 @@ mod tests {
         try_config_from_args([
             "--network",
             "custom",
-            "--eth1-rpc-urls",
-            "http://localhost:8545",
+            "--execution-endpoint",
+            "http://localhost:8551",
         ])
         .expect_err("GrandineArgs::try_into_config should fail");
     }
 
     #[test]
-    fn custom_network_without_genesis_state_file_or_eth1_rpc_urls() {
+    fn custom_network_without_genesis_state_file_or_execution_endpoint() {
         let configuration_file =
             NamedTempFile::new().expect("creating a named temporary file should succeed");
 
@@ -3562,9 +3627,7 @@ mod tests {
             "
             discovery-port: 8888
             back-sync: true
-            eth1-rpc-urls:
-              - http://localhost:8545
-              - http://example.com:8545
+            execution-endpoint: http://localhost:8551
             ",
         )
         .expect("config should be built from --args-file");
@@ -3580,9 +3643,9 @@ mod tests {
 
         assert!(node.back_sync_enabled);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://localhost:8545/", "http://example.com:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8551/".to_owned()),
         );
     }
 
@@ -3629,7 +3692,7 @@ mod tests {
             .expect("an empty sequence should be treated as unset");
         let node = beacon_node(&config);
 
-        assert!(node.eth1_rpc_urls.is_empty());
+        assert!(node.execution_endpoint.is_none());
     }
 
     #[test]
@@ -3656,9 +3719,7 @@ mod tests {
             network: sepolia
             checkpoint-sync-url: https://checkpoint.sepolia.example
             force-checkpoint-sync: true
-            eth1-rpc-urls:
-              - http://localhost:8545
-              - http://localhost:8546
+            execution-endpoint: http://localhost:8551
             back-sync: true
             graffiti:
               - \"**grandine**\"
@@ -3684,9 +3745,9 @@ mod tests {
         assert!(node.force_checkpoint_sync);
         assert!(node.back_sync_enabled);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://localhost:8545/", "http://localhost:8546/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://localhost:8551/".to_owned()),
         );
 
         assert_eq!(
@@ -3754,9 +3815,9 @@ mod tests {
         .expect("a command-line list should override the args file list");
         let node = beacon_node(&config);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://cli:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://cli:8545/".to_owned()),
         );
     }
 
@@ -3772,9 +3833,9 @@ mod tests {
         .expect("the args file list should be used when the command line omits it");
         let node = beacon_node(&config);
 
-        itertools::assert_equal(
-            node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
-            ["http://file:8545/"],
+        assert_eq!(
+            node.execution_endpoint.as_ref().map(ToString::to_string),
+            Some("http://file:8545/".to_owned()),
         );
     }
 

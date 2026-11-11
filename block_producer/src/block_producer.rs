@@ -912,7 +912,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         wait_for_result(produce_beacon_block_join_handle).await
     }
 
-    fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+    fn client_versions(&self) -> Option<Arc<ClientVersions>> {
         self.producer_context.execution_engine.client_versions()
     }
 
@@ -959,10 +959,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 .await
         });
 
-        let client_versions = self
-            .client_versions()
-            .next()
-            .map(|version| version.clone_arc());
+        let client_versions = self.client_versions();
 
         let produce_blinded_block_join_handle = self.spawn_job(|build_context| async move {
             info_with_peers!("block producer starting to build blinded option");
@@ -3279,7 +3276,7 @@ mod gloas_scoring_tests {
                 config.clone_arc(),
                 reqwest::Client::new(),
                 Arc::default(),
-                vec![],
+                None,
                 None,
                 None,
             )),

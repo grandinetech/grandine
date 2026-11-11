@@ -11,7 +11,7 @@ The API is off by default. Turn it on with `--enable-validator-api`:
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --keystore-dir /path/to/validator_keys \
   --keystore-password-file /path/to/password.txt \

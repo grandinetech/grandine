@@ -98,7 +98,7 @@ pub struct BeaconNodeConfig {
     pub genesis_state_download_url: Option<RedactingUrl>,
     pub force_checkpoint_sync: bool,
     pub back_sync_enabled: bool,
-    pub eth1_rpc_urls: Vec<RedactingUrl>,
+    pub execution_endpoint: Option<RedactingUrl>,
     pub auth_options: AuthOptions,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
@@ -369,7 +369,7 @@ impl BeaconNodeConfig {
         let Self {
             checkpoint_sync_url,
             back_sync_enabled,
-            eth1_rpc_urls,
+            execution_endpoint,
             network_config,
             storage_config,
             store_config,
@@ -385,7 +385,9 @@ impl BeaconNodeConfig {
 
         storage_config.print_db_sizes();
 
-        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().join(", "));
+        if let Some(execution_endpoint) = execution_endpoint {
+            info!("execution endpoint: {execution_endpoint}");
+        }
 
         if let Some(http_api_config) = http_api_config {
             info!("HTTP API address: {}", http_api_config.address);

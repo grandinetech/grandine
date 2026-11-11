@@ -46,7 +46,7 @@ The host does three things:
    `engine_getClientVersion`, in each version up to the current fork. Grandine calls the adapter
    wherever it would otherwise send an HTTP request to an execution client.
 2. **Starts Grandine** with a list of command line options, the same ones the `grandine` binary
-   takes. `--eth1-rpc-urls` and `--jwt-secret` are not needed.
+   takes. `--execution-endpoint` and `--jwt-secret` are not needed.
 3. **Stops Grandine** when the host shuts down. Grandine then saves its chain and returns.
 
 ### Rules for the host

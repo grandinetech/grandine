@@ -14,8 +14,8 @@ use eth1_api::{ApiController, Eth1Api, Eth1ExecutionEngine};
 use eth2_libp2p::{GossipId, NetworkConfig};
 use features::Feature;
 use fork_choice_control::{
-    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels, P2pMessage, Storage,
-    controller::MutatorHandle,
+    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels,
+    P2pMessage, Storage, controller::MutatorHandle,
 };
 use fork_choice_store::StoreConfig;
 use futures::{
@@ -102,7 +102,7 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             client.clone(),
             eth1_config.eth1_auth.clone_arc(),
-            eth1_config.eth1_rpc_urls.clone(),
+            eth1_config.execution_endpoint.clone(),
             None,
             None,
         ));

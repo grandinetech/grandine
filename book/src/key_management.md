@@ -59,7 +59,7 @@ chmod 600 /path/to/password.txt
 
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --keystore-dir /path/to/validator_keys \
   --keystore-password-file /path/to/password.txt
@@ -100,7 +100,7 @@ Keystores are encrypted with a deliberately slow key derivation function, so dec
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --keystore-dir /path/to/validator_keys \
   --keystore-password-file /path/to/password.txt \

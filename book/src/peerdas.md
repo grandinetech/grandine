@@ -37,7 +37,7 @@ grandine \
   --network mainnet \
   --supernode \
   --checkpoint-sync-url https://CHECKPOINT-HOST \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 

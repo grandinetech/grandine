@@ -51,7 +51,7 @@ With the built-in beacon node, Grandine can print a summary of how its validator
 grandine                                  \
   --network mainnet                       \
   --jwt-secret /path/to/jwt.hex           \
-  --eth1-rpc-urls http://EL-HOST:8551     \
+  --execution-endpoint http://EL-HOST:8551     \
   --keystore-dir /path/to/validator_keys  \
   --keystore-password-file /path/to/password.txt \
   --report-validator-performance

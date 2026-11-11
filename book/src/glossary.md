@@ -70,7 +70,7 @@ keys running elsewhere. Enabled with `--detect-doppelgangers`. See
 [Slashing protection](./slashing_protection.md).
 
 **Engine API**: The authenticated JSON-RPC API between a consensus client and an execution client, usually on port
-`8551`. Grandine connects to it with `--eth1-rpc-urls` and `--jwt-secret`.
+`8551`. Grandine connects to it with `--execution-endpoint` and `--jwt-secret`.
 
 **ENR (Ethereum Node Record)**: A signed record with a node's identity, IP addresses and ports, shared through discovery.
 

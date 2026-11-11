@@ -147,7 +147,8 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
 }
 
 impl<P: Preset> Eth1ExecutionEngine<P> {
-    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+    #[must_use]
+    pub fn client_versions(&self) -> Option<Arc<ClientVersions>> {
         self.eth1_api.client_versions()
     }
 

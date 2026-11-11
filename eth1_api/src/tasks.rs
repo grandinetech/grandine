@@ -73,7 +73,7 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
         let params = vec![serde_json::to_value(CAPABILITIES)?];
         let method = "engine_exchangeCapabilities";
 
-        for endpoint in eth1_api.endpoints.endpoints_for_request(None) {
+        if let Some(endpoint) = eth1_api.endpoint.as_ref() {
             let _timer = eth1_api.metrics.as_ref().map(|metrics| {
                 prometheus_metrics::start_timer_vec(&metrics.eth1_api_request_times, method)
             });
@@ -97,7 +97,10 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
                     eth1_api.on_ok_response(endpoint);
                     endpoint.set_capabilities(capabilities);
 
-                    info_with_peers!("updated capabilities for eth1 endpoint: {}", endpoint.url());
+                    info_with_peers!(
+                        "updated capabilities for execution endpoint: {}",
+                        endpoint.url()
+                    );
 
                     if supports_client_version {
                         exchange_client_versions(eth1_api, &api, endpoint).await?;
@@ -113,7 +116,7 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
                     eth1_api.on_error_response(endpoint);
 
                     warn_with_peers!(
-                        "unable to update capabilities for eth1 endpoint: {} {error:?}",
+                        "unable to update capabilities for execution endpoint: {} {error:?}",
                         endpoint.url(),
                     );
                 }
@@ -164,7 +167,7 @@ async fn exchange_client_versions(
             endpoint.set_client_versions(client_versions);
 
             info_with_peers!(
-                "updated client version for eth1 endpoint: {}",
+                "updated client version for execution endpoint: {}",
                 endpoint.url()
             );
         }
@@ -172,7 +175,7 @@ async fn exchange_client_versions(
             eth1_api.on_error_response(endpoint);
 
             warn_with_peers!(
-                "unable to update client version for eth1 endpoint: {} {error:?}",
+                "unable to update client version for execution endpoint: {} {error:?}",
                 endpoint.url(),
             );
         }

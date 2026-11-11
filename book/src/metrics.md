@@ -15,7 +15,7 @@ Metrics are disabled by default. Enable them with `--metrics`:
 ```bash
 grandine \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --metrics
 ```
@@ -54,7 +54,7 @@ docker run -d --name grandine \
   -v $HOME/.grandine:/root/.grandine \
   sifrai/grandine:stable \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /root/.grandine/jwt.hex \
   --metrics \
   --metrics-address 0.0.0.0

@@ -58,7 +58,7 @@ fn main() {
 fn filter_argument(arg: &Arg) -> bool {
     let id = arg.get_id();
 
-    id != "back_sync" && id != "eth1_rpc_urls" && id != "jwt_secret"
+    id != "back_sync" && id != "eth1_rpc_urls" && id != "execution_endpoint" && id != "jwt_secret"
 }
 
 fn generate_csharp_config_implementation(mut buffer: impl Write) -> Result<(), io::Error> {

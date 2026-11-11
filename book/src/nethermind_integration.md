@@ -138,7 +138,7 @@ environment variables, and environment variables over the configuration file. Se
 
 Some options are set by the integration and are not available:
 
-- `--eth1-rpc-urls` and `--jwt-secret`: there is no Engine API endpoint or JWT secret, because
+- `--execution-endpoint` and `--jwt-secret`: there is no Engine API endpoint or JWT secret, because
   Grandine calls Nethermind directly.
 
 If you do not set `Grandine.Network`, the plugin chooses the Grandine network from the chain that

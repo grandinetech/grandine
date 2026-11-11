@@ -129,7 +129,7 @@ docker run -d --name grandine \
   -v /path/to/jwt.hex:/jwt.hex:ro \
   sifrai/grandine:stable \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /jwt.hex \
   --checkpoint-sync-url CHECKPOINT-URL \
   --http-address 0.0.0.0

@@ -26,7 +26,6 @@ grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
-itertools = { workspace = true }
 jwt-simple = { workspace = true }
 logging = { workspace = true }
 memoffset = { workspace = true }
