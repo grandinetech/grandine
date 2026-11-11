@@ -255,7 +255,7 @@ async fn follow<P: Preset>(
                             }
                         }
                         Err(error) => {
-                            warn_with_peers!("event stream from {node} failed: {error:?}");
+                            warn_with_peers!("event stream from {node} failed: {error:#}");
                             break;
                         }
                     }
@@ -270,7 +270,7 @@ async fn follow<P: Preset>(
                 delivered
             }
             Err(error) => {
-                warn_with_peers!("unable to stream events from {node}: {error:?}");
+                warn_with_peers!("unable to stream events from {node}: {error:#}");
                 false
             }
         };
