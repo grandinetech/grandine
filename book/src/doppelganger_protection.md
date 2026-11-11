@@ -37,7 +37,7 @@ as well. The built-in beacon node uses it to see which validators are active:
 grandine                                  \
   --network mainnet                       \
   --jwt-secret /path/to/jwt.hex           \
-  --eth1-rpc-urls http://EL-HOST:8551     \
+  --execution-endpoint http://EL-HOST:8551     \
   --keystore-dir /path/to/validator_keys  \
   --keystore-password-file /path/to/password.txt \
   --track-liveness                        \

@@ -124,8 +124,7 @@ channels.
    the [storage mode](./storage.md). On shutdown it saves the current chain, so a restart can
    continue where it stopped.
 
-With `--eth1-rpc-urls` you can give more than one execution client endpoint. Grandine uses the first
-and falls back to the others if it fails. See
+Grandine connects to one execution client, given with `--execution-endpoint`. See
 [Connecting an execution client](./execution_client.md).
 
 ## The in-memory unfinalized chain
@@ -234,7 +233,7 @@ error.
 
 ## Command line options
 
-- `--eth1-rpc-urls`: no default. Engine API URLs of the execution clients; the extra URLs are fallbacks.
+- `--execution-endpoint`: no default. Engine API URL of the execution client.
 - `--jwt-secret`: no default. File with the hex-encoded JWT secret shared with the EL.
 - `--unfinalized-states-in-memory`: default `128`. Number of the latest unfinalized slots whose states stay in memory.
 - `--keystore-dir`: no default. Validator keystores for the integrated or separate validator client.

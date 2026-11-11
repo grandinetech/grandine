@@ -127,7 +127,7 @@ Start Grandine:
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /var/lib/ethereum/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-URL
 ```
@@ -143,7 +143,7 @@ docker run -d --name grandine \
   -v /var/lib/ethereum/jwt.hex:/jwt.hex:ro \
   sifrai/grandine:stable \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /jwt.hex \
   --checkpoint-sync-url CHECKPOINT-URL
 ```
@@ -151,7 +151,7 @@ docker run -d --name grandine \
 What the options do:
 
 - `--network hoodi` selects the network. The default is `mainnet`.
-- `--eth1-rpc-urls` is the Engine API URL of the execution client. Note the port: 8551, not the
+- `--execution-endpoint` is the Engine API URL of the execution client. Note the port: 8551, not the
   regular JSON-RPC port 8545.
 - `--jwt-secret` is the file from step 1.
 - `--checkpoint-sync-url` is the beacon node to download the finalized state from.
@@ -229,7 +229,7 @@ with your keystores and a fee recipient:
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /var/lib/ethereum/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-URL \
   --keystore-dir /path/to/validator_keys \
@@ -260,7 +260,7 @@ checking that everything works.
 ## Command line options
 
 - `--network`: default `mainnet`. Network to connect to: `mainnet`, `sepolia`, `holesky`, `hoodi` or `custom`.
-- `--eth1-rpc-urls`: no default. Engine API URLs of the execution clients.
+- `--execution-endpoint`: no default. Engine API URL of the execution client.
 - `--jwt-secret`: no default. File with the hex-encoded JWT secret.
 - `--checkpoint-sync-url`: no default. Beacon Node API URL to load a recent finalized checkpoint from.
 - `--data-dir`: default `$HOME/.grandine`. Parent directory for data; the network name is appended.

@@ -51,7 +51,7 @@ you sign a blinded block, by not revealing the payload in time, and then the blo
    grandine                                   \
      --network mainnet                        \
      --jwt-secret /path/to/jwt.hex            \
-     --eth1-rpc-urls http://EL-HOST:8551      \
+     --execution-endpoint http://EL-HOST:8551      \
      --keystore-dir /path/to/validator_keys   \
      --keystore-password-file /path/to/password.txt \
      --suggested-fee-recipient 0xYOUR_EXECUTION_ADDRESS \

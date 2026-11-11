@@ -109,7 +109,7 @@ sudo chmod 600 /secrets/jwt.hex
 ```
 
 ```bash
-grandine --network mainnet --eth1-rpc-urls http://127.0.0.1:8551 --jwt-secret /secrets/jwt.hex ...
+grandine --network mainnet --execution-endpoint http://127.0.0.1:8551 --jwt-secret /secrets/jwt.hex ...
 ```
 
 Make the file readable only by the users that run the two clients. Keep the Engine API port (8551)

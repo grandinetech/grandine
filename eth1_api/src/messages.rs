@@ -10,13 +10,11 @@ use types::{
 
 pub struct Eth1Metrics {
     pub eth1_connection_data: Eth1ConnectionData,
-    pub sync_eth1_fallback_configured: bool,
 }
 
 #[derive(Copy, Clone, Default)]
 pub struct Eth1ConnectionData {
     pub sync_eth1_connected: bool,
-    pub sync_eth1_fallback_connected: bool,
 }
 
 pub enum Eth1ApiToMetrics {

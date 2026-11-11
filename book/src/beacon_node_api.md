@@ -44,7 +44,7 @@ To change the listen address or port:
 ```bash
 grandine \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --http-address 127.0.0.1 \
   --http-port 5052
@@ -73,7 +73,7 @@ docker run \
   sifrai/grandine:stable \
   --network mainnet \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /root/.grandine/jwt.hex \
   --http-address 0.0.0.0
 ```

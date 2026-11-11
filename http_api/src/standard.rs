@@ -3263,7 +3263,6 @@ pub async fn node_version_v2(State(eth1_api): State<Arc<Eth1Api>>) -> Response {
         beacon_node: ClientVersionV1::own(),
         execution_client: eth1_api
             .client_versions()
-            .next()
             .and_then(|versions| versions.first().cloned()),
     };
 

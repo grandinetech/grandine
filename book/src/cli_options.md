@@ -25,7 +25,7 @@ Rules for placing options:
 
   ```bash
   # Correct
-  grandine bn --network hoodi --eth1-rpc-urls http://EL-HOST:8551 --jwt-secret /path/to/jwt.hex
+  grandine bn --network hoodi --execution-endpoint http://EL-HOST:8551 --jwt-secret /path/to/jwt.hex
 
   # Refused: --network is given before bn
   grandine --network hoodi bn
@@ -50,7 +50,7 @@ Rules for placing options:
 - Flags (options without a value) are off unless given: `--back-sync`.
 - Some list options take several values after one flag, some take a comma-separated list, and some
   must be repeated. The tables below say which. For example:
-  - `--eth1-rpc-urls URL1 URL2` (space-separated; commas are not accepted)
+  - `--web3signer-urls URL1 URL2` (space-separated)
   - `--boot-nodes ENR1,ENR2` (comma-separated)
   - `--graffiti TEXT1 --graffiti TEXT2` (repeat the flag)
   - `--beacon-node-urls URL1,URL2` or `--beacon-node-urls URL1 URL2` (both work)
@@ -112,7 +112,8 @@ Options of the beacon node. They are refused by `grandine vc`.
 
 | Option | Default | Description | Available in |
 |---|---|---|---|
-| `--eth1-rpc-urls <ETH1_RPC_URLS>...` | none | Execution client Engine API URLs (for example `http://EL-HOST:8551`). Several URLs can follow one flag, separated by spaces; Grandine switches to the next one if a request fails. Required when validators are attached. See [Connecting an execution client](./execution_client.md). | grandine, bn |
+| `--execution-endpoint <EXECUTION_ENDPOINT>` | none | Execution client Engine API URL (for example `http://EL-HOST:8551`). Takes one URL. Required when validators are attached. See [Connecting an execution client](./execution_client.md). | grandine, bn |
+| `--eth1-rpc-urls <ETH1_RPC_URLS>...` | none | Deprecated, use `--execution-endpoint`. Still accepted with a warning and used only if `--execution-endpoint` is not given; if several URLs are given, only the first is used. | grandine, bn |
 | `--jwt-secret <JWT_SECRET>` | none | Path to a file with the hex-encoded 256-bit secret shared with the execution client. | grandine, bn |
 | `--jwt-id <JWT_ID>` | none | Optional consensus client identifier to send in the JWT `id` claim. | grandine, bn |
 | `--jwt-version <JWT_VERSION>` | none | Optional consensus client type and version to send in the JWT `clv` claim. | grandine, bn |
@@ -307,10 +308,10 @@ Besides the `requires` and `conflicts` rules in the tables, Grandine checks thes
 
 - `--network custom` without `--configuration-file` (or `--configuration-directory`) fails with
   `--configuration-file must be specified when connecting to custom network`.
-- A custom network without `--eth1-rpc-urls` needs a genesis state:
-  `--eth1-rpc-urls must be specified when connecting to custom network without --genesis-state-file`.
+- A custom network without `--execution-endpoint` needs a genesis state:
+  `--execution-endpoint must be specified when connecting to custom network without --genesis-state-file`.
 - Validators attached to the built-in beacon node need an execution client:
-  `--eth1-rpc-urls must be specified when validators are present`.
+  `--execution-endpoint must be specified when validators are present`.
 - `--detect-doppelgangers` with the built-in beacon node needs `--track-liveness`.
 - `--unfinalized-states-in-memory` must be at least two epochs of slots.
 - The HTTP API, metrics and validator API must not listen on the same address and port
@@ -326,6 +327,7 @@ These still work but log a deprecation warning. Use the replacement.
 |---|---|---|
 | `--back_sync` | `--back-sync` | grandine, bn |
 | `--builder-api-url <URL>` | `--builder-url <URL>` (used only if `--builder-url` is not given) | grandine, bn |
+| `--eth1-rpc-urls <URLS>...` | `--execution-endpoint <URL>` (used only if `--execution-endpoint` is not given; only the first URL is used) | grandine, bn |
 | `--web3signer-api-urls <URLS>...` | `--web3signer-urls <URLS>...` (used only if `--web3signer-urls` is not given) | grandine, vc |
 
 ## Aliases

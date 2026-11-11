@@ -148,7 +148,7 @@ openssl rand -hex 32 | tr -d "\n" > /path/to/jwt.hex
 
 Give the same file to the execution client.
 
-### `Eth1 RPC endpoint URL returned an error: ERROR; switching to URL` or `last available Eth1 RPC endpoint URL returned an error: ERROR`
+### `execution endpoint URL returned an error: ERROR`
 
 Grandine could not talk to the execution client. Check, in order:
 
@@ -159,8 +159,6 @@ Grandine could not talk to the execution client. Check, in order:
    `chrony` or `systemd-timesyncd`.
 4. In Docker, `localhost` inside the Grandine container is the container itself. Use the execution
    client's service name or host address.
-
-When you list several URLs in `--eth1-rpc-urls`, Grandine moves to the next one on errors.
 
 ### `engine_newPayload returned SYNCING status` or `engine_forkchoiceUpdated returned SYNCING status`
 
@@ -180,10 +178,10 @@ The execution client rejected a payload. One rejected block on the network is no
 repeats for the canonical chain, your execution client may be on an old version or have a corrupted
 database. Update it, and report the issue if it persists.
 
-### `--eth1-rpc-urls must be specified when validators are present`
+### `--execution-endpoint must be specified when validators are present`
 
 Validators attached to the built-in beacon node need an execution client to propose blocks. Add
-`--eth1-rpc-urls` and `--jwt-secret`.
+`--execution-endpoint` and `--jwt-secret`.
 
 ## Networking
 
@@ -301,7 +299,7 @@ Add `--http-address 0.0.0.0` and publish the port with `-p 127.0.0.1:5052:5052`.
 ### Grandine cannot reach the execution client
 
 Inside a container, `localhost` is the container. Put both containers on the same Docker network and
-use the execution client's service name, for example `--eth1-rpc-urls http://geth:8551`.
+use the execution client's service name, for example `--execution-endpoint http://geth:8551`.
 
 ### `Permission denied` on mounted files
 

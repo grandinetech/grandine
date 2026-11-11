@@ -35,7 +35,7 @@ grandine \
   --network mainnet \
   --checkpoint-sync-url https://CHECKPOINT-HOST \
   --back-sync \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -96,7 +96,7 @@ grandine \
   --archive-storage \
   --back-sync \
   --checkpoint-sync-url https://CHECKPOINT-HOST \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -116,7 +116,7 @@ and stores states as it goes forward. This is the slowest option:
 grandine \
   --network mainnet \
   --archive-storage \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 

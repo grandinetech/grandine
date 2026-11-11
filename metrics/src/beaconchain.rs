@@ -147,12 +147,10 @@ impl BeaconNodeMetrics {
 
         let Eth1Metrics {
             eth1_connection_data,
-            sync_eth1_fallback_configured,
         } = *eth1_metrics;
 
         let Eth1ConnectionData {
             sync_eth1_connected,
-            sync_eth1_fallback_connected,
         } = eth1_connection_data;
 
         let network_peers_connected = PEERS_CONNECTED
@@ -180,8 +178,9 @@ impl BeaconNodeMetrics {
             sync_eth1_connected,
             sync_eth2_synced: *is_synced,
             sync_beacon_head_slot: controller.head_slot(),
-            sync_eth1_fallback_configured,
-            sync_eth1_fallback_connected,
+            // Only one execution endpoint is supported.
+            sync_eth1_fallback_configured: false,
+            sync_eth1_fallback_connected: false,
             slasher_active: *slasher_active,
         }
     }

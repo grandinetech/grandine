@@ -44,7 +44,7 @@ opens only the metrics port and the validator API port, if you enable them.
 
 | Port | Purpose | Option |
 |---|---|---|
-| 8551 (usual EL default) | Execution client Engine API, authenticated with the JWT secret | `--eth1-rpc-urls`, `--jwt-secret` |
+| 8551 (usual EL default) | Execution client Engine API, authenticated with the JWT secret | `--execution-endpoint`, `--jwt-secret` |
 | 5052 (usual BN default) | Remote beacon nodes used by `grandine vc` | `--beacon-node-urls` |
 | 18550 (usual MEV-Boost default) | Builder API | `--builder-url` |
 
@@ -74,7 +74,7 @@ docker run -d --name grandine \
   sifrai/grandine:stable \
   --network hoodi \
   --http-address 0.0.0.0 \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /jwt.hex
 ```
 

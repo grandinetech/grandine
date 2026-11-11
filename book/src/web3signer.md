@@ -20,7 +20,7 @@ Choose one, or combine them:
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --web3signer-urls http://SIGNER-HOST:9000 \
   --suggested-fee-recipient 0xYOUR-EXECUTION-ADDRESS

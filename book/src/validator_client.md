@@ -17,7 +17,7 @@ The default and simplest setup is a single `grandine` process with keys. The val
 ```bash
 grandine \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --keystore-dir /path/to/validator_keys \
   --keystore-password-file /path/to/password.txt \
@@ -35,14 +35,14 @@ docker run -d --name grandine \
   -v /path/to/password.txt:/password.txt:ro \
   sifrai/grandine:stable \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /jwt.hex \
   --keystore-dir /validator_keys \
   --keystore-password-file /password.txt \
   --suggested-fee-recipient 0xYOUR-EXECUTION-ADDRESS
 ```
 
-Validators need an execution client: Grandine refuses to start with keys but without `--eth1-rpc-urls`.
+Validators need an execution client: Grandine refuses to start with keys but without `--execution-endpoint`.
 
 Keys can come from a keystore directory, the [Keymanager API](./keymanager_api.md) or a [Web3Signer](./web3signer.md). See [Managing validator keys](./key_management.md). Whatever the source, Grandine records the validators it manages in [`validators.yml`](./validator_definitions.md), which also holds per-validator settings such as fee recipients and graffiti.
 
@@ -69,7 +69,7 @@ Start the beacon node with `grandine bn`. If the validator client runs on anothe
 ```bash
 grandine bn \
   --network hoodi \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --http-address 0.0.0.0 \
   --http-port 5052
@@ -108,7 +108,7 @@ A separate validator client does not need an execution client, a JWT secret or P
 ### Rules for options
 
 - Options go after `bn` or `vc`. An option before the command is refused, for example `grandine --network hoodi vc ...` fails with `--network must be specified after vc`.
-- `vc` refuses options that only the built-in beacon node acts on, for example `--eth1-rpc-urls`, `--checkpoint-sync-url`, `--target-peers`, `--http-port`, `--builder-url` or `--track-liveness`.
+- `vc` refuses options that only the built-in beacon node acts on, for example `--execution-endpoint`, `--checkpoint-sync-url`, `--target-peers`, `--http-port`, `--builder-url` or `--track-liveness`.
 - `bn` refuses validator options, for example `--keystore-dir`, `--enable-validator-api`, `--beacon-node-urls` or `--report-validator-performance`.
 - `--args-file` works with both: the options in the file are applied to the command they follow.
 - `--report-validator-performance` reads blocks from the built-in beacon node, so `vc` refuses it.

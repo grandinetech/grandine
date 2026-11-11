@@ -57,9 +57,9 @@ of the repository: a security review by Matter Labs (November 2024) and a code r
 
 ### Do I need an execution client?
 
-Yes, for any real use. Grandine talks to it through the Engine API (`--eth1-rpc-urls` and
+Yes, for any real use. Grandine talks to it through the Engine API (`--execution-endpoint` and
 `--jwt-secret`). Validators attached to the built-in beacon node do not start without one
-(`--eth1-rpc-urls must be specified when validators are present`). See
+(`--execution-endpoint must be specified when validators are present`). See
 [Connecting an execution client](./execution_client.md).
 
 ### How long does syncing take?

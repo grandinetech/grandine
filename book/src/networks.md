@@ -16,7 +16,7 @@ For each built-in network, Grandine includes the chain configuration (fork sched
 blob limits) and the bootnodes it uses to find its first peers. You only need to set `--network`.
 
 ```bash
-grandine --network hoodi --eth1-rpc-urls http://127.0.0.1:8551 --jwt-secret /path/to/jwt.hex
+grandine --network hoodi --execution-endpoint http://127.0.0.1:8551 --jwt-secret /path/to/jwt.hex
 ```
 
 The execution client must run on the same network as Grandine. A pair on different networks cannot
@@ -86,7 +86,7 @@ network's files:
 grandine \
   --network custom \
   --configuration-directory /path/to/network-config \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex
 ```
 
@@ -108,7 +108,7 @@ Notes:
 - The data directory is named after `CONFIG_NAME` in `config.yaml`, for example
   `~/.grandine/my-devnet`. The name may contain only lowercase letters, digits and `-`.
 - Grandine warns about unknown variables in `config.yaml` and ignores them.
-- A custom network without `--eth1-rpc-urls` needs a genesis state file.
+- A custom network without `--execution-endpoint` needs a genesis state file.
 - `--network custom` without a configuration file stops with
   `--configuration-file must be specified when connecting to custom network`.
 - Networks that use the `minimal` preset, common in local test setups, need a binary built with

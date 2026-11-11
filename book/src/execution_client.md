@@ -53,7 +53,7 @@ execution client's documentation for the exact names.
 ```bash
 grandine bn \
   --network mainnet \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /var/lib/ethereum/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL
 ```
@@ -61,8 +61,8 @@ grandine bn \
 When the connection works, Grandine logs:
 
 ```text
-updated capabilities for eth1 endpoint: http://127.0.0.1:8551/
-updated client version for eth1 endpoint: http://127.0.0.1:8551/
+updated capabilities for execution endpoint: http://127.0.0.1:8551/
+updated client version for execution endpoint: http://127.0.0.1:8551/
 ```
 
 The first line means the execution client accepted the JWT and answered
@@ -89,7 +89,7 @@ docker run -d --name grandine --network eth \
   sifrai/grandine:stable \
   bn \
   --network mainnet \
-  --eth1-rpc-urls http://EL-CONTAINER-NAME:8551 \
+  --execution-endpoint http://EL-CONTAINER-NAME:8551 \
   --jwt-secret /jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL
 ```
@@ -112,35 +112,20 @@ Two optional claims help an execution client tell several consensus clients apar
 
 Most setups do not need them.
 
-## Multiple execution clients and fallback
+## One execution client per beacon node
 
-`--eth1-rpc-urls` accepts several URLs, separated by spaces:
+Grandine connects to one execution client, given with `--execution-endpoint`. The flag takes one URL.
 
-```bash
-grandine bn \
-  --eth1-rpc-urls http://127.0.0.1:8551 http://EL-HOST-2:8551 \
-  --jwt-secret /var/lib/ethereum/jwt.hex \
-  ...
-```
+- If a request fails, Grandine logs `execution endpoint ... returned an error: ...` and the request
+  fails (`execution endpoint is unavailable`). At the start of every epoch, Grandine checks the
+  endpoint again with `engine_exchangeCapabilities`.
+- Some calls, such as `engine_getBlobsV2`, are sent only if the execution client advertised them;
+  otherwise they fail with `execution endpoint does not support ...`.
 
-The first URL is the primary endpoint and the others are fallbacks, in order. The same JWT secret is
-used for all of them. Grandine handles them like this:
+The older `--eth1-rpc-urls` is deprecated but still accepted, with a warning. If you give it several
+URLs, Grandine uses the first and ignores the rest.
 
-- Every request goes to the first endpoint that is marked online. If it fails, Grandine marks it
-  offline, logs `Eth1 RPC endpoint ... returned an error: ...; switching to ...` and tries the next
-  one.
-- If every endpoint fails, it logs `last available Eth1 RPC endpoint ... returned an error` and the
-  request fails (`all Eth1 RPC endpoints exhausted`).
-- At the start of every epoch, Grandine checks all endpoints with `engine_exchangeCapabilities`. An
-  endpoint that answers is marked online again, so traffic returns to the primary once it recovers.
-- Some calls, such as `engine_getBlobsV2`, go only to endpoints that advertised support for them.
-
-> **Warning:** Grandine sends Engine API calls only to the endpoint it is currently using. It does
-> not keep the fallback execution clients up to date. A fallback that has no consensus client of its
-> own falls behind and is still syncing when Grandine switches to it. Make sure each fallback
-> execution client is kept synced by another beacon node.
-
-If you need full redundancy, run complete pairs of beacon node and execution client. See
+If you need redundancy, run complete pairs of beacon node and execution client. See
 [Redundancy and fallback beacon nodes](./redundancy.md).
 
 ## Optimistic sync
@@ -176,20 +161,20 @@ moves the head to a valid branch.
 
 ## Running without an execution client
 
-Grandine refuses to start with validator keys and no `--eth1-rpc-urls`
-(`--eth1-rpc-urls must be specified when validators are present`). Without validators, a beacon
+Grandine refuses to start with validator keys and no `--execution-endpoint`
+(`--execution-endpoint must be specified when validators are present`). Without validators, a beacon
 node can start without an execution client on a built-in network, or on a custom network when it is
 given a genesis state with `--genesis-state-file`. A custom network without either stops with
-`--eth1-rpc-urls must be specified when connecting to custom network without --genesis-state-file`.
+`--execution-endpoint must be specified when connecting to custom network without --genesis-state-file`.
 
 Such a node still imports blocks and follows the head, but it cannot verify any execution payload,
 so every block it imports stays optimistic. Engine API calls fail and are logged, for example
-`engine_newPayload call failed: attempted to call Eth1 RPC endpoint but none were provided`. Use
+`engine_newPayload call failed: attempted to call execution endpoint but none was provided`. Use
 this only for testing.
 
 Clients differ here. Nimbus also has an optimistic mode without an execution client, while
 Lighthouse does not start without `--execution-endpoint`. If you move from Lighthouse, a missing
-`--eth1-rpc-urls` is therefore not reported at startup unless validators are loaded.
+`--execution-endpoint` is therefore not reported at startup unless validators are loaded.
 
 ## What Grandine uses the Engine API for
 
@@ -222,8 +207,8 @@ genesis state of a custom network from deposits, that is, on a `custom` network 
 
 | Symptom | Likely cause |
 |---|---|
-| `unable to update capabilities for eth1 endpoint: ...` with `401` or `Unauthorized` | The two clients use different JWT secrets, or the clocks differ by more than a minute. |
-| `unable to update capabilities for eth1 endpoint: ...` with `connection refused` | The execution client is not running, listens on another address or port, or a firewall blocks it. |
+| `unable to update capabilities for execution endpoint: ...` with `401` or `Unauthorized` | The two clients use different JWT secrets, or the clocks differ by more than a minute. |
+| `unable to update capabilities for execution endpoint: ...` with `connection refused` | The execution client is not running, listens on another address or port, or a firewall blocks it. |
 | `failed to parse JWT secret` | The secret file is not plain hex. |
 | `engine_newPayload returned SYNCING status` for hours | The execution client is still syncing, or it has no peers. Check its logs. |
 | `el_offline: true` in `/eth/v1/node/syncing` | No endpoint has answered recently. |
@@ -234,8 +219,9 @@ See [Troubleshooting](./troubleshooting.md) for more.
 
 See [Command line reference](./cli_options.md) for the full list.
 
-- `--eth1-rpc-urls` (default: none): one or more Engine API URLs, separated by spaces. The first is
-  the primary, the rest are fallbacks.
+- `--execution-endpoint` (default: none): Engine API URL of the execution client. Takes one URL.
+- `--eth1-rpc-urls` (default: none): deprecated, use `--execution-endpoint`. Only the first URL is
+  used.
 - `--jwt-secret` (default: none): path to the hex-encoded JWT secret.
 - `--jwt-id` (default: none): `id` claim sent in the JWT.
 - `--jwt-version` (default: none): `clv` claim sent in the JWT.

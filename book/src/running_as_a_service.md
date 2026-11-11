@@ -58,7 +58,7 @@ Group=grandine
 ExecStart=/usr/local/bin/grandine \
   --network mainnet \
   --data-dir /var/lib/grandine \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /var/lib/ethereum/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-URL
 
@@ -128,8 +128,7 @@ Create `/etc/grandine/mainnet.yaml`:
 ```yaml
 network: mainnet
 data-dir: /var/lib/grandine
-eth1-rpc-urls:
-  - http://127.0.0.1:8551
+execution-endpoint: http://127.0.0.1:8551
 jwt-secret: /var/lib/ethereum/jwt.hex
 checkpoint-sync-url: CHECKPOINT-URL
 metrics: true
@@ -259,7 +258,7 @@ services:
       - geth
     command:
       - --network=mainnet
-      - --eth1-rpc-urls=http://geth:8551
+      - --execution-endpoint=http://geth:8551
       - --jwt-secret=/jwt/jwt.hex
       - --checkpoint-sync-url=CHECKPOINT-URL
       - --http-address=0.0.0.0

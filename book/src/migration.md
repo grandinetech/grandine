@@ -32,7 +32,7 @@ before you touch the validators. Checkpoint sync takes minutes.
 ```bash
 grandine bn \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --checkpoint-sync-url https://CHECKPOINT-HOST
 ```
@@ -215,7 +215,7 @@ Start Grandine with the keys. With the integrated validator client:
 ```bash
 grandine \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --keystore-dir /var/lib/grandine/keys \
   --keystore-password-file /var/lib/grandine/keystore-password.txt \

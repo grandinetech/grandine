@@ -129,7 +129,7 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             client.clone(),
             eth1_config.eth1_auth.clone_arc(),
-            eth1_config.eth1_rpc_urls.clone(),
+            eth1_config.execution_endpoint.clone(),
             None,
             None,
         ));

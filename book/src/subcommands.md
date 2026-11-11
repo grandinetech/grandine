@@ -58,7 +58,7 @@ more separate validator clients, or that has no validators.
 ```bash
 grandine bn \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /path/to/jwt.hex \
   --checkpoint-sync-url https://CHECKPOINT-HOST
 ```

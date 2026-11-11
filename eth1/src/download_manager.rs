@@ -44,7 +44,7 @@ impl DownloadManager {
             chain_config.clone_arc(),
             client,
             eth1_config.eth1_auth.clone_arc(),
-            eth1_config.eth1_rpc_urls.clone(),
+            eth1_config.execution_endpoint.clone(),
             eth1_api_to_metrics_tx,
             metrics,
         );

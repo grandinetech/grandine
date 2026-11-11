@@ -47,7 +47,7 @@ Mainnet:
 ```bash
 grandine bn \
   --network mainnet \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL
 ```
@@ -57,7 +57,7 @@ Hoodi:
 ```bash
 grandine bn \
   --network hoodi \
-  --eth1-rpc-urls http://127.0.0.1:8551 \
+  --execution-endpoint http://127.0.0.1:8551 \
   --jwt-secret /path/to/jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL
 ```
@@ -77,7 +77,7 @@ docker run -d --name grandine \
   sifrai/grandine:stable \
   bn \
   --network mainnet \
-  --eth1-rpc-urls http://EL-HOST:8551 \
+  --execution-endpoint http://EL-HOST:8551 \
   --jwt-secret /jwt.hex \
   --checkpoint-sync-url CHECKPOINT-SYNC-URL \
   --http-address 0.0.0.0
@@ -96,8 +96,7 @@ dashes:
 
 ```yaml
 network: mainnet
-eth1-rpc-urls:
-  - http://127.0.0.1:8551
+execution-endpoint: http://127.0.0.1:8551
 jwt-secret: /path/to/jwt.hex
 checkpoint-sync-url: CHECKPOINT-SYNC-URL
 ```
@@ -114,7 +113,7 @@ When the beacon node starts, it goes through these steps. Each step logs a line 
 level, so you can follow them in the output.
 
 1. **Configuration report.** Grandine logs the client version (`client version: ...`), followed by
-   the network, the data directory, the storage mode, the database size limits, the Eth1 RPC URLs,
+   the network, the data directory, the storage mode, the database size limits, the execution endpoint,
    the HTTP API address and whether back-sync is enabled.
 2. **Port check.** Grandine checks that its TCP and UDP ports are free before it binds them. If one
    is taken, it exits with an error such as `libp2p port (9000) is unavailable; make sure no other
@@ -123,7 +122,7 @@ level, so you can follow them in the output.
    version in `meta.json` (`initialized data directory with schema version ...`). See
    [Storage and database](./storage.md).
 4. **Validator keys.** In the combined mode, Grandine loads any validator keys you passed. If it
-   finds keys but no `--eth1-rpc-urls`, it stops with `--eth1-rpc-urls must be specified when
+   finds keys but no `--execution-endpoint`, it stops with `--execution-endpoint must be specified when
    validators are present`.
 5. **Genesis.** Grandine needs the genesis state of the network. It is built into the binary for
    mainnet. For Sepolia, Holesky and Hoodi, Grandine downloads it on the first run
@@ -134,10 +133,10 @@ level, so you can follow them in the output.
    - Otherwise, if you passed `--checkpoint-sync-url`, it downloads a recent finalized block and
      state (`performing checkpoint sync from ...`, then `loaded state at slot N from ...`).
    - Otherwise, it starts from genesis.
-7. **Services.** Grandine starts the execution client connection (`updated capabilities for eth1
-   endpoint: ...`), the peer-to-peer stack (`Libp2p Starting`, `ENR Initialised`, `Listening
-   established`), the HTTP API (`HTTP server listening on 127.0.0.1:5052`), the operation pools and
-   the sync service.
+7. **Services.** Grandine starts the execution client connection (`updated capabilities for
+   execution endpoint: ...`), the peer-to-peer stack (`Libp2p Starting`, `ENR Initialised`,
+   `Listening established`), the HTTP API (`HTTP server listening on 127.0.0.1:5052`), the
+   operation pools and the sync service.
 8. **Sync.** The node requests blocks from peers and imports them until it reaches the head of the
    chain.
 
@@ -208,7 +207,7 @@ For long-term monitoring, see [Metrics](./metrics.md) and [Logging](./logging.md
 |---|---|
 | `skipping checkpoint sync: existing database found; pass --force-checkpoint-sync to force checkpoint sync` | The node resumed from its own database and ignored `--checkpoint-sync-url`. This is the expected behavior on a restart. |
 | `checkpoint sync failed` followed by an error | The download failed and the node fell back to its database or to genesis. See [Checkpoint sync](./checkpoint_sync.md). |
-| `Eth1 RPC endpoint ... returned an error: ...; switching to ...` | The primary execution client did not answer. Grandine moved to the next URL. |
+| `execution endpoint ... returned an error: ...` | The execution client did not answer or returned an error. See [Troubleshooting](./troubleshooting.md). |
 | `engine_newPayload returned SYNCING status` | The execution client is still syncing. Blocks are imported optimistically. |
 | `UPnP enabled with manual ENR settings: ...` | You set ENR options while UPnP is on. UPnP might override them. |
 
@@ -261,7 +260,7 @@ list.
   `custom`.
 - `--data-dir` (default: `$HOME/.grandine`): parent directory for all data. Grandine adds the
   network name below it.
-- `--eth1-rpc-urls` (default: none): Engine API URLs of your execution clients.
+- `--execution-endpoint` (default: none): Engine API URL of your execution client.
 - `--jwt-secret` (default: none): path to the JWT secret shared with the execution client.
 - `--checkpoint-sync-url` (default: none): Beacon Node API URL to checkpoint sync from.
 - `--args-file` (default: none): load options from a YAML file.

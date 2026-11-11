@@ -3,7 +3,6 @@ use std::{collections::HashSet, sync::Arc};
 
 use arc_swap::ArcSwap;
 use derive_more::Debug;
-use itertools::Itertools as _;
 use std_ext::ArcExt as _;
 use types::redacting_url::RedactingUrl;
 
@@ -14,22 +13,34 @@ const ORDERING: Ordering = Ordering::SeqCst;
 pub type ClientVersions = Vec<ClientVersionV1>;
 
 #[derive(Debug)]
-#[expect(clippy::partial_pub_fields)]
 pub struct Endpoint {
     is_online: AtomicBool,
-    pub is_fallback: bool,
-    pub url: RedactingUrl,
+    url: RedactingUrl,
     capabilities: ArcSwap<HashSet<String>>,
     client_versions: ArcSwap<ClientVersions>,
 }
 
 impl Endpoint {
+    #[must_use]
+    pub fn new(url: RedactingUrl) -> Self {
+        Self {
+            is_online: AtomicBool::new(true),
+            url,
+            capabilities: ArcSwap::from_pointee(HashSet::default()),
+            client_versions: ArcSwap::from_pointee(vec![]),
+        }
+    }
+
     pub const fn url(&self) -> &RedactingUrl {
         &self.url
     }
 
     pub fn is_online(&self) -> bool {
         self.is_online.load(ORDERING)
+    }
+
+    pub fn supports(&self, capability: &str) -> bool {
+        self.capabilities.load().contains(capability)
     }
 
     pub fn set_capabilities(&self, capabilities: HashSet<String>) {
@@ -49,171 +60,32 @@ impl Endpoint {
     }
 }
 
-pub struct Endpoints {
-    endpoints: Vec<Endpoint>,
-}
-
-impl Endpoints {
-    pub fn new(urls: impl IntoIterator<Item = RedactingUrl>) -> Self {
-        let endpoints = urls
-            .into_iter()
-            .enumerate()
-            .map(|(index, url)| Endpoint {
-                is_online: AtomicBool::new(true),
-                is_fallback: index > 0,
-                url,
-                capabilities: ArcSwap::from_pointee(HashSet::default()),
-                client_versions: ArcSwap::from_pointee(vec![]),
-            })
-            .collect();
-
-        Self { endpoints }
-    }
-
-    pub const fn is_empty(&self) -> bool {
-        self.endpoints.is_empty()
-    }
-
-    pub fn el_offline(&self) -> bool {
-        self.endpoints.iter().all(|endpoint| !endpoint.is_online())
-    }
-
-    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
-        self.endpoints.iter().map(Endpoint::get_client_versions)
-    }
-
-    pub fn endpoints_for_request(
-        &self,
-        capability: Option<&str>,
-    ) -> impl Iterator<Item = &Endpoint> {
-        self.endpoints
-            .iter()
-            .filter(|endpoint| {
-                capability
-                    .map(|capability| endpoint.capabilities.load().contains(capability))
-                    .unwrap_or(true)
-            })
-            .sorted_by_key(|endpoint| !endpoint.is_online())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use anyhow::Result;
 
-    use crate::{endpoints::Endpoints, eth1_api::ENGINE_GET_EL_BLOBS_V1};
+    use crate::{endpoints::Endpoint, eth1_api::ENGINE_GET_EL_BLOBS_V1};
 
     #[test]
-    fn test_empty_endpoints() {
-        let endpoints = Endpoints::new([]);
+    fn test_endpoint_online_status() -> Result<()> {
+        let endpoint = Endpoint::new("https://example.net".parse()?);
 
-        assert!(endpoints.is_empty());
-        assert!(endpoints.el_offline());
-
-        let mut endpoints_for_request = endpoints.endpoints_for_request(None);
-
-        assert!(endpoints_for_request.next().is_none());
-    }
-
-    #[test]
-    fn test_endpoints() -> Result<()> {
-        let endpoints = Endpoints::new([
-            "https://example1.net".parse()?,
-            "https://example2.net".parse()?,
-        ]);
-
-        assert!(!endpoints.is_empty());
-        assert!(!endpoints.el_offline(), "initially endpoints are online");
-
-        assert_eq!(
-            endpoints
-                .endpoints_for_request(None)
-                .map(|endpoint| (endpoint.url().clone(), endpoint.is_online()))
-                .collect::<Vec<_>>(),
-            [
-                ("https://example1.net".parse()?, true),
-                ("https://example2.net".parse()?, true),
-            ]
-        );
-
-        // set first endpoint to be offline
-        let current_endpoint = endpoints
-            .endpoints_for_request(None)
-            .next()
-            .expect("current endpoint should be present");
-
-        current_endpoint.set_online_status(false);
-
-        assert!(!current_endpoint.is_online());
-        assert!(!endpoints.el_offline());
-
-        // check that online endpoint is used for requests
-        assert_eq!(
-            endpoints
-                .endpoints_for_request(None)
-                .map(|endpoint| (endpoint.url().clone(), endpoint.is_online()))
-                .collect::<Vec<_>>(),
-            [
-                ("https://example2.net".parse()?, true),
-                ("https://example1.net".parse()?, false),
-            ]
-        );
-
-        // set the fallback endpoint to be offline
-        let current_endpoint = endpoints
-            .endpoints_for_request(None)
-            .next()
-            .expect("current endpoint should be present");
-
-        current_endpoint.set_online_status(false);
-
-        assert!(!current_endpoint.is_online());
-        assert!(endpoints.el_offline());
-
-        assert_eq!(
-            endpoints
-                .endpoints_for_request(None)
-                .map(|endpoint| (endpoint.url().clone(), endpoint.is_online()))
-                .collect::<Vec<_>>(),
-            [
-                ("https://example1.net".parse()?, false),
-                ("https://example2.net".parse()?, false),
-            ]
-        );
+        assert!(endpoint.is_online(), "initially the endpoint is online");
+        endpoint.set_online_status(false);
+        assert!(!endpoint.is_online());
 
         Ok(())
     }
 
     #[test]
-    fn test_endpoints_with_capabilities() -> Result<()> {
-        let endpoints = Endpoints::new([
-            "https://example1.net".parse()?,
-            "https://example2.net".parse()?,
-        ]);
+    fn test_endpoint_capabilities() -> Result<()> {
+        let endpoint = Endpoint::new("https://example.net".parse()?);
 
-        assert!(
-            endpoints
-                .endpoints_for_request(Some(ENGINE_GET_EL_BLOBS_V1))
-                .next()
-                .is_none()
-        );
-
-        let current_endpoint = endpoints
-            .endpoints_for_request(None)
-            .next()
-            .expect("current endpoint should be present");
-
-        current_endpoint.set_capabilities(HashSet::from([ENGINE_GET_EL_BLOBS_V1.to_owned()]));
-
-        assert_eq!(
-            endpoints
-                .endpoints_for_request(Some(ENGINE_GET_EL_BLOBS_V1))
-                .map(|endpoint| endpoint.url().clone())
-                .collect::<Vec<_>>(),
-            ["https://example1.net".parse()?]
-        );
+        assert!(!endpoint.supports(ENGINE_GET_EL_BLOBS_V1));
+        endpoint.set_capabilities(HashSet::from([ENGINE_GET_EL_BLOBS_V1.to_owned()]));
+        assert!(endpoint.supports(ENGINE_GET_EL_BLOBS_V1));
 
         Ok(())
     }

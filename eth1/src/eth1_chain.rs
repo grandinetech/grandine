@@ -32,7 +32,7 @@ const STREAM_BATCH_SIZE: usize = 1000;
 #[derive(Default)]
 pub struct Eth1Config {
     pub eth1_auth: Arc<Auth>,
-    pub eth1_rpc_urls: Vec<RedactingUrl>,
+    pub execution_endpoint: Option<RedactingUrl>,
     pub deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     pub default_deposit_tree: Option<DepositTree>,
 }
@@ -56,7 +56,7 @@ impl Eth1Chain {
 
         let chain = Self { cache };
 
-        if !eth1_config.eth1_rpc_urls.is_empty() {
+        if eth1_config.execution_endpoint.is_some() {
             chain.spawn_download_task(
                 chain_config,
                 eth1_config,
