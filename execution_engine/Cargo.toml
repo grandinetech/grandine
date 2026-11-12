@@ -15,15 +15,20 @@ libp2p-identity = { workspace = true }
 ethereum-types = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
+hex-literal = { workspace = true }
+keccak-hasher = { workspace = true }
 logging = { workspace = true }
+rlp = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
+sha2 = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
+tiny-keccak = { workspace = true }
 tracing = { workspace = true }
+triehash = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
-hex-literal = { workspace = true }
 serde_json = { workspace = true }

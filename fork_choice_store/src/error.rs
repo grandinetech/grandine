@@ -223,6 +223,14 @@ pub enum Error<P: Preset> {
         expected: Box<H256>,
     },
     #[error(
+        "execution payload block hash is not computed correctly \
+         (envelope: {envelope:?}, computed: {computed:?})"
+    )]
+    ExecutionPayloadBlockHashInvalid {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        computed: Box<H256>,
+    },
+    #[error(
         "execution payload beacon block root mismatch (envelope: {envelope:?}, expected: {expected:?})"
     )]
     ExecutionPayloadBeaconBlockRootMismatch {
