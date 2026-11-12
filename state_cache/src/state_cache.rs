@@ -7,7 +7,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::{Result, anyhow};
 #[cfg(not(target_os = "zkvm"))]
 use im::{HashMap, OrdMap};
-use logging::{info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use parking_lot::{Mutex, MutexGuard};
 #[cfg(target_os = "zkvm")]
 use std::collections::{BTreeMap as OrdMap, HashMap};
@@ -260,7 +260,7 @@ impl<P: Preset> StateCache<P> {
         }
 
         if !busy_roots.is_empty() {
-            warn_with_peers!(
+            debug_with_peers!(
                 "skipped {} busy entries while pruning beacon state cache: {busy_roots:?}",
                 busy_roots.len(),
             );
