@@ -1221,7 +1221,6 @@ where
             Ok(AggregateAndProofAction::Accept {
                 aggregate_and_proof,
                 attesting_indices,
-                is_subset_aggregate,
             }) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["accepted"]);
@@ -1242,11 +1241,17 @@ where
                 }
 
                 let message = aggregate_and_proof.message();
+                let aggregate = message.aggregate();
 
                 self.store.observe_gossip_aggregator(
                     message.aggregator_index(),
-                    message.aggregate().data().target.epoch,
+                    aggregate.data().target.epoch,
                 );
+
+                // Aggregates validated concurrently are not observed until they reach the mutator.
+                let is_subset_aggregate = self.store.is_gossip_aggregate_subset_known(&aggregate);
+
+                self.store.observe_gossip_aggregate(&aggregate);
 
                 let (gossip_id, sender) = origin.split();
 

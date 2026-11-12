@@ -2774,6 +2774,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
+        // > A valid aggregate attestation defined by `hash_tree_root(aggregate.data)` whose
+        // > `aggregation_bits` is a non-strict superset has _not_ already been seen.
+        if origin.gossip_id_ref().is_some() && self.is_gossip_aggregate_subset_known(&aggregate) {
+            return Ok(AggregateAndProofAction::Ignore);
+        }
+
         // > Get state at the `target` to fully validate attestation
         //
         // This should only be done after `Store::validate_attestation_internal` to ensure that the
@@ -2871,13 +2877,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(AggregateAndProofAction::Ignore);
         }
 
-        // https://github.com/ethereum/consensus-specs/pull/2847
-        let is_subset_aggregate = !self.aggregate_and_proof_supersets.check(&aggregate);
-
         Ok(AggregateAndProofAction::Accept {
             aggregate_and_proof,
             attesting_indices,
-            is_subset_aggregate,
         })
     }
 
@@ -5500,6 +5502,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .aggregators
             .get(&epoch)
             .is_some_and(|set| set.contains(&aggregator_index))
+    }
+
+    pub fn observe_gossip_aggregate(&self, aggregate: &Attestation<P>) {
+        self.aggregate_and_proof_supersets.observe(aggregate);
+    }
+
+    pub fn is_gossip_aggregate_subset_known(&self, aggregate: &Attestation<P>) -> bool {
+        self.aggregate_and_proof_supersets
+            .is_known_subset(aggregate)
     }
 
     fn prune_seen_gossip_attestations(&self, oldest_retained_epoch: Epoch) {

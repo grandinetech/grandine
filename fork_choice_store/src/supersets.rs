@@ -15,37 +15,45 @@ pub struct AggregateAndProofSets<N> {
 }
 
 impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
-    pub fn check(&self, data: &AttestationData, aggregation_bits: &BitList<N>) -> bool {
-        let attestation_data_root = data.hash_tree_root();
+    pub fn is_known_subset(&self, data: &AttestationData, aggregation_bits: &BitList<N>) -> bool {
+        let Some(supersets) = self.supersets.get(&data.target.epoch) else {
+            return false;
+        };
+
+        supersets
+            .value()
+            .get(&data.hash_tree_root())
+            .is_some_and(|existing_sets| {
+                // Bits not yet validated may have the wrong length, which `any_not_in` asserts.
+                existing_sets.value().iter().any(|entry| {
+                    entry.value().len() == aggregation_bits.len()
+                        && !aggregation_bits.any_not_in(entry.value())
+                })
+            })
+    }
+
+    pub fn observe(&self, data: &AttestationData, aggregation_bits: &BitList<N>) {
+        if self.is_known_subset(data, aggregation_bits) {
+            return;
+        }
+
         let supersets = self
             .supersets
             .get_or_insert_with(data.target.epoch, SkipMap::new);
 
-        let supersets = supersets.value();
+        let existing_sets = supersets
+            .value()
+            .get_or_insert(data.hash_tree_root(), SkipSet::new());
 
-        let has_unseen_bits = if let Some(existing_sets) = supersets.get(&attestation_data_root) {
-            existing_sets
-                .value()
-                .iter()
-                .all(|entry| aggregation_bits.any_not_in(entry.value()))
-        } else {
-            true
-        };
+        let existing_sets = existing_sets.value();
 
-        if has_unseen_bits {
-            let existing_sets = supersets.get_or_insert(attestation_data_root, SkipSet::new());
-            let existing_sets = existing_sets.value();
-
-            for entry in existing_sets {
-                if !entry.value().any_not_in(aggregation_bits) {
-                    entry.remove();
-                }
+        for entry in existing_sets {
+            if !entry.value().any_not_in(aggregation_bits) {
+                entry.remove();
             }
-
-            existing_sets.insert(aggregation_bits.clone());
         }
 
-        has_unseen_bits
+        existing_sets.insert(aggregation_bits.clone());
     }
 
     pub fn prune(&self, finalized_epoch: Epoch) {
@@ -85,13 +93,13 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
         self.electra_supersets.prune(finalized_epoch);
     }
 
-    pub fn check(&self, attestation: &Attestation<P>) -> bool {
+    pub fn is_known_subset(&self, attestation: &Attestation<P>) -> bool {
         let committee_index = misc::committee_index(attestation);
 
         match attestation {
             Attestation::Phase0(attestation) => self
                 .phase0_supersets
-                .check(&attestation.data, &attestation.aggregation_bits),
+                .is_known_subset(&attestation.data, &attestation.aggregation_bits),
             Attestation::Electra(attestation) => {
                 let data = AttestationData {
                     index: committee_index,
@@ -99,7 +107,7 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
                 };
 
                 self.electra_supersets
-                    .check(&data, &attestation.aggregation_bits)
+                    .is_known_subset(&data, &attestation.aggregation_bits)
             }
             Attestation::Gloas(attestation) => {
                 let data = AttestationData {
@@ -108,7 +116,40 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
                 };
 
                 self.electra_supersets
-                    .check(&data, &attestation.aggregation_bits)
+                    .is_known_subset(&data, &attestation.aggregation_bits)
+            }
+            Attestation::Single(_) => {
+                unreachable!(
+                    "single attestations should not be validated with methods meant for aggregate and proofs only"
+                )
+            }
+        }
+    }
+
+    pub fn observe(&self, attestation: &Attestation<P>) {
+        let committee_index = misc::committee_index(attestation);
+
+        match attestation {
+            Attestation::Phase0(attestation) => self
+                .phase0_supersets
+                .observe(&attestation.data, &attestation.aggregation_bits),
+            Attestation::Electra(attestation) => {
+                let data = AttestationData {
+                    index: committee_index,
+                    ..attestation.data
+                };
+
+                self.electra_supersets
+                    .observe(&data, &attestation.aggregation_bits);
+            }
+            Attestation::Gloas(attestation) => {
+                let data = AttestationData {
+                    index: committee_index,
+                    ..attestation.data
+                };
+
+                self.electra_supersets
+                    .observe(&data, &attestation.aggregation_bits);
             }
             Attestation::Single(_) => {
                 unreachable!(
@@ -140,7 +181,8 @@ mod tests {
         committee_index: CommitteeIndex,
         attester_bits: impl IntoIterator<Item = u8>,
     ) -> Attestation<Minimal> {
-        let mut aggregation_bits = BitList::with_length(3);
+        let attester_bits = attester_bits.into_iter().collect::<Vec<_>>();
+        let mut aggregation_bits = BitList::with_length(attester_bits.len());
         let mut committee_bits = BitVector::default();
 
         for (index, bit) in attester_bits.into_iter().enumerate() {
@@ -162,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_superset_check() {
+    fn test_superset_observe() {
         let agg_0_1 = aggregate(0, [0, 0, 1]);
         let agg_0_2 = aggregate(0, [1, 0, 1]);
         let agg_0_3 = aggregate(0, [0, 1, 1]);
@@ -173,28 +215,63 @@ mod tests {
         let supersets = MultiPhaseAggregateAndProofSets::<Minimal>::new();
         assert_eq!(supersets.len(), 0);
 
-        assert!(supersets.check(&agg_0_1));
+        assert!(!supersets.is_known_subset(&agg_0_1));
+        supersets.observe(&agg_0_1);
         // Adds a new superset
         assert_eq!(supersets.len(), 1);
 
-        assert!(supersets.check(&agg_0_2));
+        assert!(!supersets.is_known_subset(&agg_0_2));
+        supersets.observe(&agg_0_2);
         // Overrides existing superset
         assert_eq!(supersets.len(), 1);
 
-        assert!(supersets.check(&agg_0_3));
+        assert!(!supersets.is_known_subset(&agg_0_3));
+        supersets.observe(&agg_0_3);
         // Adds a new superset
         assert_eq!(supersets.len(), 2);
 
-        assert!(!supersets.check(&agg_0_4));
+        assert!(supersets.is_known_subset(&agg_0_4));
+        supersets.observe(&agg_0_4);
         // Does nothing
         assert_eq!(supersets.len(), 2);
 
-        assert!(!supersets.check(&agg_0_5));
+        assert!(supersets.is_known_subset(&agg_0_5));
+        supersets.observe(&agg_0_5);
         // Does nothing
         assert_eq!(supersets.len(), 2);
 
-        assert!(supersets.check(&agg_1_1));
+        assert!(!supersets.is_known_subset(&agg_1_1));
+        supersets.observe(&agg_1_1);
         // Adds a new superset
         assert_eq!(supersets.len(), 3);
+    }
+
+    // Gossip validation runs before signatures are verified, so it must not record what it sees.
+    #[test]
+    fn test_is_known_subset_does_not_observe() {
+        let superset = aggregate(0, [1, 1, 1]);
+        let subset = aggregate(0, [0, 0, 1]);
+
+        let supersets = MultiPhaseAggregateAndProofSets::<Minimal>::new();
+
+        assert!(!supersets.is_known_subset(&superset));
+        assert!(!supersets.is_known_subset(&superset));
+        assert!(!supersets.is_known_subset(&subset));
+        assert_eq!(supersets.len(), 0);
+    }
+
+    // Gossip bits of the wrong length reach the subset check before their length is validated.
+    #[test]
+    fn test_is_known_subset_with_mismatched_length() {
+        let observed = aggregate(0, [1, 1, 1]);
+        let shorter = aggregate(0, [1, 1]);
+        let longer = aggregate(0, [1, 1, 1, 0]);
+
+        let supersets = MultiPhaseAggregateAndProofSets::<Minimal>::new();
+
+        supersets.observe(&observed);
+
+        assert!(!supersets.is_known_subset(&shorter));
+        assert!(!supersets.is_known_subset(&longer));
     }
 }
