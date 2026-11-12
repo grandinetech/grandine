@@ -738,8 +738,17 @@ impl<P: Preset> Context<P> {
         ));
     }
 
-    // Unlike envelopes from tests, envelopes from gossip generate events.
-    pub fn on_valid_gossip_execution_payload(
+    // Unlike envelopes from tests, own envelopes generate events.
+    // Gossip would too, but it checks block hashes, and the factory's are placeholders.
+    pub fn on_own_execution_payload(&self, envelope: &Arc<SignedExecutionPayloadEnvelope<P>>) {
+        self.controller()
+            .on_own_execution_payload_envelope(envelope.clone_arc());
+
+        self.controller().wait_for_tasks();
+    }
+
+    // The factory's block hashes are placeholders, so gossip rejects every factory envelope.
+    pub fn on_gossip_execution_payload_with_invalid_block_hash(
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
@@ -748,9 +757,16 @@ impl<P: Preset> Context<P> {
 
         self.controller().wait_for_tasks();
 
+        let expected_block_root = envelope.message.beacon_block_root;
+
         assert!(matches!(
             self.next_p2p_message(),
-            Some(P2pMessage::Accept(_)),
+            Some(P2pMessage::Reject(
+                _,
+                MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
+                    payload_envelope_identifier,
+                },
+            )) if payload_envelope_identifier.beacon_block_root == expected_block_root,
         ));
     }
 

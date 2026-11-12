@@ -21,7 +21,7 @@ use eip_7594::{
     verify_data_column_sidecar, verify_data_column_sidecar_shape, verify_kzg_proofs,
     verify_sidecar_inclusion_proof,
 };
-use execution_engine::ExecutionEngine;
+use execution_engine::{ExecutionEngine, compute_block_hash};
 use features::Feature;
 use hash_hasher::HashedMap;
 use helper_functions::{
@@ -4270,6 +4270,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.pubkey_cache.get_or_insert(pubkey)?,
                 SignatureKind::ExecutionPayloadEnvelope,
             )?;
+        }
+
+        if origin.verify_block_hash() {
+            // > assert execution_engine.verify_and_notify_new_payload(...)
+            // That includes `is_valid_block_hash`. It is checked here, without the execution layer.
+            // It runs after the signature check, so unsigned junk payloads are not hashed.
+            let computed_block_hash = compute_block_hash(
+                &envelope.message.payload,
+                envelope.message.parent_beacon_block_root,
+                &envelope.message.execution_requests,
+            )?;
+
+            ensure!(
+                computed_block_hash == envelope.message.payload.block_hash,
+                Error::<P>::ExecutionPayloadBlockHashInvalid {
+                    envelope,
+                    computed: Box::new(computed_block_hash),
+                },
+            );
         }
 
         let versioned_hashes = bid

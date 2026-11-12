@@ -1365,6 +1365,16 @@ impl ExecutionPayloadEnvelopeOrigin {
         }
     }
 
+    // Own payloads come from the execution layer.
+    // Spec test vectors use placeholder block hashes.
+    #[must_use]
+    pub const fn verify_block_hash(&self) -> bool {
+        match self {
+            Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
+            Self::Own | Self::Test(_) => false,
+        }
+    }
+
     #[must_use]
     pub const fn is_own(&self) -> bool {
         matches!(self, Self::Own)

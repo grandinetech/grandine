@@ -2986,14 +2986,19 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "keccak-hasher",
  "libp2p-identity",
  "logging",
+ "rlp",
  "serde",
  "serde_json",
  "serde_utils",
+ "sha2 0.10.9",
  "ssz",
  "thiserror 2.0.21",
+ "tiny-keccak",
  "tracing",
+ "triehash",
  "typenum",
  "types",
 ]
@@ -3663,6 +3668,21 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "zerocopy",
+]
+
+[[package]]
+name = "hash-db"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d23bd4e7b5eda0d0f3a307e8b381fdc8ba9000f26fbe912250c0a4cc3956364a"
+
+[[package]]
+name = "hash256-std-hasher"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92c171d55b98633f4ed3860808f004099b36c1cc29c42cfc53aa8591b21efcf2"
+dependencies = [
+ "crunchy",
 ]
 
 [[package]]
@@ -4832,6 +4852,17 @@ checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
+]
+
+[[package]]
+name = "keccak-hasher"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "711adba9940a039f4374fc5724c0a5eaca84a2d558cce62256bfe26f0dbef05e"
+dependencies = [
+ "hash-db",
+ "hash256-std-hasher",
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -9502,6 +9533,16 @@ dependencies = [
  "typenum",
  "types",
  "unwrap_none",
+]
+
+[[package]]
+name = "triehash"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1631b201eb031b563d2e85ca18ec8092508e262a3196ce9bd10a67ec87b9f5c"
+dependencies = [
+ "hash-db",
+ "rlp",
 ]
 
 [[package]]

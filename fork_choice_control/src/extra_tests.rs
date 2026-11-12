@@ -3511,7 +3511,7 @@ fn gloas_invalid_payload_with_older_latest_valid_hash_invalidates_all_payloads_i
 //
 // 1's envelope arrives and the head turns full.
 // The execution engine has not ruled on 1's payload yet, so the head is optimistic.
-// The envelope comes from gossip, so a `head_v2` event goes out for the full head, optimistic.
+// The envelope is our own, so a `head_v2` event goes out for the full head, optimistic.
 // The verdict sends the head events again, no longer optimistic.
 // 2 builds on 1's validated payload, so its `head_v2` event is not optimistic from the start.
 #[test]
@@ -3534,7 +3534,7 @@ fn gloas_head_v2_events_are_sent_again_when_the_head_is_validated() {
 
     context.assert_head_optimistic(false);
 
-    context.on_valid_gossip_execution_payload(&envelope_1);
+    context.on_own_execution_payload(&envelope_1);
     context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
     context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
     context.assert_head_v2_events(&[(root_1, PayloadPresence::Full, true)]);
@@ -3547,6 +3547,34 @@ fn gloas_head_v2_events_are_sent_again_when_the_head_is_validated() {
     context.on_slot(block_2.message().slot());
     context.on_acceptable_block(&block_2);
     context.assert_head_v2_events(&[(root_2, PayloadPresence::Empty, false)]);
+}
+
+// ```text
+// 0 -e- 1
+// ```
+//
+// 1's envelope comes from gossip with a block hash that does not match its payload.
+// The factory's block hashes are placeholders, so its envelopes are exactly that.
+// Gossip rejects it, and the head stays empty.
+// The same envelope from a test checks the signature but not the block hash, and is accepted.
+// That is the only difference from gossip, so the block hash check is what rejected it.
+#[test]
+fn gloas_gossip_envelope_with_invalid_block_hash_is_rejected() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+
+    context.on_gossip_execution_payload_with_invalid_block_hash(&envelope_1);
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
 }
 
 // ```text

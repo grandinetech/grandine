@@ -1,4 +1,5 @@
 pub use crate::{
+    block_hash::compute_block_hash,
     execution_engine::{ExecutionEngine, MockExecutionEngine, NullExecutionEngine},
     messages::ExecutionServiceMessage,
     types::{
@@ -15,6 +16,7 @@ pub use crate::{
     },
 };
 
+mod block_hash;
 mod execution_engine;
 mod messages;
 mod types;
