@@ -23,7 +23,7 @@ use types::{
 use crate::{
     controller::{Controller, MutatorHandle},
     events::EventChannels,
-    messages::{AttestationVerifierMessage, P2pMessage},
+    messages::{AttestationVerifierMessage, P2pMessage, ValidatorMessage},
     storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, Storage},
     unbounded_sink::UnboundedSink,
 };
@@ -108,6 +108,7 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        validator_tx: impl UnboundedSink<ValidatorMessage<P, WaitGroup>>,
         event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
@@ -140,7 +141,7 @@ where
             futures::sink::drain(),
             futures::sink::drain(),
             futures::sink::drain(),
-            futures::sink::drain(),
+            validator_tx,
             storage,
             core::iter::empty(),
             true,
@@ -172,6 +173,7 @@ impl<P: Preset> AdHocBenchController<P> {
             NullExecutionEngine,
             None,
             p2p_tx,
+            futures::sink::drain(),
             Arc::new(EventChannels::default()),
             None,
         )
@@ -197,6 +199,7 @@ impl<P: Preset> BenchController<P> {
             NullExecutionEngine,
             None,
             futures::sink::drain(),
+            futures::sink::drain(),
             Arc::new(EventChannels::default()),
             None,
         )
@@ -210,6 +213,8 @@ impl<P: Preset> TestController<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
+        let store_config = StoreConfig::aggressive(&chain_config);
+
         Self::with_p2p_tx(
             chain_config,
             Arc::new(PubkeyCache::default()),
@@ -217,6 +222,8 @@ impl<P: Preset> TestController<P> {
             anchor_state,
             Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
             futures::sink::drain(),
+            futures::sink::drain(),
+            store_config,
             Arc::new(EventChannels::default()),
             None,
         )
@@ -230,11 +237,11 @@ impl<P: Preset> TestController<P> {
         anchor_state: Arc<BeaconState<P>>,
         execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        validator_tx: impl UnboundedSink<ValidatorMessage<P, WaitGroup>>,
+        store_config: StoreConfig,
         event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
-        let store_config = StoreConfig::aggressive(&chain_config);
-
         Self::new_internal(
             chain_config,
             pubkey_cache,
@@ -245,6 +252,7 @@ impl<P: Preset> TestController<P> {
             execution_engine,
             None,
             p2p_tx,
+            validator_tx,
             event_channels,
             thread_pool_size,
         )

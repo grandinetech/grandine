@@ -63,7 +63,12 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
             !beacon_state.is_post_gloas(),
             "Gloas requires final-bid packing"
         );
-        let attestations = pool.best_proposable_attestations(beacon_state.slot()).await;
+        let attestations = pool
+            .best_proposable_attestations(
+                beacon_state.slot(),
+                accessors::latest_block_root(beacon_state.as_ref()),
+            )
+            .await;
         let slot = controller.slot();
 
         if !attestations.is_empty() {
@@ -179,42 +184,47 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             metrics,
         } = self;
 
-        let started_at = Instant::now();
+        // A proposal that re-orgs the head builds on its parent, which needs its own packing.
+        // The head goes first, as it is the likelier parent and its state is usually cached.
+        for parent_root in controller.possible_proposal_parents_at_next_slot() {
+            let started_at = Instant::now();
 
-        let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
-        // The final bid is not available to this background task.
-        if beacon_state.is_post_gloas() {
-            return Ok(());
+            let beacon_state = controller.preprocessed_state_at_next_slot_blocking(parent_root)?;
+            // The final bid is not available to this background task.
+            if beacon_state.is_post_gloas() {
+                return Ok(());
+            }
+            let _timer = metrics.as_ref().map(|metrics| {
+                metrics
+                    .att_pool_pack_proposable_attestations_times
+                    .start_timer()
+            });
+            let slot = beacon_state.slot();
+
+            // Greedy packing is a single deterministic pass, so — unlike the removed solver path —
+            // there is nothing to gain from an anytime loop; pre-compute once and store the result.
+            let attestation_packer = AttestationPacker::new(
+                controller.chain_config().clone_arc(),
+                beacon_state.clone_arc(),
+                false,
+            )?;
+
+            let outcome =
+                pack_attestations_greedily(&controller, &attestation_packer, &pool, &beacon_state)
+                    .await?;
+
+            features::log!(
+                DebugAttestationPacker,
+                "pack outcome for slot: {slot}, parent: {parent_root:?}, attestations: {}, \
+                 deadline_reached: {}, elapsed: {} ms",
+                outcome.attestations.len(),
+                outcome.deadline_reached,
+                started_at.elapsed().as_millis(),
+            );
+
+            pool.set_best_proposable_attestations(outcome.attestations, slot, parent_root)
+                .await;
         }
-        let _timer = metrics.as_ref().map(|metrics| {
-            metrics
-                .att_pool_pack_proposable_attestations_times
-                .start_timer()
-        });
-        let slot = controller.slot().saturating_add(1);
-
-        // Greedy packing is a single deterministic pass, so — unlike the removed solver path —
-        // there is nothing to gain from an anytime loop; pre-compute once and store the result.
-        let attestation_packer = AttestationPacker::new(
-            controller.chain_config().clone_arc(),
-            beacon_state.clone_arc(),
-            false,
-        )?;
-
-        let outcome =
-            pack_attestations_greedily(&controller, &attestation_packer, &pool, &beacon_state)
-                .await?;
-
-        features::log!(
-            DebugAttestationPacker,
-            "pack outcome for slot: {slot}, attestations: {}, deadline_reached: {}, elapsed: {} ms",
-            outcome.attestations.len(),
-            outcome.deadline_reached,
-            started_at.elapsed().as_millis(),
-        );
-
-        pool.set_best_proposable_attestations(outcome.attestations, beacon_state.slot())
-            .await;
 
         Ok(())
     }

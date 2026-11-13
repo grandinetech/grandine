@@ -497,11 +497,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::PrepareExecutionPayload(
                         slot,
+                        parent_root,
+                        beacon_state,
                         safe_execution_payload_hash,
                         finalized_execution_payload_hash,
                     ) => {
                         self.prepare_execution_payload(
                             slot,
+                            parent_root,
+                            beacon_state,
                             safe_execution_payload_hash,
                             finalized_execution_payload_hash,
                         )
@@ -754,6 +758,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn prepare_execution_payload(
         &self,
         slot: Slot,
+        parent_root: H256,
+        beacon_state: Arc<BeaconState<P>>,
         safe_execution_payload_hash: ExecutionBlockHash,
         finalized_execution_payload_hash: ExecutionBlockHash,
     ) {
@@ -768,76 +774,79 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             ..
         } = local.as_ref();
 
-        let slot_head = self.safe_slot_head(slot).await;
+        // Fork choice picks the block to build on, which is not the head if it is to be re-orged.
+        let slot_head = SlotHead::from_state(
+            self.chain_source.chain_config.clone_arc(),
+            slot,
+            parent_root,
+            beacon_state.as_ref(),
+        );
 
-        if let Some((slot_head, beacon_state)) = slot_head {
-            let proposer_index = match slot_head.proposer_index(&beacon_state) {
-                Ok(proposer_index) => proposer_index,
-                Err(error) => {
-                    error_with_peers!(
-                        "failed to compute proposer index while preparing execution payload: {error:?}"
-                    );
-                    return;
-                }
-            };
-
-            let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload
-                .is_enabled()
-                || attestation_agg_pool
-                    .is_registered_validator(proposer_index)
-                    .await;
-
-            if !should_prepare_execution_payload {
+        let proposer_index = match slot_head.proposer_index(&beacon_state) {
+            Ok(proposer_index) => proposer_index,
+            Err(error) => {
+                error_with_peers!(
+                    "failed to compute proposer index while preparing execution payload: {error:?}"
+                );
                 return;
             }
+        };
 
-            let block_build_context = block_producer.new_build_context(
-                beacon_state.clone_arc(),
-                slot_head.beacon_block_root,
-                proposer_index,
-                BlockBuildOptions::default(),
-            );
-
-            let payload_attributes = match block_build_context
-                .prepare_execution_payload_attributes()
-                .await
-            {
-                Ok(Some(attributes)) => attributes,
-                Ok(None) => {
-                    debug_with_peers!("no payload attributes prepared");
-                    return;
-                }
-                Err(error) => {
-                    warn_with_peers!("failed to prepare execution payload attributes: {error:?}");
-                    return;
-                }
-            };
-
-            if let Some((parent_block_number, parent_block_hash)) =
-                block_build_context.execution_payload_parent()
-            {
-                event_channels.send_payload_attributes_event(
-                    slot_head.phase(),
-                    slot,
-                    proposer_index,
-                    slot_head.beacon_block_root,
-                    &payload_attributes,
-                    parent_block_number,
-                    parent_block_hash,
-                    safe_execution_payload_hash,
-                    finalized_execution_payload_hash,
-                );
-            }
-
-            block_build_context
-                .prepare_execution_payload_for_slot(
-                    slot,
-                    safe_execution_payload_hash,
-                    finalized_execution_payload_hash,
-                    payload_attributes,
-                )
+        let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
+            || attestation_agg_pool
+                .is_registered_validator(proposer_index)
                 .await;
+
+        if !should_prepare_execution_payload {
+            return;
         }
+
+        let block_build_context = block_producer.new_build_context(
+            beacon_state.clone_arc(),
+            slot_head.beacon_block_root,
+            proposer_index,
+            BlockBuildOptions::default(),
+        );
+
+        let payload_attributes = match block_build_context
+            .prepare_execution_payload_attributes()
+            .await
+        {
+            Ok(Some(attributes)) => attributes,
+            Ok(None) => {
+                debug_with_peers!("no payload attributes prepared");
+                return;
+            }
+            Err(error) => {
+                warn_with_peers!("failed to prepare execution payload attributes: {error:?}");
+                return;
+            }
+        };
+
+        if let Some((parent_block_number, parent_block_hash)) =
+            block_build_context.execution_payload_parent()
+        {
+            event_channels.send_payload_attributes_event(
+                slot_head.phase(),
+                slot,
+                proposer_index,
+                slot_head.beacon_block_root,
+                &payload_attributes,
+                parent_block_number,
+                parent_block_hash,
+                safe_execution_payload_hash,
+                finalized_execution_payload_hash,
+            );
+        }
+
+        block_build_context
+            .prepare_execution_payload_for_slot(
+                slot,
+                safe_execution_payload_hash,
+                finalized_execution_payload_hash,
+                payload_attributes,
+            )
+            .await;
     }
 
     fn handle_pool_addition_outcome_for_p2p(
@@ -4036,11 +4045,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    // Waits for the head to become fully validated or for a late current slot block.
-    // For the built-in beacon node it also settles whether the duty uses the head's full node.
+    // Waits for the block the duty relies on to become fully validated or for a late current slot
+    // block. That is the head, or its parent for a proposal that re-orgs the head.
+    // For the built-in beacon node it also settles whether the duty uses that block's full node.
     // That is the node whose payload status the wait checked.
-    // Returns `None` if the head is still optimistic when the wait times out,
-    // or if the block itself turns out to be invalid.
+    // Returns `None` if that block is still optimistic when the wait times out,
+    // or if it turns out to be invalid.
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
     async fn wait_for_fully_validated_head(
@@ -4068,12 +4078,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let head_root = node.head().beacon_block_root;
         let head_block_slot = node.state().latest_block_header().slot;
 
+        // A proposal that re-orgs the head builds on the head's parent.
+        // The head's own status does not matter to it, and late heads are often still optimistic.
+        let reorg_parent_root = match duty {
+            HeadDuty::Propose => Some(controller.proposer_head(slot))
+                .filter(|root| *root == node.state().latest_block_header().parent_root),
+            HeadDuty::Attest => None,
+        };
+
+        let checked_root = reorg_parent_root.unwrap_or(head_root);
+
         // Decided once: if a late block replaces the head as fork choice's head,
         // the old head must still be checked on the node the duty was going to use.
-        let mut full = duty_uses_full_node(controller, head_root, head_block_slot, slot, duty);
+        let mut full = if reorg_parent_root.is_some() {
+            controller
+                .snapshot()
+                .should_build_on_full_for(checked_root, slot)
+        } else {
+            duty_uses_full_node(controller, head_root, head_block_slot, slot, duty)
+        };
 
         let is_optimistic = controller
-            .node_payload_status(head_root, full)
+            .node_payload_status(checked_root, full)
             .is_some_and(PayloadStatus::is_optimistic);
 
         if !is_optimistic && !self.should_wait_for_late_block(tick) {
@@ -4139,21 +4165,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 // A rejected payload of its own only moves the duty to its empty node.
                 // `Invalid` there means the block itself is dead.
-                let status = match controller.node_payload_status(head_root, full) {
+                let status = match controller.node_payload_status(checked_root, full) {
                     Some(status) if full && status.is_invalid() => {
                         full = false;
-                        controller.node_payload_status(head_root, false)
+                        controller.node_payload_status(checked_root, false)
                     }
                     status => status,
                 };
 
                 match status {
                     Some(status) if status.is_valid() => {
-                        debug_with_peers!("fork choice head became fully validated");
+                        debug_with_peers!("block {checked_root:?} became fully validated");
                         break HeadWait::Validated;
                     }
                     Some(status) if status.is_invalid() => {
-                        debug_with_peers!("fork choice head was found to be invalid");
+                        debug_with_peers!("block {checked_root:?} was found to be invalid");
                         break HeadWait::Invalidated;
                     }
                     _ => {}
@@ -4212,7 +4238,8 @@ enum HeadWait<P: Preset, W: Wait> {
 
 // Whether a duty at `slot` uses the full node of this block.
 // That decides which payload the duty relies on.
-// Proposals use the node fork choice builds on, the same choice as the block producer.
+// Proposals on the head use the node fork choice builds on, the same choice as the block producer.
+// `Validator::wait_for_fully_validated_head` handles proposals that re-org the head separately.
 // Attestations use the node fork choice resolves the head to.
 // A block from `slot` itself is attested on its empty node.
 fn duty_uses_full_node<P: Preset, W: Wait>(

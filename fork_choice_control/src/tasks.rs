@@ -1061,6 +1061,8 @@ pub struct PreprocessStateTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub head_block_root: H256,
     pub next_slot: Slot,
+    // Set if `head_block_root` is the parent of this head, which a proposal may re-org.
+    pub reorged_head_root: Option<H256>,
     pub pubkey_cache: Arc<PubkeyCache>,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -1074,6 +1076,7 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
             mutator_tx,
             head_block_root,
             next_slot,
+            reorged_head_root,
             pubkey_cache,
             metrics,
         } = self;
@@ -1097,7 +1100,12 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
                     );
                 }
 
-                MutatorMessage::PreprocessedBeaconState { state }.send(&mutator_tx);
+                MutatorMessage::PreprocessedBeaconState {
+                    block_root: head_block_root,
+                    state,
+                    reorged_head_root,
+                }
+                .send(&mutator_tx);
             }
             Err(error) => {
                 warn_with_peers!("failed to preprocess beacon state for the next slot: {error:?}");

@@ -938,6 +938,7 @@ dependencies = [
  "features",
  "fork_choice_control",
  "futures",
+ "genesis",
  "grandine_version",
  "helper_functions",
  "hex-literal",
