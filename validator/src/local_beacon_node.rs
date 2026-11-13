@@ -30,7 +30,7 @@ use http_api_utils::{
 };
 use itertools::Itertools as _;
 use liveness_tracker::ApiToLiveness;
-use logging::{debug_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{AttestationKey, convert_to_electra_attestation};
 use p2p::{
     BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
@@ -163,6 +163,47 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
 
     pub const fn head_block_root(&self) -> H256 {
         self.slot_head.beacon_block_root
+    }
+
+    // The block a proposal for `slot` builds on, with its state at `slot`.
+    // That is the head, or its parent if the head is to be re-orged.
+    // `BlockProducer::reorg_parent_state` decides whether a re-org can build on the parent.
+    async fn proposal_parent(
+        &self,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+    ) -> (H256, Arc<BeaconState<P>>) {
+        let head_root = self.slot_head.beacon_block_root;
+        let head_parent_root = self.beacon_state.latest_block_header().parent_root;
+
+        if self.context.chain.controller.proposer_head(slot) != head_parent_root {
+            return (head_root, self.beacon_state.clone_arc());
+        }
+
+        match self
+            .context
+            .chain
+            .block_producer
+            .reorg_parent_state(head_parent_root, slot, proposer_index)
+            .await
+        {
+            Ok(parent_state) => {
+                info_with_peers!(
+                    "re-orging head {head_root:?} by building on its parent {head_parent_root:?} \
+                     at slot {slot}",
+                );
+
+                (head_parent_root, parent_state)
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "building on head {head_root:?} instead of re-orging it \
+                     by building on its parent {head_parent_root:?} at slot {slot}: {error:?}",
+                );
+
+                (head_root, self.beacon_state.clone_arc())
+            }
+        }
     }
 
     async fn publish_blob_data(
@@ -633,14 +674,15 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             self.slot_head.slot(),
         );
 
-        let beacon_state = &self.beacon_state;
         let proposer_index =
-            tokio::task::block_in_place(|| self.slot_head.proposer_index(beacon_state))?;
+            tokio::task::block_in_place(|| self.slot_head.proposer_index(&self.beacon_state))?;
+
+        let (parent_root, beacon_state) = self.proposal_parent(slot, proposer_index).await;
         let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
 
         let block_build_context = self.context.chain.block_producer.new_build_context(
-            beacon_state.clone_arc(),
-            self.slot_head.beacon_block_root,
+            beacon_state,
+            parent_root,
             proposer_index,
             BlockBuildOptions {
                 graffiti,

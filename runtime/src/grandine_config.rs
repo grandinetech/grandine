@@ -430,6 +430,10 @@ impl BeaconNodeConfig {
             info!("sync with reconstruction disabled");
         }
 
+        if store_config.disable_proposer_reorgs {
+            info!("proposer re-orgs disabled");
+        }
+
         if chain_config.is_peerdas_scheduled() {
             info!("custody mode: {custody_mode:?}");
         }

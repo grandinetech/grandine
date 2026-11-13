@@ -526,17 +526,43 @@ pub fn is_before_due_bps_in_slot(
     due_bps: u64,
     time: Duration,
 ) -> bool {
-    let Some(slot_start) = slot_start(config, genesis_time, slot) else {
-        return false;
-    };
+    time_into_slot(config, genesis_time, slot, time)
+        .is_some_and(|time_into_slot| time_into_slot < config.slot_component_duration(due_bps))
+}
+
+/// Whether `time` is at most `due_bps` basis points into `slot`.
+///
+/// Mirrors the spec's `time_into_slot_ms <= due_ms`, which compares whole milliseconds.
+/// Otherwise like [`is_before_due_bps_in_slot`].
+#[must_use]
+pub fn is_at_or_before_due_bps_in_slot(
+    config: &Config,
+    genesis_time: UnixSeconds,
+    slot: Slot,
+    due_bps: u64,
+    time: Duration,
+) -> bool {
+    time_into_slot(config, genesis_time, slot, time).is_some_and(|time_into_slot| {
+        time_into_slot.as_millis() <= config.slot_component_duration(due_bps).as_millis()
+    })
+}
+
+// `None` if `time` is too early to belong to `slot`.
+fn time_into_slot(
+    config: &Config,
+    genesis_time: UnixSeconds,
+    slot: Slot,
+    time: Duration,
+) -> Option<Duration> {
+    let slot_start = slot_start(config, genesis_time, slot)?;
 
     // A sender whose clock runs ahead may deliver slightly before the slot starts.
     // Gossip accepts that much disparity, so it still counts as timely.
     if time.saturating_add(config.maximum_gossip_clock_disparity) < slot_start {
-        return false;
+        return None;
     }
 
-    time.saturating_sub(slot_start) < config.slot_component_duration(due_bps)
+    Some(time.saturating_sub(slot_start))
 }
 
 /// Time left from `time` until `due_bps` basis points into `slot`.
@@ -1470,6 +1496,31 @@ mod tests {
             5000,
             Duration::from_millis(time_in_ms),
         )
+    }
+
+    // The whole millisecond at the due point counts, unlike in `is_before_due_bps_in_slot`.
+    #[test_case(Duration::from_secs(807);           "at the due point")]
+    #[test_case(Duration::from_micros(807_000_999); "inside the millisecond of the due point")]
+    fn is_at_or_before_due_bps_in_slot_accepts(time: Duration) {
+        assert!(is_at_or_before_due_bps_in_slot(
+            &custom_due_bps_config(),
+            777,
+            2,
+            5000,
+            time,
+        ));
+    }
+
+    #[test_case(Duration::from_millis(807_001); "1 ms after the due point")]
+    #[test_case(Duration::from_millis(800_499); "earlier than the clock disparity")]
+    fn is_at_or_before_due_bps_in_slot_rejects(time: Duration) {
+        assert!(!is_at_or_before_due_bps_in_slot(
+            &custom_due_bps_config(),
+            777,
+            2,
+            5000,
+            time,
+        ));
     }
 
     // `Slot::MAX` fails the slot conversion.

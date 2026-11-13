@@ -398,9 +398,11 @@ where
                     result,
                     origin,
                 } => self.handle_proposer_preferences(&wait_group, result, origin),
-                MutatorMessage::PreprocessedBeaconState { state } => {
-                    self.prepare_execution_payload_for_next_slot(&state);
-                }
+                MutatorMessage::PreprocessedBeaconState {
+                    block_root,
+                    state,
+                    reorged_head_root,
+                } => self.handle_preprocessed_state(block_root, &state, reorged_head_root),
                 MutatorMessage::NotifiedForkChoiceUpdate {
                     wait_group,
                     head_execution_block_hash,
@@ -700,7 +702,23 @@ where
         }
 
         if tick.is_last_tick::<P>(self.store.chain_config()) {
-            self.prepare_execution_payload_for_head(self.store.head().block_root);
+            let head_root = self.store.head().block_root;
+            let proposer_head = self.store.predicted_proposer_head();
+
+            // A proposal for the next slot may re-org the head and build on its parent.
+            // Whether it does is only known once the slot starts, so a payload is prepared on both.
+            // The head goes last for the execution engine to be left on the fork choice head.
+            if proposer_head != head_root {
+                debug_with_peers!(
+                    "preparing execution payload for slot {} on {proposer_head:?} \
+                     in case head {head_root:?} is re-orged",
+                    tick.slot.saturating_add(1),
+                );
+
+                self.prepare_execution_payload_for_possible_reorg(proposer_head, head_root);
+            }
+
+            self.prepare_execution_payload_for_head(head_root);
             self.track_collection_metrics();
         }
 
@@ -4130,7 +4148,7 @@ where
         let finalized_block_hash = store.finalized_execution_payload_hash();
 
         let head_block_hash = if let Some(post_gloas_state) = new_head_state.post_gloas() {
-            // Match the branch the current-slot proposer will build on.
+            // Match the branch a proposer building on the head will use.
             if store.should_build_on_full(store.slot()) {
                 post_gloas_state.latest_execution_payload_bid().block_hash
             } else {
@@ -5380,6 +5398,60 @@ where
         });
     }
 
+    fn handle_preprocessed_state(
+        &self,
+        block_root: H256,
+        state: &Arc<BeaconState<P>>,
+        reorged_head_root: Option<H256>,
+    ) {
+        let head_root = self.store.head().block_root;
+
+        match reorged_head_root {
+            // The task may finish after the head changed.
+            // Preparing a payload on the old head would move the execution engine back to it.
+            None if block_root == head_root => {
+                self.prepare_execution_payload_for_next_slot(block_root, state);
+            }
+            Some(reorged_head_root)
+                if reorged_head_root == head_root
+                    && state.slot() == self.store.slot().saturating_add(1) =>
+            {
+                self.prepare_execution_payload_for_next_slot(block_root, state);
+
+                // Leave the execution engine on the fork choice head.
+                self.prepare_execution_payload_for_head(head_root);
+            }
+            _ => debug_with_peers!(
+                "not preparing execution payload on {block_root:?} \
+                 because it is outdated (head: {head_root:?})",
+            ),
+        }
+    }
+
+    // The state is usually not cached if the head was imported before the `Attest` tick.
+    fn prepare_execution_payload_for_possible_reorg(&self, parent_root: H256, head_root: H256) {
+        let store = &self.store;
+        let next_slot = store.slot().saturating_add(1);
+
+        if let Some(state) = self
+            .state_cache
+            .existing_state_at_slot(store, parent_root, next_slot)
+        {
+            self.prepare_execution_payload_for_next_slot(parent_root, &state);
+        } else if store.is_forward_synced() {
+            self.spawn(PreprocessStateTask {
+                store_snapshot: self.owned_store(),
+                state_cache: self.state_cache.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                head_block_root: parent_root,
+                next_slot,
+                reorged_head_root: Some(head_root),
+                pubkey_cache: self.pubkey_cache.clone_arc(),
+                metrics: self.metrics.clone(),
+            });
+        }
+    }
+
     fn prepare_execution_payload_for_head(&self, head_block_root: H256) {
         let store = &self.store;
 
@@ -5388,11 +5460,15 @@ where
             head_block_root,
             store.slot().saturating_add(1),
         ) {
-            self.prepare_execution_payload_for_next_slot(&state);
+            self.prepare_execution_payload_for_next_slot(head_block_root, &state);
         }
     }
 
-    fn prepare_execution_payload_for_next_slot(&self, next_slot_state: &BeaconState<P>) {
+    fn prepare_execution_payload_for_next_slot(
+        &self,
+        block_root: H256,
+        next_slot_state: &Arc<BeaconState<P>>,
+    ) {
         let Some(state) = next_slot_state.post_bellatrix() else {
             return;
         };
@@ -5406,6 +5482,8 @@ where
 
         self.send_to_validator(ValidatorMessage::PrepareExecutionPayload(
             state.slot(),
+            block_root,
+            next_slot_state.clone_arc(),
             safe_block_hash,
             finalized_block_hash,
         ));
@@ -5443,6 +5521,7 @@ where
                 mutator_tx: self.owned_mutator_tx(),
                 head_block_root: self.store.head().block_root,
                 next_slot: self.store.slot(),
+                reorged_head_root: None,
                 pubkey_cache: self.pubkey_cache.clone_arc(),
                 metrics: self.metrics.clone(),
             })
@@ -5460,6 +5539,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             head_block_root: self.store.head().block_root,
             next_slot: self.store.slot().saturating_add(1),
+            reorged_head_root: None,
             pubkey_cache: self.pubkey_cache.clone_arc(),
             metrics: self.metrics.clone(),
         })

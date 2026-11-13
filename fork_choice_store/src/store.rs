@@ -2,6 +2,7 @@ use core::{
     cell::OnceCell,
     cmp::Ordering::{Equal, Greater, Less},
     ops::{Bound, RangeInclusive},
+    time::Duration,
 };
 use std::{
     backtrace::Backtrace,
@@ -1034,6 +1035,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // > Return whether the proposer should build on the parent's full payload (as
     // > opposed to its empty variant). The relevant ``head`` is ``get_head(store)``,
     // > i.e. the parent block the proposer is building on, so we resolve it here.
+    //
+    // A proposer re-org does not build on `get_head(store)`.
+    // Proposals use `Store::should_build_on_full_for` with the block they actually build on.
     pub fn should_build_on_full(&self, slot: Slot) -> bool {
         let (head, payload_status) = self.head_with_payload_status();
 
@@ -1055,6 +1059,59 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // See <https://github.com/ethereum/consensus-specs/pull/5210>.
         !self.payload_timeliness(head.block_root, false)
             && !self.payload_data_availability(head.block_root, false)
+    }
+
+    // Like `Store::should_build_on_full`, but for a proposal building on `parent_root`.
+    // A proposer re-org builds on the parent of the head.
+    // > preserve the payload status of the parent node when a proposer re-org is selected
+    #[must_use]
+    pub fn should_build_on_full_for(&self, parent_root: H256, slot: Slot) -> bool {
+        let head = self.head();
+
+        if parent_root != head.block_root && parent_root == head.parent_root() {
+            // A pre-Gloas parent has no empty node. Its payload is part of the block.
+            return head.parent_payload_presence != PayloadPresence::Empty;
+        }
+
+        self.should_build_on_full(slot)
+    }
+
+    /// [`get_proposer_head`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fork-choice.md#get_proposer_head)
+    ///
+    /// Returns the root of the block a proposal for `slot` should build on.
+    /// That is the parent of the head if the head is weak enough to be re-orged by proposer boost.
+    ///
+    /// Only valid once the store has reached `slot`. Called earlier, it returns the head.
+    ///
+    /// `time` is the time of the proposal, measured from the Unix epoch.
+    #[must_use]
+    pub fn proposer_head(&self, slot: Slot, time: Duration) -> H256 {
+        let head = self.head();
+
+        if self.slot() == slot && self.should_reorg_head(head, slot, Some(time)) {
+            head.parent_root()
+        } else {
+            head.block_root
+        }
+    }
+
+    /// Anticipates [`Store::proposer_head`] for the next slot.
+    ///
+    /// Used to prepare the execution payload for the next slot on the block it may extend.
+    /// The weights of the head and its parent are not known until the slot ends,
+    /// so this may return the parent even if [`Store::proposer_head`] will return the head.
+    /// It returns the parent whenever [`Store::proposer_head`] can, other than for
+    /// equivocations seen only after this is called.
+    #[must_use]
+    pub fn predicted_proposer_head(&self) -> H256 {
+        let head = self.head();
+        let slot = self.slot().saturating_add(1);
+
+        if self.should_reorg_head(head, slot, None) {
+            head.parent_root()
+        } else {
+            head.block_root
+        }
     }
 
     pub fn is_bid_compatible_with_head(&self, bid: &ExecutionPayloadBid<P>) -> bool {
@@ -1474,36 +1531,192 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         committee_weight.saturating_mul(committee_percent) / 100
     }
 
+    // The block with its `get_attestation_score` for its pending node.
+    // Only unfinalized blocks and the last finalized block have attestation scores.
+    fn attestation_score(&self, block_root: H256) -> Result<(&ChainLink<P>, Gwei)> {
+        if let Some(location) = self.unfinalized_locations.get(&block_root) {
+            let Location {
+                segment_id,
+                position,
+            } = location;
+
+            let block = &self.unfinalized[segment_id][*position];
+
+            return Ok((&block.chain_link, block.attesting_balances.pending));
+        }
+
+        if let Some(index) = (self.last_finalized().block_root == block_root)
+            .then(|| self.finalized_indices.get(&block_root))
+            .flatten()
+        {
+            return Ok((
+                &self.finalized[*index],
+                self.last_finalized_attesting_balances().pending,
+            ));
+        }
+
+        bail!(Error::<P>::BlockNotFound { block_root })
+    }
+
+    // The conditions of `get_proposer_head` for building on the parent of `head` at `slot`.
+    // They are checked from least to most expensive, as the specification allows.
+    //
+    // `proposal_time` is `None` when anticipating the decision during the slot of the head.
+    // The attestations from that slot are only applied once it ends, so the weights are not known.
+    // Like `should_override_forkchoice_update` in earlier specifications, the head is then assumed
+    // weak and the parent strong. Whether the proposal will be on time is not known either.
+    fn should_reorg_head(
+        &self,
+        head: &ChainLink<P>,
+        slot: Slot,
+        proposal_time: Option<Duration>,
+    ) -> bool {
+        if self.store_config.disable_proposer_reorgs {
+            return false;
+        }
+
+        let head_root = head.block_root;
+        let parent_root = head.parent_root();
+
+        // > Only re-org a single slot at most.
+        let current_time_ok = head.slot().saturating_add(1) == slot;
+
+        // > ensure boost has worn off
+        //
+        // When anticipating the decision, the boost of the head is still there but will be gone.
+        if !current_time_ok || proposal_time.is_some() && self.proposer_boost_root == head_root {
+            return false;
+        }
+
+        let Some(parent) = self.chain_link(parent_root) else {
+            return false;
+        };
+
+        // The tick of a new epoch pulls up finalization before a proposal in it can be made.
+        let finalized_epoch = if proposal_time.is_none() && misc::is_epoch_start::<P>(slot) {
+            self.finalized_epoch()
+                .max(self.unrealized_finalized_checkpoint.epoch)
+        } else {
+            self.finalized_epoch()
+        };
+
+        let is_reorg_allowed = self.is_head_late(head_root)
+            && Self::is_shuffling_stable(self.chain_config.phase_at_slot::<P>(slot), slot)
+            && Self::is_ffg_competitive(head, parent)
+            && self.is_finalization_ok(slot, finalized_epoch)
+            && proposal_time.is_none_or(|time| self.is_proposing_on_time(slot, time))
+            && parent.slot().saturating_add(1) == head.slot();
+
+        // > Re-org more aggressively if there is a proposer equivocation in the previous slot.
+        // The scan is only needed if the other conditions fail or the parent is not strong.
+        let is_proposer_equivocation = || {
+            self.exhibits_equivocation_on_blocks(
+                head.slot(),
+                head.block.message().proposer_index(),
+                head_root,
+                |_| true,
+            )
+        };
+
+        if !is_reorg_allowed && !is_proposer_equivocation() {
+            return false;
+        }
+
+        if proposal_time.is_none() {
+            return true;
+        }
+
+        // > Check that the head has few enough votes to be overpowered by our proposer boost.
+        match self.is_head_weak(head_root) {
+            Ok(true) => {}
+            Ok(false) => return false,
+            Err(error) => {
+                warn_with_peers!("proposer re-org check failed: {error:?}");
+                return false;
+            }
+        }
+
+        if !is_reorg_allowed {
+            return true;
+        }
+
+        // > Check that the missing votes are assigned to the parent and not being hoarded.
+        match self.is_parent_strong(parent_root) {
+            Ok(is_parent_strong) => is_parent_strong || is_proposer_equivocation(),
+            Err(error) => {
+                warn_with_peers!("proposer re-org check failed: {error:?}");
+                false
+            }
+        }
+    }
+
+    // > Only re-org the head block if it arrived later than the attestation deadline.
+    //
+    // Blocks without a record, like the anchor, are treated as timely.
+    fn is_head_late(&self, head_root: H256) -> bool {
+        self.block_timeliness
+            .get(&head_root)
+            .is_some_and(|timeliness| !timeliness.before_attestation_due)
+    }
+
+    // > Do not re-org on an epoch boundary where the proposer shuffling could change.
+    //
+    // Fulu no longer checks this. The proposer lookahead fixes proposers an epoch in advance.
+    fn is_shuffling_stable(phase: Phase, slot: Slot) -> bool {
+        phase >= Phase::Fulu || !misc::is_epoch_start::<P>(slot)
+    }
+
+    // > Ensure that the FFG information of the new head will be competitive with the current head.
+    fn is_ffg_competitive(head: &ChainLink<P>, parent: &ChainLink<P>) -> bool {
+        head.unrealized_justified_checkpoint == parent.unrealized_justified_checkpoint
+    }
+
+    // > Do not re-org if the chain is not finalizing with acceptable frequency.
+    fn is_finalization_ok(&self, slot: Slot, finalized_epoch: Epoch) -> bool {
+        let epochs_since_finalization = Self::epoch_at_slot(slot).saturating_sub(finalized_epoch);
+
+        epochs_since_finalization <= self.chain_config.reorg_max_epochs_since_finalization
+    }
+
+    // > Only re-org if we are proposing on-time.
+    //
+    // `PROPOSER_REORG_CUTOFF_BPS` is not an interval start, so ticks cannot place it exactly.
+    // No tick emitted by default even ends before it, as `Propose` lasts until `ProposeFourth`.
+    fn is_proposing_on_time(&self, slot: Slot, time: Duration) -> bool {
+        clock::is_at_or_before_due_bps_in_slot(
+            &self.chain_config,
+            self.last_finalized().state(self).genesis_time(),
+            slot,
+            self.chain_config.proposer_reorg_cutoff_bps,
+            time,
+        )
+    }
+
+    fn is_parent_strong(&self, parent_root: H256) -> Result<bool> {
+        let parent_threshold =
+            self.calculate_committee_fraction(self.chain_config.reorg_parent_weight_threshold);
+
+        let (_, parent_weight) = self.attestation_score(parent_root)?;
+
+        Ok(parent_weight > parent_threshold)
+    }
+
     fn is_head_weak(&self, head_root: H256) -> Result<bool> {
         let reorg_threshold =
             self.calculate_committee_fraction(self.chain_config.reorg_head_weight_threshold);
 
-        let (head, mut head_weight) =
-            if let Some(location) = self.unfinalized_locations.get(&head_root) {
-                let Location {
-                    segment_id,
-                    position,
-                } = location;
-
-                let head = &self.unfinalized[segment_id][*position];
-
-                (&head.chain_link, head.attesting_balances.pending)
-            } else if let Some(index) = (self.last_finalized().block_root == head_root)
-                .then(|| self.finalized_indices.get(&head_root))
-                .flatten()
-            {
-                (
-                    &self.finalized[*index],
-                    self.last_finalized_attesting_balances().pending,
-                )
-            } else {
-                bail!(Error::<P>::BlockNotFound {
-                    block_root: head_root
-                });
-            };
+        let (head, mut head_weight) = self.attestation_score(head_root)?;
 
         if !self.equivocating_indices.is_empty() {
             let head_state = head.state(self);
+
+            // > justified_state.validators[index].effective_balance
+            // > for index in committee
+            // > if index in store.equivocating_indices
+            //
+            // Unlike vote weights, this counts equivocators slashed or inactive in the justified state.
+            // `Store.justified_active_balances` would count them as 0.
+            let justified_validators = self.justified_state().validators();
 
             for committee in accessors::beacon_committees(&head_state, head.slot())? {
                 head_weight = head_weight.saturating_add(
@@ -1513,13 +1726,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             self.equivocating_indices.contains(validator_index)
                         })
                         .map(|validator_index| {
-                            let index: usize = validator_index
-                                .try_into()
-                                .expect("validator index should fit into usize");
-
-                            self.justified_active_balances
-                                .get(index)
-                                .copied()
+                            justified_validators
+                                .effective_balance(validator_index)
                                 .unwrap_or_default()
                         })
                         .sum::<Gwei>(),

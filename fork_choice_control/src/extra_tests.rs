@@ -11,8 +11,10 @@
 #![expect(clippy::similar_names)]
 #![expect(clippy::too_many_lines)]
 
+use core::time::Duration;
 use std::sync::Arc;
 
+use clock::{Tick, TickKind};
 #[cfg(feature = "eth2-cache")]
 use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
@@ -4112,4 +4114,527 @@ async fn gloas_data_column_sidecar_for_anchor_at_finalized_slot_is_accepted() {
         context.on_data_column_sidecar(data_column_sidecar).await,
         Some(P2pMessage::Accept(_)),
     ));
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+// ```
+//
+// 2 arrives after the attestation deadline and gets no votes.
+// The attesters of slots 1 and 2 vote for 1, which makes it strong.
+// A proposal at slot 3 re-orgs 2 and builds on the node of 1 that 2 extended.
+// Once the proposal is no longer on time, it builds on 2.
+#[test]
+fn gloas_proposal_reorgs_late_weak_head_onto_parent_node() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    for slot in 1..=2 {
+        let attesters = accessors::beacon_committees(&state_1, slot)
+            .expect("committees of the current epoch can be computed")
+            .flatten()
+            .collect_vec();
+
+        for validator_index in attesters {
+            // Attesters of slot 2 vote for the full node of 1, which 2 extends.
+            if slot == 1 {
+                context.on_acceptable_singular_attestation(
+                    &state_1,
+                    GENESIS_EPOCH,
+                    validator_index,
+                );
+            } else {
+                context.on_acceptable_singular_attestation_for_payload(
+                    &state_1,
+                    GENESIS_EPOCH,
+                    validator_index,
+                );
+            }
+        }
+    }
+
+    context.assert_head(2, root_2);
+
+    context.assert_predicted_proposer_head(root_1);
+
+    context.on_slot(3);
+
+    context.assert_head(2, root_2);
+    context.assert_proposer_head(root_1);
+
+    context.assert_builds_on_full(root_1, 3, true);
+
+    // The `Propose` tick lasts past the cutoff, so the time of the proposal has to decide.
+    let cutoff = context.proposer_reorg_cutoff();
+
+    context.assert_proposer_head_at(cutoff, root_1);
+    context.assert_proposer_head_at(cutoff.saturating_add(Duration::from_millis(1)), root_2);
+
+    context.on_tick(Tick {
+        slot: 3,
+        kind: TickKind::Attest,
+    });
+
+    context.assert_proposer_head(root_2);
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+// ```
+//
+// 2 arrives after the attestation deadline, but nobody votes for 1 either.
+// At the end of slot 2, the payload for slot 3 is prepared on 1 in case the proposal re-orgs 2.
+// The head goes last, which leaves the execution engine on it.
+// 1 is not strong, so the proposal builds on 2 after all.
+#[test]
+fn gloas_proposal_keeps_late_head_if_parent_is_not_strong() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    context.assert_predicted_proposer_head(root_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::PayloadAttestFourth,
+    });
+
+    assert_eq!(context.next_prepared_payload_after(3, root_1), (3, root_2));
+
+    context.on_slot(3);
+
+    context.assert_proposer_head(root_2);
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+// ```
+//
+// The state of 1 at slot 3 is preprocessed at the `Attest` tick of slot 2, while 1 is the head.
+// 2 arrives after that, as late heads do, so the payload for slot 3 is prepared on 1
+// from the cached state at the last tick. The head goes last, leaving the execution engine on it.
+#[test]
+fn gloas_proposal_prepares_payload_on_parent_from_cached_state() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Attest,
+    });
+
+    context.wait_for_prepared_payload(3, root_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    context.wait_for_prepared_payload(3, root_2);
+
+    context.assert_head(2, root_2);
+    context.assert_predicted_proposer_head(root_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::PayloadAttestFourth,
+    });
+
+    assert_eq!(context.next_prepared_payload(), (3, root_1));
+    assert_eq!(context.next_prepared_payload(), (3, root_2));
+}
+
+// ```text
+// 0 -e- 1 -e- 2
+//   \
+//    e- 3'
+// ```
+//
+// `PreprocessStateTask`s may finish after the head has changed.
+// Preparing payloads on what they preprocessed would move the execution engine off the head.
+// 3' is never imported. It only provides a state at slot 3 that descends from 0.
+#[test]
+fn gloas_outdated_preprocessed_states_do_not_prepare_payloads() {
+    let mut context = Context::gloas_minimal();
+
+    let (block_0, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, 2, H256::default());
+    let (_, state_3_on_0) = context.empty_block(&state_0, 3, H256::default());
+    let (_, state_3_on_1) = context.empty_block(&state_1, 3, H256::default());
+    let (_, state_3_on_2) = context.empty_block(&state_2, 3, H256::default());
+
+    let root_0 = block_0.message().hash_tree_root();
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+
+    context.on_slot(2);
+    context.on_acceptable_block(&block_2);
+
+    // Wait for the payload prepared for the new head, which leaves no `PreprocessStateTask` running.
+    context.wait_for_prepared_payload(3, root_2);
+
+    context.assert_head(2, root_2);
+
+    // A task spawned while 1 was the head.
+    context.on_preprocessed_state(root_1, &state_3_on_1, None);
+
+    // A task spawned while 1 was the head and a proposal might re-org it.
+    context.on_preprocessed_state(root_0, &state_3_on_0, Some(root_1));
+
+    context.on_slot(3);
+
+    // A task spawned in slot 2 for a proposal in slot 3 that might re-org 2.
+    context.on_preprocessed_state(root_1, &state_3_on_1, Some(root_2));
+
+    // A task for the head is still acted on.
+    context.on_preprocessed_state(root_2, &state_3_on_2, None);
+
+    assert_eq!(context.next_prepared_payload(), (3, root_2));
+}
+
+// ```text
+// 0 -e- 1 -e- 2
+// ```
+//
+// 1 has a payload, but 2 extends its empty node.
+// A proposal that re-orgs 2 has to keep building on that node.
+#[test]
+fn gloas_proposal_reorg_preserves_empty_parent_node() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    let attesters = accessors::beacon_committees(&state_2, 2)
+        .expect("committees of the current epoch can be computed")
+        .flatten()
+        .collect_vec();
+
+    for validator_index in attesters {
+        context.on_acceptable_singular_attestation(&state_2, GENESIS_EPOCH, validator_index);
+    }
+
+    context.on_slot(3);
+
+    context.assert_head(2, root_2);
+    context.assert_builds_on_full(root_1, 3, false);
+}
+
+// ```text
+// 0 -e- 1 -e- 2a
+//         \
+//          e- 2b
+// ```
+//
+// The proposer of slot 2 equivocates. 2a and 2b are on time and nobody votes for them.
+// The boost of the head has not worn off when the payload for slot 3 is prepared,
+// but a proposal for slot 3 re-orgs the head, so the payload has to be prepared on 1 as well.
+#[test]
+fn gloas_proposal_reorgs_timely_equivocating_head() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2a, _) = context.empty_block(&state_1, 2, H256::default());
+    let (block_2b, _) = context.empty_block(&state_1, 2, H256::repeat_byte(1));
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2a = block_2a.message().hash_tree_root();
+    let root_2b = block_2b.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+
+    context.on_slot(2);
+    context.on_acceptable_block(&block_2a);
+    context.on_acceptable_block(&block_2b);
+
+    context.assert_predicted_proposer_head(root_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::PayloadAttestFourth,
+    });
+
+    // The execution engine has to be left on the head, which is either of 2a and 2b.
+    let (_, next_root) = context.next_prepared_payload_after(3, root_1);
+
+    assert!([root_2a, root_2b].contains(&next_root));
+
+    context.on_slot(3);
+
+    context.assert_proposer_head(root_1);
+}
+
+// ```text
+// 0 -e- 1 -e- 2
+// ```
+//
+// 2 is late and weak, and the attesters of slots 1 and 2 vote for 1, which makes it strong.
+// With re-orgs enabled, a proposal at slot 3 would build on 1, but they are disabled.
+// The proposal has to build on 2, and the prediction keeps a payload from being prepared on 1.
+#[test]
+fn gloas_proposal_keeps_late_weak_head_if_reorgs_are_disabled() {
+    let mut context = Context::gloas_minimal_without_proposer_reorgs();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    // 2 extends the empty node of 1, so the attesters of slot 2 vote for that node.
+    for slot in 1..=2 {
+        let attesters = accessors::beacon_committees(&state_1, slot)
+            .expect("committees of the current epoch can be computed")
+            .flatten()
+            .collect_vec();
+
+        for validator_index in attesters {
+            context.on_acceptable_singular_attestation(&state_1, GENESIS_EPOCH, validator_index);
+        }
+    }
+
+    context.assert_head(2, root_2);
+    context.assert_predicted_proposer_head(root_2);
+
+    context.on_slot(3);
+
+    context.assert_head(2, root_2);
+    context.assert_proposer_head(root_2);
+}
+
+// ```text
+// 0 -e- 1 -e- 2
+// ```
+//
+// Two members of the committee of slot 2 are slashed in the justified state.
+// 2 is late and gets no votes. The other attesters of slots 1 and 2 vote for 1, making it strong.
+// A proposal at slot 3 re-orgs 2 until the two are known to equivocate.
+// `is_head_weak` then counts their effective balances for 2, even though they are slashed.
+// That lifts 2 to 64 ETH, above the threshold of 20% of 62 * 32 ETH / 8, which is 49.6 ETH.
+#[test]
+fn gloas_proposal_counts_equivocators_slashed_in_justified_state_for_head() {
+    let slot_2_attesters;
+    let proposers;
+
+    // Slashing does not change committees or proposers, so they can be found beforehand.
+    {
+        let context = Context::gloas_minimal();
+        let (_, state_0) = context.genesis();
+
+        slot_2_attesters = accessors::beacon_committees(&state_0, 2)
+            .expect("committees of the current epoch can be computed")
+            .flatten()
+            .collect_vec();
+
+        proposers = (1..=3)
+            .map(|slot| {
+                let (block, _) = context.empty_block(&state_0, slot, H256::default());
+                block.message().proposer_index()
+            })
+            .collect_vec();
+    }
+
+    // Slashed validators cannot propose.
+    let equivocators = slot_2_attesters
+        .iter()
+        .copied()
+        .filter(|validator_index| !proposers.contains(validator_index))
+        .take(2)
+        .collect_vec();
+
+    assert_eq!(equivocators.len(), 2);
+
+    let mut context = Context::gloas_minimal_with_slashed_validators(&equivocators);
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+
+    context.on_tick(Tick {
+        slot: 2,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_2);
+
+    for slot in 1..=2 {
+        let attesters = accessors::beacon_committees(&state_1, slot)
+            .expect("committees of the current epoch can be computed")
+            .flatten()
+            .filter(|validator_index| !equivocators.contains(validator_index))
+            .collect_vec();
+
+        for validator_index in attesters {
+            context.on_acceptable_singular_attestation(&state_1, GENESIS_EPOCH, validator_index);
+        }
+    }
+
+    context.on_slot(3);
+
+    context.assert_head(2, root_2);
+    context.assert_proposer_head(root_1);
+
+    context.on_equivocating_validators(equivocators);
+
+    context.assert_head(2, root_2);
+    context.assert_proposer_head(root_2);
+}
+
+// ```text
+// 0 - 23 - 30 - 31
+// ```
+//
+// 23 justifies epoch 2. 30 carries enough attestations to justify epoch 3 and finalize epoch 2.
+// 31 arrives late, in the last slot of the epoch, and is competitive with 30.
+// The finalized checkpoint is still far behind, but the tick of slot 32 will pull it up.
+#[test]
+fn proposal_reorg_is_predicted_for_first_slot_of_epoch_on_finalizing_chain() {
+    let mut context = Context::fulu_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_23, state_23) = context.block_justifying_current_epoch(&state_0, 2, H256::default());
+    let (block_30, state_30) =
+        context.block_with_attestations_from_current_epoch(&state_23, 30, H256::default());
+    let (block_31, _) = context.empty_block(&state_30, 31, H256::default());
+
+    let root_30 = block_30.message().hash_tree_root();
+    let root_31 = block_31.message().hash_tree_root();
+
+    context.on_slot(30);
+    context.on_acceptable_block(&block_23);
+    context.on_acceptable_block(&block_30);
+
+    context.on_tick(Tick {
+        slot: 31,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_31);
+
+    context.assert_head(31, root_31);
+    context.assert_finalized_epoch(GENESIS_EPOCH);
+    context.assert_predicted_proposer_head(root_30);
+
+    context.on_slot(32);
+
+    context.assert_finalized_epoch(2);
+}
+
+// ```text
+// 0 - 30 - 31
+// ```
+//
+// 31 arrives late, in the last slot of the epoch, but nothing is about to be finalized.
+// A proposal for slot 32 will not re-org 31, so no payload has to be prepared on 30.
+#[test]
+fn proposal_reorg_is_not_predicted_for_first_slot_of_epoch_on_non_finalizing_chain() {
+    let mut context = Context::fulu_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_30, state_30) = context.empty_block(&state_0, 30, H256::default());
+    let (block_31, _) = context.empty_block(&state_30, 31, H256::default());
+
+    let root_31 = block_31.message().hash_tree_root();
+
+    context.on_slot(30);
+    context.on_acceptable_block(&block_30);
+
+    context.on_tick(Tick {
+        slot: 31,
+        kind: TickKind::Aggregate,
+    });
+
+    context.on_acceptable_block(&block_31);
+
+    context.assert_predicted_proposer_head(root_31);
 }

@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context as _, Error as AnyhowError, Result, anyhow};
+use anyhow::{Context as _, Error as AnyhowError, Result, anyhow, ensure};
 use bls::{
     AggregateSignature, PublicKeyBytes, SignatureBytes,
     traits::{Signature as _, SignatureBytes as _},
@@ -117,6 +117,10 @@ use crate::misc::{
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
+// The block to build on, the slot, and post-Gloas the execution block the payload extends.
+// A Gloas block has an empty and a full node, and the one to build on can change after preparing.
+type PayloadIdCacheKey = (H256, Slot, Option<ExecutionBlockHash>);
+
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
 pub type BuilderApiBidsJoinHandle<P> = JoinHandle<Vec<BuilderApiBid<P>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
@@ -190,6 +194,56 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     #[must_use]
     pub fn payload_builder_api(&self) -> &Arc<PayloadBuilderApi> {
         &self.producer_context.payload_builder_api
+    }
+
+    /// The state at `slot` of `parent_root`, if a proposal by `proposer_index` can build on it.
+    ///
+    /// A proposer re-org builds on the parent of the head. The HTTP API and the built-in
+    /// validator both decide with this, and build on the head instead if it fails. It fails if
+    /// - the state of `parent_root` at `slot` is unavailable;
+    /// - it names a proposer other than `proposer_index`, the proposer on the head's state;
+    /// - before Gloas, the execution engine does not start a payload on `parent_root`.
+    ///   See [`BlockBuildContext::ensure_local_execution_payload_id`].
+    pub async fn reorg_parent_state(
+        &self,
+        parent_root: H256,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+    ) -> Result<Arc<BeaconState<P>>> {
+        let beacon_state = self
+            .producer_context
+            .controller
+            .preprocessed_state_for_block_production(parent_root, slot)
+            .await?;
+
+        let parent_proposer_index = accessors::get_beacon_proposer_index(
+            &self.producer_context.chain_config,
+            &beacon_state,
+        )?;
+
+        ensure!(
+            parent_proposer_index == proposer_index,
+            "the proposer at slot {slot} is {parent_proposer_index} on the parent \
+             but {proposer_index} on the head",
+        );
+
+        // The payload ID does not depend on the build options.
+        let payload_obtainable = self
+            .new_build_context(
+                beacon_state.clone_arc(),
+                parent_root,
+                proposer_index,
+                BlockBuildOptions::default(),
+            )
+            .ensure_local_execution_payload_id()
+            .await;
+
+        ensure!(
+            payload_obtainable,
+            "the execution engine did not start a payload on the parent",
+        );
+
+        Ok(beacon_state)
     }
 
     pub fn new_build_context(
@@ -820,7 +874,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     attester_slashings: Mutex<Vec<AttesterSlashing<P>>>,
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
     payload_cache: PayloadCache<P>,
-    payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
+    payload_id_cache: Mutex<SizedCache<PayloadIdCacheKey, PayloadId>>,
     // Cached payload root by `BlockBuildContext.head_block_root` for `payload_cache` retrieval
     // used to construct execution payload envelope
     cached_payload_roots: Mutex<SizedCache<H256, H256>>,
@@ -867,6 +921,8 @@ pub struct BuilderApiBid<P: Preset> {
 pub struct BlockBuildContext<P: Preset, W: Wait> {
     producer_context: Arc<ProducerContext<P, W>>,
     beacon_state: Arc<BeaconState<P>>,
+    // The block the new block builds on.
+    // That is the head, or its parent if a proposer re-org is to orphan the head.
     head_block_root: H256,
     proposer_index: ValidatorIndex,
     options: BlockBuildOptions,
@@ -1269,13 +1325,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     })),
                     Phase::Gloas => {
                         let snapshot = self.producer_context.controller.snapshot();
-                        let parent_block = self.producer_context.controller.head_block();
+                        let parent_slot = self.beacon_state.latest_block_header().slot;
 
                         // TODO(gloas): payload attestations are valid only for one slot after block.
                         // spec says: "The slot of the parent block is exactly one slot before the proposing slot."
-                        let payload_attestations = if parent_block.value().to_header().message.slot
-                            == misc::previous_slot(slot)
-                        {
+                        let payload_attestations = if parent_slot == misc::previous_slot(slot) {
                             self.prepare_payload_attestations().await?.into()
                         } else {
                             ProgressiveList::default()
@@ -1283,7 +1337,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                         info_with_peers!("block producer prepared payload attestations");
 
-                        let parent_execution_requests = if snapshot.should_build_on_full(slot) {
+                        let build_on_full = snapshot.should_build_on_full_for(parent_root, slot);
+
+                        let parent_execution_requests = if build_on_full {
                             // TODO(gloas): the block root needs to be checked if it is gloas or not.
                             // the current behavior erroneously returns empty execution requests
                             // when payload envelope is not found, though block may be from gloas
@@ -1467,13 +1523,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             None => {
                 // In ePBS (post-Gloas) the payload is decoupled from the beacon block, so a
                 // missing local payload is not fatal here: it is handled below by skipping
-                // self-build (and the proposal) rather than erroring. Before Gloas a post-merge
-                // block must carry a payload, so its absence is an error.
-                let payload_required = !self.beacon_state.is_post_gloas()
-                    && (self.beacon_state.post_capella().is_some()
-                        || post_merge_state(&self.beacon_state).is_some());
-
-                if payload_required {
+                // self-build (and the proposal) rather than erroring.
+                if self.is_local_execution_payload_required() {
                     return Err(AnyhowError::msg("no execution payload to include in block"));
                 }
 
@@ -2182,7 +2233,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let target_gas_limit = self.gas_limit()?;
                 let snapshot = self.producer_context.controller.snapshot();
 
-                let withdrawals = if snapshot.should_build_on_full(state.slot())
+                let withdrawals = if snapshot.should_build_on_full_for(head_root, state.slot())
                     && let Some(envelope) = snapshot.stored_envelope_by_root(head_root)?
                 {
                     debug_with_peers!(
@@ -2273,7 +2324,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let parent_slot = state.latest_block_header().slot;
         let snapshot = self.producer_context.controller.snapshot();
 
-        if snapshot.should_build_on_full(state.slot())
+        if snapshot.should_build_on_full_for(self.head_block_root, state.slot())
             || self
                 .producer_context
                 .chain_config
@@ -2286,6 +2337,90 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
+    // Before Gloas a post-merge block must carry a payload, and without a local one
+    // `BlockBuildContext::produce_beacon_block` fails, even if a builder offers a header.
+    fn is_local_execution_payload_required(&self) -> bool {
+        !self.beacon_state.is_post_gloas()
+            && (self.beacon_state.post_capella().is_some()
+                || post_merge_state(&self.beacon_state).is_some())
+    }
+
+    /// Whether the execution engine has started building a payload for this block, if it needs one.
+    ///
+    /// Uses the payload ID prepared for this block, or asks the execution engine for one now
+    /// and caches it for [`Self::get_local_execution_payload`].
+    /// That request is the one block production would otherwise make, so it has no extra effect.
+    ///
+    /// A proposer re-org builds on a canonical ancestor of the execution engine's head.
+    /// Some execution clients do not build on such a block, which leaves the proposal without
+    /// a payload. Checking this first lets the proposal build on the head instead.
+    pub async fn ensure_local_execution_payload_id(&self) -> bool {
+        // Fake payloads are made without the execution engine.
+        if self.producer_context.fake_execution_payloads
+            || !self.is_local_execution_payload_required()
+        {
+            return true;
+        }
+
+        let cache_key = self.payload_id_cache_key();
+
+        if self
+            .producer_context
+            .payload_id_cache
+            .lock()
+            .await
+            .cache_get(&cache_key)
+            .is_some()
+        {
+            return true;
+        }
+
+        let payload_attributes = match self.prepare_execution_payload_attributes().await {
+            Ok(Some(payload_attributes)) => payload_attributes,
+            Ok(None) => return false,
+            Err(error) => {
+                warn_with_peers!("unable to prepare payload attributes: {error:?}");
+                return false;
+            }
+        };
+
+        let snapshot = self.producer_context.controller.snapshot();
+
+        let payload_id = match self
+            .prepare_execution_payload(
+                snapshot.safe_execution_payload_hash(),
+                snapshot.finalized_execution_payload_hash(),
+                payload_attributes,
+            )
+            .await
+        {
+            Ok(Some(payload_id)) => payload_id,
+            Ok(None) => return false,
+            Err(error) => {
+                warn_with_peers!("error while preparing execution payload: {error:?}");
+                return false;
+            }
+        };
+
+        self.producer_context
+            .payload_id_cache
+            .lock()
+            .await
+            .cache_set(cache_key, payload_id);
+
+        true
+    }
+
+    fn payload_id_cache_key(&self) -> PayloadIdCacheKey {
+        let state = self.beacon_state.as_ref();
+
+        let parent_hash = state
+            .post_gloas()
+            .map(|state| self.gloas_payload_parent_hash(state));
+
+        (self.head_block_root, state.slot(), parent_hash)
+    }
+
     #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_for_slot(
         &self,
@@ -2295,6 +2430,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         payload_attributes: PayloadAttributes<P>,
     ) {
         let head_root = self.head_block_root;
+        let cache_key = self.payload_id_cache_key();
 
         let payload_id = self
             .prepare_execution_payload(
@@ -2317,15 +2453,33 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             .payload_id_cache
                             .lock()
                             .await
-                            .cache_set((head_root, slot), payload_id);
+                            .cache_set(cache_key, payload_id);
                     }
                     // If we have no block at 4th-second mark, we preprocess new state without the block.
                     // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
                     // outdated EL head block hash, which EL client might discard as too old if it has seen newer blocks.
-                    None => warn_with_peers!(
-                        "could not prepare execution payload: payload_id is None; \
-                         ensure that multiple consensus clients are not driving the same execution client",
-                    ),
+                    //
+                    // The same happens when preparing on the parent of the head for a proposer re-org.
+                    // Some execution clients do not build on an ancestor of their head.
+                    None => {
+                        let fork_choice_head_root =
+                            self.producer_context.controller.head().value.block_root;
+
+                        if head_root == fork_choice_head_root {
+                            warn_with_peers!(
+                                "could not prepare execution payload: payload_id is None; \
+                                 ensure that multiple consensus clients are not driving \
+                                 the same execution client",
+                            );
+                        } else {
+                            warn_with_peers!(
+                                "could not prepare execution payload on {head_root:?} \
+                                 for slot {slot}: payload_id is None; the execution client \
+                                 may not build on a block other than the fork choice head \
+                                 {fork_choice_head_root:?}, as for a proposer re-org",
+                            );
+                        }
+                    }
                 }
             }
             Err(error) => warn_with_peers!("error while preparing execution payload: {error:?}"),
@@ -2446,8 +2600,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
 
         let state = self.beacon_state.post_gloas()?;
-        let parent_block_hash =
-            bid_parent_block_hash(&self.producer_context.controller.snapshot(), state);
+        let parent_block_hash = bid_parent_block_hash(
+            &self.producer_context.controller.snapshot(),
+            state,
+            self.head_block_root,
+        );
 
         let proposer_pubkey = match accessors::public_key(state, self.proposer_index) {
             Ok(pubkey) => *pubkey,
@@ -2490,7 +2647,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return None;
         }
 
-        let parent_block_hash = bid_parent_block_hash(&snapshot, state);
+        let parent_block_hash = bid_parent_block_hash(&snapshot, state, self.head_block_root);
 
         let BlockBuildOptions {
             builder_boost_factor,
@@ -2660,7 +2817,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .payload_id_cache
             .lock()
             .await
-            .cache_get(&(self.head_block_root, self.beacon_state.slot()))
+            .cache_get(&self.payload_id_cache_key())
             .copied()
             .map(PayloadIdEntry::Cached);
 
@@ -3044,8 +3201,9 @@ async fn request_builder_api_bids<P: Preset>(
 fn bid_parent_block_hash<P: Preset>(
     snapshot: &Snapshot<P>,
     state: &(impl PostGloasBeaconState<P> + ?Sized),
+    parent_root: H256,
 ) -> ExecutionBlockHash {
-    if snapshot.should_build_on_full(state.slot()) {
+    if snapshot.should_build_on_full_for(parent_root, state.slot()) {
         state.latest_execution_payload_bid().block_hash
     } else {
         state.latest_execution_payload_bid().parent_block_hash
@@ -3270,50 +3428,18 @@ mod gloas_scoring_tests {
         let anchor =
             Arc::new(BeaconBlock::from(Hc::new(anchor)).with_signature(SignatureBytes::empty()));
         let state = Arc::new(BeaconState::Gloas(Hc::new(state)));
-        let engine = Arc::new(Eth1ExecutionEngine::new(
-            config.clone_arc(),
-            Arc::new(eth1_api::Eth1Api::new(
-                config.clone_arc(),
-                reqwest::Client::new(),
-                Arc::default(),
-                None,
-                None,
-                None,
-            )),
-            futures::channel::mpsc::unbounded().0,
-        ));
-        let events = Arc::new(fork_choice_control::EventChannels::default());
-        let storage = Arc::new(fork_choice_control::Storage::new(
-            config.clone_arc(),
-            pubkeys.clone_arc(),
-            database::Database::in_memory(),
-            fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            Default::default(),
-            true,
-            fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,
-        ));
-        let (controller, _mutator) = fork_choice_control::Controller::<P, _, _, WaitGroup>::new(
-            config.clone_arc(),
-            pubkeys.clone_arc(),
-            Default::default(),
+        let test_chain::TestChain {
+            controller,
+            mutator_handle: _mutator,
+            execution_engine: engine,
+            event_channels: events,
+        } = test_chain::TestChain::new(
+            &config,
+            &pubkeys,
             anchor,
             state,
             clock::Tick::start_of_slot(proposal_slot),
-            events.clone_arc(),
-            engine.clone_arc(),
-            None,
             futures::channel::mpsc::unbounded().0,
-            futures::sink::drain(),
-            futures::sink::drain(),
-            futures::sink::drain(),
-            futures::sink::drain(),
-            futures::sink::drain(),
-            storage,
-            core::iter::empty(),
-            true,
-            Default::default(),
-            Arc::default(),
-            Some(2),
         )?;
         let executor = Arc::new(DedicatedExecutor::new("gloas integration", 2, None, None));
         // Only the attestation task fails; the producer and other pools must keep running.
@@ -3588,6 +3714,32 @@ mod gloas_scoring_tests {
         );
         controller.wait_for_tasks();
         assert_eq!(controller.head().value.block_root, built_root);
+        let cache_key = |state: &Arc<BeaconState<P>>| {
+            producer
+                .new_build_context(
+                    state.clone_arc(),
+                    built_root,
+                    0,
+                    BlockBuildOptions::default(),
+                )
+                .payload_id_cache_key()
+        };
+        let empty_state = controller
+            .preprocessed_state_at_next_slot_blocking(controller.head().value.block_root)?;
+        let empty_bid = empty_state
+            .post_gloas()
+            .expect("fixture state is post-Gloas")
+            .latest_execution_payload_bid();
+        assert_ne!(empty_bid.block_hash, empty_bid.parent_block_hash);
+        // Without an envelope a payload can only extend the empty node of the block.
+        assert_eq!(
+            cache_key(&empty_state),
+            (
+                built_root,
+                empty_state.slot(),
+                Some(empty_bid.parent_block_hash),
+            ),
+        );
         let (envelope, _, _) = producer
             .build_local_execution_payload_envelope_contents(built_root, root)
             .await
@@ -3617,8 +3769,24 @@ mod gloas_scoring_tests {
         controller.wait_for_tasks();
         controller.on_slot(25);
         controller.wait_for_tasks();
-        let proposal_state = controller.preprocessed_state_at_next_slot_blocking()?;
+        let proposal_state = controller
+            .preprocessed_state_at_next_slot_blocking(controller.head().value.block_root)?;
         assert!(controller.snapshot().should_build_on_full(26));
+        // Once the full node is chosen, the ID prepared on the empty node must not be reused.
+        assert_eq!(
+            cache_key(&proposal_state),
+            (
+                built_root,
+                proposal_state.slot(),
+                Some(
+                    proposal_state
+                        .post_gloas()
+                        .expect("fixture state is post-Gloas")
+                        .latest_execution_payload_bid()
+                        .block_hash,
+                ),
+            ),
+        );
         let proposer = accessors::get_beacon_proposer_index(&config, &proposal_state)?;
         let preferences = ProposerPreferences {
             dependent_root: controller
@@ -3939,5 +4107,403 @@ mod gloas_scoring_tests {
             GloasExecutionRequests::default()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod payload_id_tests {
+    use core::time::Duration;
+
+    use crossbeam_utils::sync::WaitGroup;
+    use execution_engine::ExecutionServiceMessage;
+    use fork_choice_control::controller::MutatorHandle;
+    use futures::channel::mpsc::UnboundedReceiver;
+    use types::{preset::Minimal, traits::SignedBeaconBlock as _};
+
+    use super::{test_chain::TestChain, *};
+
+    const TIMEOUT: Duration = Duration::from_secs(30);
+
+    struct Fixture {
+        producer: BlockProducer<Minimal, WaitGroup>,
+        context: BlockBuildContext<Minimal, WaitGroup>,
+        parent_root: H256,
+        proposer_index: ValidatorIndex,
+        execution_service_rx: UnboundedReceiver<ExecutionServiceMessage<Minimal>>,
+        // Keep the mutator running until the end of the test.
+        _mutator_handle: MutatorHandle<Minimal, WaitGroup>,
+    }
+
+    impl Fixture {
+        // A build context for a proposal at slot 1 on the genesis block.
+        fn new(phase: Phase, fake_execution_payloads: bool) -> Result<Self> {
+            let config = Arc::new(ChainConfig::minimal().start_and_stay_in(phase));
+            let pubkey_cache = Arc::new(PubkeyCache::default());
+            let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)?;
+            let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+            let genesis_root = genesis_block.message().hash_tree_root();
+
+            let (execution_service_tx, execution_service_rx) = futures::channel::mpsc::unbounded();
+
+            let TestChain {
+                controller,
+                mutator_handle,
+                execution_engine,
+                event_channels,
+            } = TestChain::new(
+                &config,
+                &pubkey_cache,
+                genesis_block,
+                genesis_state,
+                clock::Tick::start_of_slot(1),
+                execution_service_tx,
+            )?;
+
+            let executor = Arc::new(DedicatedExecutor::new("payload ID tests", 2, None, None));
+
+            let attestation_agg_pool =
+                AttestationAggPool::new(controller.clone_arc(), executor.clone_arc(), None, None);
+
+            let (pool_tx, _) = futures::channel::mpsc::unbounded();
+
+            let sync_committee_agg_pool = SyncCommitteeAggPool::new(
+                executor.clone_arc(),
+                controller.clone_arc(),
+                pool_tx.clone(),
+                None,
+                None,
+            );
+
+            let (bls_to_execution_change_pool, _) = BlsToExecutionChangePool::new(
+                controller.clone_arc(),
+                event_channels,
+                pool_tx,
+                None,
+            );
+
+            let payload_attestation_agg_pool =
+                PayloadAttestationAggPool::new(controller.clone_arc(), executor.clone_arc(), None);
+
+            let proposer_configs = Arc::new(ProposerConfigs::new(
+                None,
+                Some(30_000_000),
+                H256::zero(),
+                keymanager::BuilderSettings::default(),
+                Arc::new(keymanager::ValidatorDefinitionsWithStorage::new(
+                    Arc::default(),
+                    keymanager::DefinitionsStorage::default(),
+                )),
+            ));
+
+            let producer = BlockProducer::new(
+                proposer_configs,
+                None,
+                Arc::new(PayloadBuilderApi::new(
+                    config.clone_arc(),
+                    reqwest::Client::new(),
+                    builder_api::BuilderApiFormat::default(),
+                    None,
+                )),
+                controller.clone_arc(),
+                executor,
+                execution_engine,
+                attestation_agg_pool,
+                bls_to_execution_change_pool,
+                sync_committee_agg_pool,
+                payload_attestation_agg_pool,
+                None,
+                Some(Options {
+                    fake_execution_payloads,
+                }),
+            );
+
+            let beacon_state = controller.preprocessed_state_at_current_slot_blocking()?;
+            let proposer_index = accessors::get_beacon_proposer_index(&config, &beacon_state)?;
+
+            let context = producer.new_build_context(
+                beacon_state,
+                genesis_root,
+                proposer_index,
+                BlockBuildOptions::default(),
+            );
+
+            Ok(Self {
+                producer,
+                context,
+                parent_root: genesis_root,
+                proposer_index,
+                execution_service_rx,
+                _mutator_handle: mutator_handle,
+            })
+        }
+
+        // Answers the next `engine_forkchoiceUpdated` call with payload attributes.
+        // Calls the mutator makes on its own carry none and are skipped.
+        async fn answer_payload_preparation(&mut self, payload_id: Option<PayloadId>) {
+            loop {
+                let message = tokio::time::timeout(TIMEOUT, self.execution_service_rx.next())
+                    .await
+                    .expect("execution payload should be prepared")
+                    .expect("execution service channel should be open");
+
+                if let ExecutionServiceMessage::NotifyForkchoiceUpdated {
+                    payload_attributes: Either::Right(_),
+                    sender,
+                    ..
+                } = message
+                {
+                    sender
+                        .expect("payload preparation should wait for a payload ID")
+                        .send(payload_id)
+                        .expect("payload preparation should still be waiting");
+
+                    return;
+                }
+            }
+        }
+
+        fn assert_no_payload_preparation(&mut self) {
+            while let Ok(message) = self.execution_service_rx.try_recv() {
+                assert!(
+                    !matches!(
+                        message,
+                        ExecutionServiceMessage::NotifyForkchoiceUpdated {
+                            payload_attributes: Either::Right(_),
+                            ..
+                        },
+                    ),
+                    "no execution payload should be prepared",
+                );
+            }
+        }
+
+        // For calls that must not wait for the execution engine, which never answers on its own.
+        async fn ensure_without_payload_preparation(&mut self) -> bool {
+            let ensured =
+                tokio::time::timeout(TIMEOUT, self.context.ensure_local_execution_payload_id())
+                    .await
+                    .expect("no execution payload should be prepared");
+
+            self.assert_no_payload_preparation();
+
+            ensured
+        }
+
+        async fn cached_payload_id(&self) -> Option<PayloadId> {
+            self.producer
+                .producer_context
+                .payload_id_cache
+                .lock()
+                .await
+                .cache_get(&self.context.payload_id_cache_key())
+                .copied()
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::default_trait_access,
+        reason = "the type in `PayloadId` is not a dependency of this crate"
+    )]
+    async fn payload_id_is_requested_and_cached_if_missing() -> Result<()> {
+        let mut fixture = Fixture::new(Phase::Electra, false)?;
+        let payload_id = PayloadId::Electra(Default::default());
+
+        let context = fixture.context.clone();
+        let ensured =
+            tokio::spawn(async move { context.ensure_local_execution_payload_id().await });
+
+        fixture.answer_payload_preparation(Some(payload_id)).await;
+
+        assert!(ensured.await?);
+        assert!(matches!(
+            fixture.cached_payload_id().await,
+            Some(PayloadId::Electra(_)),
+        ));
+
+        // Block production will use the cached ID, so it is not requested again.
+        assert!(fixture.ensure_without_payload_preparation().await);
+
+        Ok(())
+    }
+
+    // Some execution clients do not build on a canonical ancestor of their head.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn payload_id_is_not_ensured_if_execution_engine_returns_none() -> Result<()> {
+        let mut fixture = Fixture::new(Phase::Electra, false)?;
+
+        let context = fixture.context.clone();
+        let ensured =
+            tokio::spawn(async move { context.ensure_local_execution_payload_id().await });
+
+        fixture.answer_payload_preparation(None).await;
+
+        assert!(!ensured.await?);
+        assert!(fixture.cached_payload_id().await.is_none());
+
+        Ok(())
+    }
+
+    // A Gloas block does not carry the payload.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn payload_id_is_not_needed_after_gloas() -> Result<()> {
+        assert_payload_id_is_not_needed(Phase::Gloas, false).await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn payload_id_is_not_needed_for_fake_execution_payloads() -> Result<()> {
+        assert_payload_id_is_not_needed(Phase::Electra, true).await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reorg_parent_state_is_returned_for_the_same_proposer() -> Result<()> {
+        // No payload ID is needed after Gloas, so the execution engine does not have to answer.
+        let mut fixture = Fixture::new(Phase::Gloas, false)?;
+
+        let parent_state = tokio::time::timeout(
+            TIMEOUT,
+            fixture
+                .producer
+                .reorg_parent_state(fixture.parent_root, 1, fixture.proposer_index),
+        )
+        .await??;
+
+        assert_eq!(parent_state.slot(), 1);
+        assert_eq!(
+            accessors::latest_block_root(parent_state.as_ref()),
+            fixture.parent_root,
+        );
+        fixture.assert_no_payload_preparation();
+
+        Ok(())
+    }
+
+    // The randao reveal and signature are by the proposer on the head's state.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reorg_parent_state_is_refused_for_another_proposer() -> Result<()> {
+        let mut fixture = Fixture::new(Phase::Electra, false)?;
+        let other_proposer_index = fixture.proposer_index.wrapping_add(1);
+
+        let result = tokio::time::timeout(
+            TIMEOUT,
+            fixture
+                .producer
+                .reorg_parent_state(fixture.parent_root, 1, other_proposer_index),
+        )
+        .await?;
+
+        let error = result.expect_err("a proposal by another proposer cannot build on the parent");
+
+        assert!(
+            error.to_string().starts_with("the proposer at slot 1 is "),
+            "unexpected error: {error:?}",
+        );
+
+        // The proposer is checked before the execution engine is asked for a payload.
+        fixture.assert_no_payload_preparation();
+
+        Ok(())
+    }
+
+    async fn assert_payload_id_is_not_needed(
+        phase: Phase,
+        fake_execution_payloads: bool,
+    ) -> Result<()> {
+        let mut fixture = Fixture::new(phase, fake_execution_payloads)?;
+
+        assert!(fixture.ensure_without_payload_preparation().await);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test_chain {
+    use crossbeam_utils::sync::WaitGroup;
+    use execution_engine::ExecutionServiceMessage;
+    use fork_choice_control::{Controller, EventChannels, Storage, controller::MutatorHandle};
+    use futures::channel::mpsc::UnboundedSender;
+    use types::{combined::SignedBeaconBlock, nonstandard::StorageMode};
+
+    use super::*;
+
+    pub struct TestChain<P: Preset> {
+        pub controller: ApiController<P, WaitGroup>,
+        pub mutator_handle: MutatorHandle<P, WaitGroup>,
+        pub execution_engine: Arc<Eth1ExecutionEngine<P>>,
+        pub event_channels: Arc<EventChannels<P>>,
+    }
+
+    impl<P: Preset> TestChain<P> {
+        // A controller over an in-memory database, starting at `tick`.
+        // Its execution engine sends its requests to `execution_service_tx`.
+        #[expect(
+            clippy::default_trait_access,
+            reason = "`StoreConfig` is in `fork_choice_store`, which this crate does not depend on"
+        )]
+        pub fn new(
+            config: &Arc<ChainConfig>,
+            pubkey_cache: &Arc<PubkeyCache>,
+            anchor_block: Arc<SignedBeaconBlock<P>>,
+            anchor_state: Arc<BeaconState<P>>,
+            tick: clock::Tick,
+            execution_service_tx: UnboundedSender<ExecutionServiceMessage<P>>,
+        ) -> Result<Self> {
+            let execution_engine = Arc::new(Eth1ExecutionEngine::new(
+                config.clone_arc(),
+                Arc::new(eth1_api::Eth1Api::new(
+                    config.clone_arc(),
+                    reqwest::Client::new(),
+                    Arc::default(),
+                    None,
+                    None,
+                    None,
+                )),
+                execution_service_tx,
+            ));
+
+            let event_channels = Arc::new(EventChannels::default());
+
+            let storage = Arc::new(Storage::new(
+                config.clone_arc(),
+                pubkey_cache.clone_arc(),
+                database::Database::in_memory(),
+                fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+                StorageMode::default(),
+                true,
+                fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            ));
+
+            let (controller, mutator_handle) = Controller::new(
+                config.clone_arc(),
+                pubkey_cache.clone_arc(),
+                Default::default(),
+                anchor_block,
+                anchor_state,
+                tick,
+                event_channels.clone_arc(),
+                execution_engine.clone_arc(),
+                None,
+                futures::channel::mpsc::unbounded().0,
+                futures::sink::drain(),
+                futures::sink::drain(),
+                futures::sink::drain(),
+                futures::sink::drain(),
+                futures::sink::drain(),
+                storage,
+                core::iter::empty(),
+                true,
+                HashSet::default(),
+                Arc::default(),
+                Some(2),
+            )?;
+
+            Ok(Self {
+                controller,
+                mutator_handle,
+                execution_engine,
+                event_channels,
+            })
+        }
     }
 }

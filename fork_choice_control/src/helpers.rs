@@ -1,5 +1,8 @@
-use core::ops::Range;
-use std::sync::{Arc, Mutex};
+use core::{ops::Range, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use anyhow::Result;
 use clock::Tick;
@@ -9,8 +12,10 @@ use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
-use fork_choice_store::{AttestationItem, AttestationOrigin, PayloadPresence};
-use futures::channel::mpsc::UnboundedReceiver;
+use fork_choice_store::{
+    AttestationItem, AttestationOrigin, AttesterSlashingOrigin, PayloadPresence, StoreConfig,
+};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use helper_functions::{misc, signing::SignForSingleFork as _};
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
@@ -37,19 +42,42 @@ use types::{
         },
     },
     preset::{Minimal, Preset},
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
 
 use crate::{
     controller::MutatorHandle,
     events::{Event, EventChannels, Topic},
-    messages::P2pMessage,
+    messages::{MutatorMessage, P2pMessage, ValidatorMessage},
     misc::{MutatorIgnoreReason, MutatorRejectionReason},
     queries::BlockWithRoot,
     specialized::{TestController, TestExecutionEngine},
     storage::StoredBlock,
+    unbounded_sink::UnboundedSink,
 };
+
+// Keeps only what the tests look at.
+// Other messages hold `WaitGroup`s, which would make `Controller::wait_for_tasks` hang.
+struct PreparedPayloadSink(UnboundedSender<(Slot, H256)>);
+
+impl<P: Preset> UnboundedSink<ValidatorMessage<P, WaitGroup>> for PreparedPayloadSink {
+    fn clone(&self) -> Self {
+        Self(Clone::clone(&self.0))
+    }
+
+    fn unbounded_send(
+        &self,
+        message: ValidatorMessage<P, WaitGroup>,
+    ) -> Result<(), ValidatorMessage<P, WaitGroup>> {
+        if let ValidatorMessage::PrepareExecutionPayload(slot, block_root, ..) = message {
+            // The receiver lives as long as the `Context`, and a dropped one is of no interest.
+            let _unused = self.0.unbounded_send((slot, block_root));
+        }
+
+        Ok(())
+    }
+}
 
 pub struct Context<P: Preset> {
     pubkey_cache: Arc<PubkeyCache>,
@@ -61,6 +89,7 @@ pub struct Context<P: Preset> {
     mutator_handle: MutatorHandle<P, WaitGroup>,
     execution_engine: TestExecutionEngine<P>,
     p2p_rx: UnboundedReceiver<P2pMessage<P>>,
+    prepared_payload_rx: UnboundedReceiver<(Slot, H256)>,
     service_rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
     // Subscribed from the start. Events are only sent while someone listens.
     block_rx: Receiver<Event<P>>,
@@ -82,14 +111,21 @@ impl<P: Preset> Drop for Context<P> {
 
 impl<P: Preset> Context<P> {
     fn with_config(config: Config) -> Result<Self> {
+        let store_config = StoreConfig::aggressive(&config);
+
+        Self::with_configs(config, store_config)
+    }
+
+    fn with_configs(config: Config, store_config: StoreConfig) -> Result<Self> {
         let config = Arc::new(config);
         let pubkey_cache = Arc::new(PubkeyCache::default());
         let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)?;
         let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
 
-        Ok(Self::new(
+        Ok(Self::with_store_config(
             config,
             pubkey_cache,
+            store_config,
             genesis_block,
             genesis_state,
             true,
@@ -106,6 +142,28 @@ impl<P: Preset> Context<P> {
         optimistic_merge_block_validation: bool,
         thread_pool_size: Option<usize>,
     ) -> Self {
+        let store_config = StoreConfig::aggressive(&config);
+
+        Self::with_store_config(
+            config,
+            pubkey_cache,
+            store_config,
+            anchor_block,
+            anchor_state,
+            optimistic_merge_block_validation,
+            thread_pool_size,
+        )
+    }
+
+    fn with_store_config(
+        config: Arc<Config>,
+        pubkey_cache: Arc<PubkeyCache>,
+        store_config: StoreConfig,
+        anchor_block: Arc<SignedBeaconBlock<P>>,
+        anchor_state: Arc<BeaconState<P>>,
+        optimistic_merge_block_validation: bool,
+        thread_pool_size: Option<usize>,
+    ) -> Self {
         let (service_tx, service_rx) = futures::channel::mpsc::unbounded();
 
         let execution_engine = Arc::new(Mutex::new(MockExecutionEngine::new(
@@ -115,6 +173,7 @@ impl<P: Preset> Context<P> {
         )));
 
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
+        let (prepared_payload_tx, prepared_payload_rx) = futures::channel::mpsc::unbounded();
 
         let event_channels = Arc::new(EventChannels::default());
         let block_rx = event_channels.receiver_for(Topic::Block);
@@ -130,6 +189,8 @@ impl<P: Preset> Context<P> {
             anchor_state,
             execution_engine.clone_arc(),
             p2p_tx,
+            PreparedPayloadSink(prepared_payload_tx),
+            store_config,
             event_channels,
             thread_pool_size,
         );
@@ -149,6 +210,7 @@ impl<P: Preset> Context<P> {
             controller: Some(controller),
             mutator_handle,
             p2p_rx,
+            prepared_payload_rx,
             service_rx,
             execution_engine,
             block_rx,
@@ -307,6 +369,23 @@ impl<P: Preset> Context<P> {
             epoch,
             graffiti,
             None,
+        )
+        .expect("block should be constructed successfully")
+    }
+
+    #[must_use]
+    pub fn block_with_attestations_from_current_epoch(
+        &self,
+        pre_state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        graffiti: H256,
+    ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
+        factory::block_with_attestations_from_current_epoch(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state.clone_arc(),
+            slot,
+            graffiti,
         )
         .expect("block should be constructed successfully")
     }
@@ -1068,6 +1147,20 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message().unwrap_none();
     }
 
+    // Adds `validator_indices` to `Store.equivocating_indices` like a validated attester slashing.
+    // Fork choice only accepts slashings of validators not slashed in the justified state.
+    // This makes equivocators of validators slashed in it without advancing justification.
+    pub fn on_equivocating_validators(&self, validator_indices: Vec<ValidatorIndex>) {
+        MutatorMessage::AttesterSlashing {
+            wait_group: self.controller().owned_wait_group(),
+            result: Ok(validator_indices),
+            origin: AttesterSlashingOrigin::Test(BlsSetting::Required),
+        }
+        .send(&self.controller().owned_mutator_tx());
+
+        self.controller().wait_for_tasks();
+    }
+
     pub fn on_notified_valid_payload(&self, block: &SignedBeaconBlock<P>) {
         let execution_block_hash = Self::execution_block_hash(block);
 
@@ -1166,6 +1259,114 @@ impl<P: Preset> Context<P> {
 
     pub fn assert_proposer_boost_root(&self, expected_root: H256) {
         assert_eq!(self.controller().proposer_boost_root(), expected_root);
+    }
+
+    // The specification calls `get_proposer_head` for the current slot at the time of the store.
+    // `Controller::proposer_head` cannot be used because it reads the system clock.
+    pub fn assert_proposer_head(&self, expected_root: H256) {
+        let controller = self.controller();
+        let offset_in_slot = controller
+            .tick()
+            .offset_in_slot::<P>(controller.chain_config());
+
+        self.assert_proposer_head_at(offset_in_slot, expected_root);
+    }
+
+    pub fn proposer_reorg_cutoff(&self) -> Duration {
+        let chain_config = self.controller().chain_config();
+
+        chain_config.slot_component_duration(chain_config.proposer_reorg_cutoff_bps)
+    }
+
+    pub fn assert_proposer_head_at(&self, offset_in_slot: Duration, expected_root: H256) {
+        let controller = self.controller();
+        let slot = controller.slot();
+
+        // The time left until the start of the slot, counted from the Unix epoch.
+        let slot_start = clock::duration_until_due_bps(
+            controller.chain_config(),
+            controller.genesis_time(),
+            slot,
+            0,
+            Duration::ZERO,
+        );
+
+        let time = slot_start.saturating_add(offset_in_slot);
+
+        assert_eq!(
+            controller.store_snapshot().proposer_head(slot, time),
+            expected_root,
+        );
+    }
+
+    pub fn assert_finalized_epoch(&self, expected_epoch: Epoch) {
+        assert_eq!(self.controller().finalized_epoch(), expected_epoch);
+    }
+
+    pub fn assert_predicted_proposer_head(&self, expected_root: H256) {
+        assert_eq!(
+            self.controller().store_snapshot().predicted_proposer_head(),
+            expected_root,
+        );
+    }
+
+    // Waits until an execution payload is prepared on `parent_root` and returns the block
+    // the next one is prepared on. The mutator sends the two messages one right after the other.
+    pub fn next_prepared_payload_after(&mut self, slot: Slot, parent_root: H256) -> (Slot, H256) {
+        self.wait_for_prepared_payload(slot, parent_root);
+        self.next_prepared_payload()
+    }
+
+    // Skips execution payloads prepared before the one on `parent_root`.
+    pub fn wait_for_prepared_payload(&mut self, slot: Slot, parent_root: H256) {
+        while self.next_prepared_payload() != (slot, parent_root) {}
+    }
+
+    // Sends what a `PreprocessStateTask` sends when it finishes.
+    // The mutator handles messages in order, so an execution payload prepared in response
+    // to a later message shows that none was prepared in response to this one.
+    pub fn on_preprocessed_state(
+        &self,
+        block_root: H256,
+        state: &Arc<BeaconState<P>>,
+        reorged_head_root: Option<H256>,
+    ) {
+        MutatorMessage::PreprocessedBeaconState {
+            block_root,
+            state: state.clone_arc(),
+            reorged_head_root,
+        }
+        .send(&self.controller().owned_mutator_tx());
+    }
+
+    // `Controller::wait_for_tasks` does not cover `PreprocessStateTask`, which sends some of these.
+    pub fn next_prepared_payload(&mut self) -> (Slot, H256) {
+        const TIMEOUT: Duration = Duration::from_secs(60);
+        const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+        let started_at = Instant::now();
+
+        loop {
+            if let Ok(prepared_payload) = self.prepared_payload_rx.try_recv() {
+                return prepared_payload;
+            }
+
+            assert!(
+                started_at.elapsed() < TIMEOUT,
+                "no execution payload was prepared",
+            );
+
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+
+    pub fn assert_builds_on_full(&self, parent_root: H256, slot: Slot, expected_full: bool) {
+        assert_eq!(
+            self.controller()
+                .snapshot()
+                .should_build_on_full_for(parent_root, slot),
+            expected_full,
+        );
     }
 
     pub fn assert_payload_timeliness_vote(
@@ -1691,6 +1892,51 @@ impl Context<Minimal> {
     pub fn gloas_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Gloas))
             .expect("minimal configuration modified to start in Gloas is valid")
+    }
+
+    #[must_use]
+    pub fn gloas_minimal_without_proposer_reorgs() -> Self {
+        let config = Config::minimal().start_and_stay_in(Phase::Gloas);
+
+        let store_config = StoreConfig {
+            disable_proposer_reorgs: true,
+            ..StoreConfig::aggressive(&config)
+        };
+
+        Self::with_configs(config, store_config)
+            .expect("minimal configuration modified to start in Gloas is valid")
+    }
+
+    // Like `Context::gloas_minimal`, but with `validator_indices` slashed in the anchor state.
+    // That is also the justified state. The validators stay active and in committees.
+    #[must_use]
+    pub fn gloas_minimal_with_slashed_validators(validator_indices: &[ValidatorIndex]) -> Self {
+        let config = Arc::new(Config::minimal().start_and_stay_in(Phase::Gloas));
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+
+        let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)
+            .expect("minimal configuration modified to start in Gloas is valid");
+
+        let mut anchor_state = genesis_state.as_ref().clone();
+
+        for validator_index in validator_indices.iter().copied() {
+            anchor_state
+                .validators_mut()
+                .partial_validator_mut(validator_index)
+                .expect("slashed validators should be in the genesis state")
+                .slashed = true;
+        }
+
+        let anchor_block = Arc::new(genesis::beacon_block(&anchor_state));
+
+        Self::new(
+            config,
+            pubkey_cache,
+            anchor_block,
+            Arc::new(anchor_state),
+            true,
+            None,
+        )
     }
 
     #[must_use]
