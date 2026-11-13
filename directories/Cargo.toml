@@ -9,3 +9,6 @@ anyhow = { workspace = true }
 dirs = { workspace = true }
 fs_extra = { workspace = true }
 types = { workspace = true }
+
+[lints]
+workspace = true

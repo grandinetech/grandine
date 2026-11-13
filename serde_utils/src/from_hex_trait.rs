@@ -7,7 +7,7 @@ use serde_with::{DeserializeAs, SerializeAs};
 // Neither `serde` nor `serde_with` have a way to map the functions in a `with`-compatible module
 // over the contents of an `Option`. `serde_with::hex::Hex` requires the type being deserialized to
 // implement `TryFrom<Vec<u8>>` rather than `FromHex`.
-pub enum FromHexTrait {}
+pub struct FromHexTrait;
 
 impl<'de, T: FromHex<Error: Display>> DeserializeAs<'de, T> for FromHexTrait {
     fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {

@@ -3,7 +3,7 @@ use core::fmt::Display;
 use serde::Serializer;
 use serde_with::SerializeAs;
 
-pub enum AlternateDisplay {}
+pub struct AlternateDisplay;
 
 impl<T: Display> SerializeAs<T> for AlternateDisplay {
     fn serialize_as<S: Serializer>(value: &T, serializer: S) -> Result<S::Ok, S::Error> {

@@ -18,3 +18,7 @@ blst = ['c_grandine/blst']
 constantine = ['c_grandine/constantine']
 mcl = ['c_grandine/mcl']
 zkcrypto = ['c_grandine/zkcrypto']
+
+# Workspace lints forbid `unsafe_code`, which FFI bindings need.
+[lints.cargo]
+missing_lints_inheritance = 'allow'

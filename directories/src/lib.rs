@@ -72,10 +72,13 @@ impl Directories {
         let network_usage = dir_usage(self.network_dir.as_ref())?.unwrap_or_default();
         let validator_usage = dir_usage(self.validator_dir.as_ref())?.unwrap_or_default();
 
-        Ok(store_usage + network_usage + validator_usage)
+        Ok(store_usage
+            .saturating_add(network_usage)
+            .saturating_add(validator_usage))
     }
 }
 
+#[must_use]
 pub fn data_directory(data_dir: Option<&PathBuf>) -> PathBuf {
     data_dir
         .cloned()

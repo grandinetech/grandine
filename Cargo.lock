@@ -1000,9 +1000,7 @@ dependencies = [
 name = "bls-core"
 version = "0.0.0"
 dependencies = [
- "derivative",
  "hex",
- "once_cell",
  "serde",
  "ssz",
  "static_assertions",
@@ -6793,13 +6791,9 @@ name = "prometheus_metrics"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "features",
- "futures",
  "logging",
  "once_cell",
  "prometheus",
- "tokio",
- "tokio-stream",
  "tracing",
  "types",
 ]
