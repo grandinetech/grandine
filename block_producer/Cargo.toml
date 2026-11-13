@@ -48,6 +48,7 @@ clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }
 factory = { workspace = true }
+genesis = { workspace = true }
 
 [features]
 stub-grandine-version = ['grandine_version/stub-grandine-version', 'hex-literal', 'test-case']

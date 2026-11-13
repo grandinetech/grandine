@@ -231,6 +231,12 @@ pub struct BeaconNodeOptions {
     #[clap(help_heading = "Block production", long)]
     disable_blockprint_graffiti: bool,
 
+    /// Disable proposer boost re-orgs. If specified, own blocks always build on the head.
+    /// By default a head with little support that arrived after the attestation deadline
+    /// or comes from an equivocating proposer is re-orged by building on its parent.
+    #[clap(help_heading = "Block production", long)]
+    disable_proposer_reorgs: bool,
+
     /// Force checkpoint sync. Requires --checkpoint-sync-url
     /// [default: disabled]
     #[clap(long, requires = "checkpoint_sync_url")]
@@ -465,6 +471,7 @@ impl BeaconNodeOptions {
             terminal_block_hash_activation_epoch_override: _,
             disable_wait_for_late_blocks: _,
             disable_blockprint_graffiti: _,
+            disable_proposer_reorgs,
             force_checkpoint_sync,
             state_slot,
             back_sync,
@@ -666,6 +673,7 @@ impl BeaconNodeOptions {
                 unfinalized_states_in_memory,
                 kzg_backend,
                 sync_without_reconstruction,
+                disable_proposer_reorgs,
                 builder_circuit_breaker,
             },
             reconstruction_delay: Duration::from_millis(reconstruction_delay),
@@ -2814,6 +2822,22 @@ mod tests {
         let node = beacon_node(&config);
 
         assert!(node.store_config.builder_circuit_breaker.disabled);
+    }
+
+    #[test]
+    fn disable_proposer_reorgs_reaches_the_store_config() {
+        let config = config_from_args(["--disable-proposer-reorgs"]);
+        let node = beacon_node(&config);
+
+        assert!(node.store_config.disable_proposer_reorgs);
+    }
+
+    #[test]
+    fn proposer_reorgs_are_enabled_by_default() {
+        let config = config_from_args([]);
+        let node = beacon_node(&config);
+
+        assert!(!node.store_config.disable_proposer_reorgs);
     }
 
     #[test]

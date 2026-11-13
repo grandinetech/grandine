@@ -194,7 +194,10 @@ pub enum MutatorMessage<P: Preset, W> {
         origin: ProposerPreferencesOrigin,
     },
     PreprocessedBeaconState {
+        block_root: H256,
         state: Arc<BeaconState<P>>,
+        // Set if `block_root` is the parent of this head, which a proposal may re-org.
+        reorged_head_root: Option<H256>,
     },
     NotifiedForkChoiceUpdate {
         wait_group: W,
@@ -302,7 +305,14 @@ pub enum ValidatorMessage<P: Preset, W> {
     FinalizedCheckpoint(Checkpoint),
     ValidAttestation(W, Arc<Attestation<P>>),
     ValidPayloadAttestation(W, Arc<PayloadAttestationMessage>),
-    PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
+    // The block to build on, its state at the slot, and the safe and finalized block hashes.
+    PrepareExecutionPayload(
+        Slot,
+        H256,
+        Arc<BeaconState<P>>,
+        ExecutionBlockHash,
+        ExecutionBlockHash,
+    ),
     Stop,
 }
 

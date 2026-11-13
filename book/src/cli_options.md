@@ -227,6 +227,7 @@ beacon node. See [Fee recipient, graffiti and gas limit](./fee_recipient.md) and
 | `--builder-max-skipped-slots-per-epoch <BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH>` | `8` | Missing blocks (missing payloads after Gloas) in the last rolling epoch that trip the circuit breaker. | grandine, bn |
 | `--disable-wait-for-late-blocks` | disabled | Do not wait the extra second before attesting when a block is still being processed at the start of the attestation duty. | grandine, bn |
 | `--disable-blockprint-graffiti` | disabled | Do not append blockprint graffiti. | grandine, bn |
+| `--disable-proposer-reorgs` | disabled | Always build own blocks on the head. By default a head with little support that arrived after the attestation deadline or comes from an equivocating proposer is re-orged by building on its parent. | grandine, bn |
 
 ## Metrics
 

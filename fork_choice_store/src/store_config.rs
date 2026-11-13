@@ -23,6 +23,8 @@ pub struct StoreConfig {
     pub kzg_backend: KzgBackend,
     #[derivative(Default(value = "false"))]
     pub sync_without_reconstruction: bool,
+    #[derivative(Default(value = "false"))]
+    pub disable_proposer_reorgs: bool,
     // No `derivative` attribute: `BuilderCircuitBreakerConfig` supplies its own defaults.
     pub builder_circuit_breaker: BuilderCircuitBreakerConfig,
 }
