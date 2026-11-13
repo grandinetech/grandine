@@ -296,7 +296,6 @@ arc-swap = '1'
 assert-json-diff = '2'
 axum = { version = '0.8' }
 axum-extra = { version = '0.12', features = ['typed-header', 'query'] }
-base64 = '0.22'
 bindgen = '0.72'
 bit_field = '0.10'
 bitvec = '1'
@@ -334,7 +333,6 @@ enr = '0.14'
 enum-iterator = '2'
 enum-map = '2'
 enumset = '1'
-env_logger = '0.11'
 ethereum-types = '0.14'
 ff = '0.13'
 fixed-hash = '0.8'
@@ -363,12 +361,10 @@ igd-next = '0.17'
 im = '15'
 impl-serde = '0.5'
 integer-sqrt = '0.1'
-instant = '0.1'
 itertools = '0.14'
 jwt-simple = { version = '0.15', default-features = false, features = ['pure-rust'] }
 keccak-hasher = '0.15'
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
-lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd6324d63e27ef6b7c49cdc9b1977c1b808234c7b' }
 libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
 libp2p-identity = { version = '0.3', features = ['peerid'] }
@@ -433,10 +429,6 @@ serde_yaml = { package = 'serde_norway', version = '0.9' }
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
 sha2 = { version = '0.10.9', features = ['compress'] }
-slog = { version = '2', features = ['max_level_trace'] }
-slog-async = '2'
-slog-stdlog = '4'
-slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 sse-stream = '0.2'
@@ -493,7 +485,6 @@ bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
 builder_api = { path = 'builder_api' }
 c_grandine = { path = 'bindings/c', default-features = false }
 clock = { path = 'clock' }
-csharp_grandine = { path = 'bindings/csharp' }
 data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 debug_info = { path = 'debug_info' }

@@ -6,12 +6,12 @@ authors = ["Grandine <info@grandine.io>"]
 
 [dependencies]
 anyhow = { workspace = true }
-features = { workspace = true }
-futures = { workspace = true }
 logging = { workspace = true }
 once_cell = { workspace = true }
 prometheus = { workspace = true }
-tokio = { workspace = true }
-tokio-stream = { workspace = true }
 tracing = { workspace = true }
 types = { workspace = true }
+
+# TODO: Inherit `workspace.lints` and fix the resulting warnings.
+[lints.cargo]
+missing_lints_inheritance = 'allow'

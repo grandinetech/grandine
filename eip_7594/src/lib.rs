@@ -168,13 +168,8 @@ pub fn verify_data_column_sidecar<P: Preset>(
     }
 
     // The column length must be equal to the number of commitments/proofs
-    if data_column_sidecar.column().len_usize() != kzg_commitments.len()
-        || data_column_sidecar.column().len_usize() != data_column_sidecar.kzg_proofs().len_usize()
-    {
-        return false;
-    }
-
-    true
+    data_column_sidecar.column().len_usize() == kzg_commitments.len()
+        && data_column_sidecar.column().len_usize() == data_column_sidecar.kzg_proofs().len_usize()
 }
 
 /// Check what `verify_data_column_sidecar` can check before the KZG commitments are known.

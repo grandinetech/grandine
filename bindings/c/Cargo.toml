@@ -43,3 +43,7 @@ blst = ['bls/blst', 'kzg_utils/blst']
 constantine = ['kzg_utils/constantine']
 mcl = ['kzg_utils/mcl']
 zkcrypto = ['bls/zkcrypto', 'kzg_utils/zkcrypto']
+
+# Workspace lints forbid `unsafe_code`, which FFI bindings need.
+[lints.cargo]
+missing_lints_inheritance = 'allow'

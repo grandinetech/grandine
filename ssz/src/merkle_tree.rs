@@ -137,10 +137,6 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
     pub fn push_and_compute_root(&mut self, index: usize, chunk: H256) -> H256 {
         let (updated_sibling, mut hash) = self.push(index, chunk);
 
-        #[expect(
-            clippy::needless_range_loop,
-            reason = "The suggested rewrite is not an improvement."
-        )]
         for height in updated_sibling..D::USIZE {
             // `self.sibling_hashes[updated_sibling]` will not be accessed during this call.
             // The first iteration of the loop always takes the else branch.
