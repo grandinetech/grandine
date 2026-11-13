@@ -3769,10 +3769,8 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    let block_root = controller.head().value.block_root;
-    let beacon_state = controller
-        .preprocessed_state_for_block_production(block_root, slot)
-        .await?;
+    let (block_root, beacon_state) =
+        proposal_parent(&chain_config, &block_producer, &controller, slot).await?;
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
@@ -3820,6 +3818,55 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     let version = blinded_block.phase();
 
     Ok(EthResponse::json(blinded_block).version(version))
+}
+
+// The block a proposal for `slot` builds on, with its state at `slot`.
+// That is the head, or its parent if the head is to be re-orged.
+// `BlockProducer::reorg_parent_state` decides whether a re-org can build on the parent.
+async fn proposal_parent<P: Preset, W: Wait>(
+    chain_config: &ChainConfig,
+    block_producer: &BlockProducer<P, W>,
+    controller: &ApiController<P, W>,
+    slot: Slot,
+) -> Result<(H256, Arc<BeaconState<P>>), Error> {
+    let head = controller.head().value;
+    let head_root = head.block_root;
+    let parent_root = head.parent_root();
+
+    let head_state = controller
+        .preprocessed_state_for_block_production(head_root, slot)
+        .await?;
+
+    // The head may have changed since it was read. Only its parent counts as a re-org.
+    if controller.proposer_head(slot) != parent_root {
+        return Ok((head_root, head_state));
+    }
+
+    // A failure here is left to the endpoint, which computes the proposer of the state it builds on.
+    let Ok(proposer_index) = accessors::get_beacon_proposer_index(chain_config, &head_state) else {
+        return Ok((head_root, head_state));
+    };
+
+    match block_producer
+        .reorg_parent_state(parent_root, slot, proposer_index)
+        .await
+    {
+        Ok(parent_state) => {
+            info_with_peers!(
+                "re-orging head {head_root:?} by building on {parent_root:?} at slot {slot}",
+            );
+
+            Ok((parent_root, parent_state))
+        }
+        Err(error) => {
+            warn_with_peers!(
+                "building on head {head_root:?} instead of re-orging it \
+                 by building on {parent_root:?} at slot {slot}: {error:?}",
+            );
+
+            Ok((head_root, head_state))
+        }
+    }
 }
 
 // Refuses a block that extends a payload the execution engine has not validated.
@@ -3881,10 +3928,8 @@ pub async fn validator_block<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    let block_root = controller.head().value.block_root;
-    let beacon_state = controller
-        .preprocessed_state_for_block_production(block_root, slot)
-        .await?;
+    let (block_root, beacon_state) =
+        proposal_parent(&chain_config, &block_producer, &controller, slot).await?;
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
     let block_build_context = block_producer.new_build_context(
@@ -3936,10 +3981,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    let block_root = controller.head().value.block_root;
-    let beacon_state = controller
-        .preprocessed_state_for_block_production(block_root, slot)
-        .await?;
+    let (block_root, beacon_state) =
+        proposal_parent(&chain_config, &block_producer, &controller, slot).await?;
 
     if beacon_state.is_post_gloas() {
         return Err(Error::StatePostGloas);
@@ -4052,10 +4095,8 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    let head_block_root = controller.head().value.block_root;
-    let beacon_state = controller
-        .preprocessed_state_for_block_production(head_block_root, slot)
-        .await?;
+    let (head_block_root, beacon_state) =
+        proposal_parent(&chain_config, &block_producer, &controller, slot).await?;
 
     if !beacon_state.is_post_gloas() {
         return Err(Error::StatePreGloas);

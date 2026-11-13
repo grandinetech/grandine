@@ -1,5 +1,9 @@
 use core::{fmt::Debug, ops::Range, time::Duration};
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::HashSet,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arc_swap::Guard;
@@ -339,6 +343,20 @@ where
             status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
+    }
+
+    /// The root of the block a proposal for `slot` should build on.
+    ///
+    /// That is the head, or its parent if the head is to be re-orged.
+    /// See [`Store::proposer_head`] for the conditions.
+    #[must_use]
+    pub fn proposer_head(&self, slot: Slot) -> H256 {
+        // A clock before the Unix epoch makes the proposal count as late, which keeps the head.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+
+        self.store_snapshot().proposer_head(slot, now)
     }
 
     #[must_use]
@@ -985,16 +1003,34 @@ where
             .state_at_slot(self.pubkey_cache(), &store, head.block_root, store.slot())
     }
 
-    pub fn preprocessed_state_at_next_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
+    // The state of `block_root` at the slot after the current one.
+    pub fn preprocessed_state_at_next_slot_blocking(
+        &self,
+        block_root: H256,
+    ) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
-        let head = store.head();
 
         self.state_cache().state_at_slot(
             self.pubkey_cache(),
             &store,
-            head.block_root,
+            block_root,
             store.slot().saturating_add(1),
         )
+    }
+
+    /// The blocks a proposal for the next slot may build on.
+    ///
+    /// The head comes first. Its parent follows if [`Store::predicted_proposer_head`] says
+    /// a proposal may re-org the head. Use [`Self::proposer_head`] once the slot starts.
+    #[must_use]
+    pub fn possible_proposal_parents_at_next_slot(&self) -> Vec<H256> {
+        let store = self.store_snapshot();
+        let head_root = store.head().block_root;
+        let proposer_head = store.predicted_proposer_head();
+
+        core::iter::once(head_root)
+            .chain((proposer_head != head_root).then_some(proposer_head))
+            .collect()
     }
 
     // The `block_root` and `state` parameters are needed
@@ -1583,6 +1619,12 @@ impl<P: Preset> Snapshot<'_, P> {
     #[must_use]
     pub fn should_build_on_full(&self, slot: Slot) -> bool {
         self.store_snapshot.should_build_on_full(slot)
+    }
+
+    #[must_use]
+    pub fn should_build_on_full_for(&self, parent_root: H256, slot: Slot) -> bool {
+        self.store_snapshot
+            .should_build_on_full_for(parent_root, slot)
     }
 
     #[must_use]

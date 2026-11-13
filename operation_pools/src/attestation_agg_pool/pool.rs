@@ -23,8 +23,10 @@ use crate::attestation_agg_pool::types::{
     Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet, PoolAttestation,
 };
 
+// Attestations packed for proposals in one slot, keyed by the parent of the block.
+// A proposal that may re-org the head has them packed for both the head and its parent.
 #[expect(type_alias_bounds)]
-type AttestationsWithSlot<P: Preset> = (Vec<PoolAttestation<P>>, Slot);
+type PreparedAttestations<P: Preset> = (Slot, HashMap<H256, Vec<PoolAttestation<P>>>);
 
 pub struct Pool<P: Preset> {
     chain_config: Arc<ChainConfig>,
@@ -33,7 +35,7 @@ pub struct Pool<P: Preset> {
     // The type of the inner map does not affect the result of attestation packing,
     // though that may change if the packers are redesigned again.
     singular_attestations: RwLock<BTreeMap<Epoch, AttestationMap<P>>>,
-    best_proposable_attestations: Mutex<AttestationsWithSlot<P>>,
+    best_proposable_attestations: Mutex<PreparedAttestations<P>>,
     committees_with_aggregators: RwLock<BTreeMap<Slot, BTreeSet<CommitteeIndex>>>,
     proposer_indices: RwLock<BTreeMap<Slot, ValidatorIndex>>,
     registered_validator_indices: RwLock<HashSet<ValidatorIndex>>,
@@ -273,12 +275,21 @@ impl<P: Preset> Pool<P> {
             .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
     }
 
-    pub async fn best_proposable_attestations(&self, slot: Slot) -> Vec<PoolAttestation<P>> {
-        let attestations_with_slot = self.best_proposable_attestations.lock().await;
-        let (attestations, prepared_for_slot) = &*attestations_with_slot;
+    // Packing depends on the parent, as attestations it includes are worth less.
+    // A proposal that re-orgs the head has a different parent than the one prepared for.
+    pub async fn best_proposable_attestations(
+        &self,
+        slot: Slot,
+        parent_root: H256,
+    ) -> Vec<PoolAttestation<P>> {
+        let prepared_attestations = self.best_proposable_attestations.lock().await;
+        let (prepared_for_slot, attestations_by_parent_root) = &*prepared_attestations;
 
         if slot == *prepared_for_slot {
-            attestations.clone()
+            attestations_by_parent_root
+                .get(&parent_root)
+                .cloned()
+                .unwrap_or_default()
         } else {
             Vec::new()
         }
@@ -349,8 +360,17 @@ impl<P: Preset> Pool<P> {
         &self,
         attestations: Vec<PoolAttestation<P>>,
         prepared_for_slot: Slot,
+        prepared_for_parent_root: H256,
     ) {
-        *self.best_proposable_attestations.lock().await = (attestations, prepared_for_slot);
+        let mut prepared_attestations = self.best_proposable_attestations.lock().await;
+        let (slot, attestations_by_parent_root) = &mut *prepared_attestations;
+
+        if *slot != prepared_for_slot {
+            *slot = prepared_for_slot;
+            attestations_by_parent_root.clear();
+        }
+
+        attestations_by_parent_root.insert(prepared_for_parent_root, attestations);
     }
 
     pub async fn set_committees_with_aggregators(
@@ -422,5 +442,93 @@ impl<P: Preset> Pool<P> {
             .range(range)
             .next()
             .is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bls::AggregateSignatureBytes;
+    use ssz::BitList;
+    use types::{phase0::containers::AttestationData, preset::Minimal};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn best_proposable_attestations_are_only_reused_for_the_parent_they_were_packed_for() {
+        let pool = Pool::<Minimal>::new(Arc::new(ChainConfig::minimal()));
+        let parent_root = H256::repeat_byte(1);
+        let other_root = H256::repeat_byte(2);
+
+        let attestation = PoolAttestation {
+            aggregation_bits: BitList::with_length(1),
+            data: AttestationData::default(),
+            committee_index: 0,
+            signature: AggregateSignatureBytes::default(),
+        };
+
+        pool.set_best_proposable_attestations(vec![attestation], 3, parent_root)
+            .await;
+
+        assert_eq!(
+            pool.best_proposable_attestations(3, parent_root)
+                .await
+                .len(),
+            1
+        );
+        assert!(
+            pool.best_proposable_attestations(3, other_root)
+                .await
+                .is_empty()
+        );
+        assert!(
+            pool.best_proposable_attestations(4, parent_root)
+                .await
+                .is_empty()
+        );
+    }
+
+    // A proposal that may re-org the head has attestations packed for the head and its parent.
+    #[tokio::test]
+    async fn best_proposable_attestations_are_kept_for_each_parent_in_a_slot() {
+        let pool = Pool::<Minimal>::new(Arc::new(ChainConfig::minimal()));
+        let head_root = H256::repeat_byte(1);
+        let parent_root = H256::repeat_byte(2);
+
+        let attestation = |committee_index| PoolAttestation {
+            aggregation_bits: BitList::with_length(1),
+            data: AttestationData::default(),
+            committee_index,
+            signature: AggregateSignatureBytes::default(),
+        };
+
+        pool.set_best_proposable_attestations(vec![attestation(0)], 3, head_root)
+            .await;
+        pool.set_best_proposable_attestations(vec![attestation(1), attestation(2)], 3, parent_root)
+            .await;
+
+        assert_eq!(
+            pool.best_proposable_attestations(3, head_root).await.len(),
+            1
+        );
+        assert_eq!(
+            pool.best_proposable_attestations(3, parent_root)
+                .await
+                .len(),
+            2
+        );
+
+        // Attestations packed for an earlier slot are dropped.
+        pool.set_best_proposable_attestations(vec![attestation(0)], 4, head_root)
+            .await;
+
+        assert!(
+            pool.best_proposable_attestations(4, parent_root)
+                .await
+                .is_empty()
+        );
+        assert_eq!(
+            pool.best_proposable_attestations(4, head_root).await.len(),
+            1
+        );
     }
 }

@@ -85,6 +85,7 @@ struct Checks {
     justified_checkpoint: Option<Checkpoint>,
     finalized_checkpoint: Option<Checkpoint>,
     proposer_boost_root: Option<H256>,
+    get_proposer_head: Option<H256>,
     payload_timeliness_vote: Option<PtcVotes>,
     payload_data_availability_vote: Option<PtcVotes>,
     // TODO: assert viable_for_head_roots_and_weights
@@ -121,26 +122,26 @@ struct ViableHeadRootAndWeight {
 // - <https://github.com/ethereum/consensus-specs/pull/3294>
 // - <https://github.com/ethereum/consensus-specs/pull/3297>
 //
-// We do not run the following test cases:
-// - `consensus-spec-tests/tests/*/*/fork_choice/get_proposer_head/*/*`
-// - `consensus-spec-tests/tests/*/*/fork_choice/should_override_forkchoice_update/*/*`
-// Grandine does not implement proposer boost re-orgs.
 #[duplicate_item(
     glob                                                                                        function_name                                  preset    phase;
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/ex_ante/*/*"]                       [altair_mainnet_ex_ante]                       [Mainnet] [Altair];
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/get_head/*/*"]                      [altair_mainnet_get_head]                      [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/mainnet/altair/fork_choice/get_proposer_head/*/*"]             [altair_mainnet_get_proposer_head]             [Mainnet] [Altair];
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/on_block/*/*"]                      [altair_mainnet_on_block]                      [Mainnet] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/ex_ante/*/*"]                       [altair_minimal_ex_ante]                       [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/get_head/*/*"]                      [altair_minimal_get_head]                      [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice/get_proposer_head/*/*"]             [altair_minimal_get_proposer_head]             [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/on_block/*/*"]                      [altair_minimal_on_block]                      [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/reorg/*/*"]                         [altair_minimal_reorg]                         [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/withholding/*/*"]                   [altair_minimal_withholding]                   [Minimal] [Altair];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/ex_ante/*/*"]                    [bellatrix_mainnet_ex_ante]                    [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/get_head/*/*"]                   [bellatrix_mainnet_get_head]                   [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/get_proposer_head/*/*"]          [bellatrix_mainnet_get_proposer_head]          [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/on_block/*/*"]                   [bellatrix_mainnet_on_block]                   [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/on_merge_block/*/*"]             [bellatrix_mainnet_on_merge_block]             [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/ex_ante/*/*"]                    [bellatrix_minimal_ex_ante]                    [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/get_head/*/*"]                   [bellatrix_minimal_get_head]                   [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/get_proposer_head/*/*"]          [bellatrix_minimal_get_proposer_head]          [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/on_block/*/*"]                   [bellatrix_minimal_on_block]                   [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/on_merge_block/*/*"]             [bellatrix_minimal_on_merge_block]             [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/reorg/*/*"]                      [bellatrix_minimal_reorg]                      [Minimal] [Bellatrix];
@@ -149,9 +150,11 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/minimal/bellatrix/sync/*/*/*"]                                 [bellatrix_sync_minimal]                       [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/ex_ante/*/*"]                      [capella_mainnet_ex_ante]                      [Mainnet] [Capella];
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/get_head/*/*"]                     [capella_mainnet_get_head]                     [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/mainnet/capella/fork_choice/get_proposer_head/*/*"]            [capella_mainnet_get_proposer_head]            [Mainnet] [Capella];
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/on_block/*/*"]                     [capella_mainnet_on_block]                     [Mainnet] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/ex_ante/*/*"]                      [capella_minimal_ex_ante]                      [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/get_head/*/*"]                     [capella_minimal_get_head]                     [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice/get_proposer_head/*/*"]            [capella_minimal_get_proposer_head]            [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/on_block/*/*"]                     [capella_minimal_on_block]                     [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/reorg/*/*"]                        [capella_minimal_reorg]                        [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/withholding/*/*"]                  [capella_minimal_withholding]                  [Minimal] [Capella];
@@ -159,9 +162,11 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/minimal/capella/sync/*/*/*"]                                   [capella_sync_minimal]                         [Minimal] [Capella];
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/ex_ante/*/*"]                        [deneb_mainnet_ex_ante]                        [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/get_head/*/*"]                       [deneb_mainnet_get_head]                       [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/get_proposer_head/*/*"]              [deneb_mainnet_get_proposer_head]              [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/on_block/*/*"]                       [deneb_mainnet_on_block]                       [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/ex_ante/*/*"]                        [deneb_minimal_ex_ante]                        [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/get_head/*/*"]                       [deneb_minimal_get_head]                       [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice/get_proposer_head/*/*"]              [deneb_minimal_get_proposer_head]              [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/on_block/*/*"]                       [deneb_minimal_on_block]                       [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/reorg/*/*"]                          [deneb_minimal_reorg]                          [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/withholding/*/*"]                    [deneb_minimal_withholding]                    [Minimal] [Deneb];
@@ -169,10 +174,12 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/minimal/deneb/sync/*/*/*"]                                     [deneb_sync_minimal]                           [Minimal] [Deneb];
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/ex_ante/*/*"]                      [electra_mainnet_ex_ante]                      [Mainnet] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_head/*/*"]                     [electra_mainnet_get_head]                     [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_proposer_head/*/*"]            [electra_mainnet_get_proposer_head]            [Mainnet] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/on_block/*/*"]                     [electra_mainnet_on_block]                     [Mainnet] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/deposit_with_reorg/*/*"]           [electra_deposit_with_reorg_minimal]           [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/ex_ante/*/*"]                      [electra_minimal_ex_ante]                      [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/get_head/*/*"]                     [electra_minimal_get_head]                     [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice/get_proposer_head/*/*"]            [electra_minimal_get_proposer_head]            [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/on_block/*/*"]                     [electra_minimal_on_block]                     [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/reorg/*/*"]                        [electra_minimal_reorg]                        [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/withholding/*/*"]                  [electra_minimal_withholding]                  [Minimal] [Electra];
@@ -180,10 +187,12 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/minimal/electra/sync/*/*/*"]                                   [electra_sync_minimal]                         [Minimal] [Electra];
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/ex_ante/*/*"]                         [fulu_mainnet_ex_ante]                         [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_head/*/*"]                        [fulu_mainnet_get_head]                        [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_proposer_head/*/*"]               [fulu_mainnet_get_proposer_head]               [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/on_block/*/*"]                        [fulu_mainnet_on_block]                        [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/deposit_with_reorg/*/*"]              [fulu_deposit_with_reorg_minimal]              [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/ex_ante/*/*"]                         [fulu_minimal_ex_ante]                         [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/get_head/*/*"]                        [fulu_minimal_get_head]                        [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice/get_proposer_head/*/*"]               [fulu_minimal_get_proposer_head]               [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/on_block/*/*"]                        [fulu_minimal_on_block]                        [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/reorg/*/*"]                           [fulu_minimal_reorg]                           [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/withholding/*/*"]                     [fulu_minimal_withholding]                     [Minimal] [Fulu];
@@ -427,6 +436,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     justified_checkpoint,
                     finalized_checkpoint,
                     proposer_boost_root,
+                    get_proposer_head,
                     payload_timeliness_vote,
                     payload_data_availability_vote,
                     viable_for_head_roots_and_weights: _,
@@ -464,6 +474,10 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 if let Some(proposer_boost_root) = proposer_boost_root {
                     context.assert_proposer_boost_root(proposer_boost_root);
+                }
+
+                if let Some(proposer_head) = get_proposer_head {
+                    context.assert_proposer_head(proposer_head);
                 }
 
                 if let Some(PtcVotes { block_root, votes }) = payload_timeliness_vote {

@@ -140,6 +140,37 @@ pub fn block_justifying_previous_epoch<P: Preset>(
     )
 }
 
+// Unlike `block_justifying_current_epoch`, this leaves room for blocks later in the epoch.
+// Enough slots must have passed for the attestations to justify the epoch.
+pub fn block_with_attestations_from_current_epoch<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    pre_state: Arc<BeaconState<P>>,
+    block_slot: Slot,
+    graffiti: H256,
+) -> Result<BlockWithState<P>> {
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
+    let eth1_data = advanced_state.eth1_data();
+    let epoch = misc::compute_epoch_at_slot::<P>(block_slot);
+    let attestation_slots = misc::compute_start_slot_at_epoch::<P>(epoch)..block_slot;
+    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
+    let deposits = ContiguousList::default();
+    let sync_aggregate = SyncAggregate::empty();
+    let execution_payload = None;
+
+    block(
+        config,
+        pubkey_cache,
+        advanced_state,
+        eth1_data,
+        graffiti,
+        attestations,
+        deposits,
+        sync_aggregate,
+        execution_payload,
+    )
+}
+
 pub fn block_justifying_current_epoch<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
