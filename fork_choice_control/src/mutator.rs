@@ -63,7 +63,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadEnvelopeIdentifier,
+    gloas::containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -92,7 +92,7 @@ use crate::{
         VerifyAttestationResult, VerifyPayloadAttestationResult, WaitingForCheckpointState,
     },
     state_at_slot_cache::StateAtSlotCache,
-    storage::Storage,
+    storage::{Storage, StoredEnvelope},
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
         BlockTask, CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
@@ -456,6 +456,16 @@ where
     ) -> Result<()> {
         let wait_group = W::default();
 
+        // The first unfinalized block builds on the anchor, so the anchor's payload has to be
+        // replayed as well for that block to pass `BlockAction::DelayUntilPayload`. This has to be
+        // done before unfinalized blocks exist check below
+        if self.store.anchor().is_post_gloas() {
+            self.process_persisted_execution_payload_envelope(
+                &wait_group,
+                self.store.anchor().block_root,
+            )?;
+        }
+
         let Some(last_block) = blocks.next_back().transpose()? else {
             self.finished_loading_from_storage = true;
             return Ok(());
@@ -500,6 +510,59 @@ where
         }
 
         self.finished_loading_from_storage = true;
+
+        Ok(())
+    }
+
+    fn process_persisted_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        block_root: H256,
+    ) -> Result<()> {
+        match self.storage.envelope_by_root(block_root)? {
+            Some(StoredEnvelope::Full(envelope)) => self
+                .validate_and_handle_persisted_execution_payload_envelope(
+                    wait_group, block_root, &envelope,
+                ),
+            Some(StoredEnvelope::Blinded(envelope)) => self
+                .validate_and_handle_persisted_execution_payload_envelope(
+                    wait_group, block_root, &envelope,
+                ),
+            None => Ok(()),
+        }
+    }
+
+    fn validate_and_handle_persisted_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        block_root: H256,
+        envelope: &Arc<impl traits::SignedExecutionPayloadEnvelope<P>>,
+    ) -> Result<()> {
+        let origin = ExecutionPayloadEnvelopeOrigin::Persisted;
+
+        let seen_before_deadline = self
+            .storage
+            .is_execution_payload_envelope_timely(block_root)?;
+
+        let result = self.store.validate_execution_payload_envelope(
+            envelope,
+            &origin,
+            &self.execution_engine,
+            NullVerifier,
+        );
+
+        self.handle_execution_payload_envelope(
+            wait_group.clone(),
+            result,
+            origin,
+            PayloadEnvelopeIdentifier {
+                beacon_block_root: block_root,
+                builder_index: envelope.message().builder_index(),
+            },
+            seen_before_deadline,
+            ProcessingTimings::new(),
+            tracing::debug_span!("handle_persisted_execution_payload_envelope"),
+        );
 
         Ok(())
     }
@@ -2326,7 +2389,9 @@ where
     fn handle_execution_payload_envelope(
         &mut self,
         wait_group: W,
-        result: Result<ExecutionPayloadEnvelopeAction<P>>,
+        result: Result<
+            ExecutionPayloadEnvelopeAction<P, impl traits::SignedExecutionPayloadEnvelope<P>>,
+        >,
         origin: ExecutionPayloadEnvelopeOrigin,
         payload_envelope_identifier: PayloadEnvelopeIdentifier,
         seen_before_deadline: bool,
@@ -2339,12 +2404,13 @@ where
                     metrics.register_mutator_execution_payload_envelope(&["accepted"]);
                 }
 
-                let beacon_block_root = envelope.block_root();
-                let slot = envelope.slot();
-                let builder_index = envelope.builder_index();
-                let block_hash = envelope.message.payload.block_hash;
+                let beacon_block_root = envelope.message().block_root();
+                let slot = envelope.message().slot();
+                let builder_index = envelope.message().builder_index();
+                let block_hash = envelope.message().block_hash();
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
+                let is_persisted = origin.is_persisted();
 
                 if self.store.is_forward_synced() {
                     debug_with_peers!(
@@ -2388,7 +2454,12 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                self.accept_execution_payload_envelope(&wait_group, envelope, seen_before_deadline);
+                self.accept_execution_payload_envelope(
+                    &wait_group,
+                    envelope,
+                    seen_before_deadline,
+                    is_persisted,
+                );
 
                 if should_generate_event
                     && let Some(chain_link) = self.store.chain_link(beacon_block_root)
@@ -2456,6 +2527,12 @@ where
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_block"]);
                 }
 
+                let Some(execution_payload_envelope) =
+                    full_envelope_to_delay(execution_payload_envelope)
+                else {
+                    return;
+                };
+
                 let processing_timings = processing_timings.delayed();
                 let pending_envelope = reply_delayed_payload_envelope_validation_result(
                     PendingExecutionPayloadEnvelope {
@@ -2495,6 +2572,12 @@ where
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_state"]);
                 }
+
+                let Some(execution_payload_envelope) =
+                    full_envelope_to_delay(execution_payload_envelope)
+                else {
+                    return;
+                };
 
                 let slot = execution_payload_envelope.slot();
                 let processing_timings = processing_timings.delayed();
@@ -2536,6 +2619,12 @@ where
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_data"]);
                 }
+
+                let Some(execution_payload_envelope) =
+                    full_envelope_to_delay(execution_payload_envelope)
+                else {
+                    return;
+                };
 
                 let slot = execution_payload_envelope.slot();
                 let block_root = execution_payload_envelope.block_root();
@@ -3525,6 +3614,7 @@ where
 
         let block = block.clone_arc();
         let is_post_gloas = chain_link.is_post_gloas();
+        let is_persisted = matches!(origin, BlockOrigin::Persisted);
         let is_valid = chain_link.is_valid();
         let post_state = chain_link.state.clone();
         let changes = self.store_mut().apply_block(chain_link)?;
@@ -3842,6 +3932,12 @@ where
                 .observe(post_processing_duration.as_secs_f64());
         }
 
+        // Persisted blocks can be accepted after `process_unfinalized_blocks` has moved on,
+        // so the envelope has to be replayed here rather than in that loop.
+        if is_persisted && is_post_gloas {
+            self.process_persisted_execution_payload_envelope(wait_group, block_root)?;
+        }
+
         Ok(())
     }
 
@@ -3900,12 +3996,16 @@ where
         wait_group: &W,
         envelope: Arc<impl traits::SignedExecutionPayloadEnvelope<P>>,
         is_before_deadline: bool,
+        is_persisted: bool,
     ) {
         let beacon_block_root = envelope.message().block_root();
         let execution_block_hash = envelope.message().block_hash();
 
-        self.store_mut()
-            .apply_execution_payload_envelope(envelope, is_before_deadline);
+        self.store_mut().apply_execution_payload_envelope(
+            envelope,
+            is_before_deadline,
+            is_persisted,
+        );
 
         self.update_store_snapshot();
 
@@ -5485,6 +5585,7 @@ where
     fn spawn_persist_execution_payload_envelopes_task(&self, wait_group: &W) {
         if self.storage.prune_storage_enabled()
             || !(self.store.has_unpersisted_envelopes() || self.store.has_rejected_envelopes())
+            || !self.finished_loading_from_storage
         {
             return;
         }
@@ -6159,6 +6260,21 @@ fn reply_payload_envelope_validation_result_to_http_api(
     {
         debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
     }
+}
+
+fn full_envelope_to_delay<P: Preset, E: traits::SignedExecutionPayloadEnvelope<P>>(
+    envelope: Arc<E>,
+) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+    let block_root = envelope.message().block_root();
+    let full_envelope = envelope.into_full();
+
+    if full_envelope.is_none() {
+        warn_with_peers!(
+            "blinded execution payload envelope cannot be delayed (block root: {block_root:?})"
+        );
+    }
+
+    full_envelope
 }
 
 fn reply_delayed_block_validation_result<P: Preset>(

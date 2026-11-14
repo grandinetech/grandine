@@ -54,7 +54,11 @@ const META_FILE_NAME: &str = "meta.json";
 // ## 0.2.3
 //
 // Added state_root to slot indexing to storage to enable loading archived states by state root.
-const SCHEMA_VERSION: &str = "0.2.3";
+//
+// ## 0.2.4
+//
+// Persist execution payload envelope timeliness.
+const SCHEMA_VERSION: &str = "0.2.4";
 
 // Semantic Versioning by itself only achieves forward compatibility.
 // Backward compatibility is achieved using a version requirement separate from the schema version.
