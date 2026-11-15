@@ -108,44 +108,63 @@ impl<P: Preset> Pool<P> {
             .clone_arc()
     }
 
-    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<PoolAttestation<P>> {
-        self.aggregates
-            .read()
-            .await
-            .get(&epoch)
-            .into_iter()
-            .flatten()
-            .map(|(key, aggregates)| async {
-                aggregates
-                    .lock()
-                    .await
-                    .iter()
-                    .cloned()
-                    .map(|aggregate| {
-                        let AttestationKey {
-                            data,
-                            committee_index,
-                        } = *key;
-                        let Aggregate {
-                            aggregation_bits,
-                            signature,
-                        } = aggregate;
+    fn export_aggregate(key: &AttestationKey, aggregate: Aggregate<P>) -> PoolAttestation<P> {
+        let AttestationKey {
+            data,
+            committee_index,
+        } = *key;
+        let Aggregate {
+            aggregation_bits,
+            signature,
+        } = aggregate;
+        PoolAttestation {
+            aggregation_bits,
+            data,
+            committee_index,
+            signature: signature.into(),
+        }
+    }
 
-                        PoolAttestation {
-                            aggregation_bits,
-                            data,
-                            committee_index,
-                            signature: signature.into(),
-                        }
-                    })
-                    .collect_vec()
-            })
-            .collect::<FuturesOrdered<_>>()
-            .collect::<Vec<_>>()
+    async fn export_group(
+        key: &AttestationKey,
+        aggregates: &Mutex<Vec<Aggregate<P>>>,
+    ) -> Vec<PoolAttestation<P>> {
+        aggregates
+            .lock()
             .await
-            .into_iter()
-            .flatten()
+            .iter()
+            .cloned()
+            .map(|aggregate| Self::export_aggregate(key, aggregate))
             .collect_vec()
+    }
+
+    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<PoolAttestation<P>> {
+        let epochs = self.aggregates.read().await;
+        let mut entries = epochs.get(&epoch).into_iter().flatten();
+        let mut output = Vec::new();
+        while let Some((key, aggregates)) = entries.next() {
+            // try_lock does not consume Tokio's cooperative budget like lock().await does.
+            tokio::task::consume_budget().await;
+            if let Ok(aggregates) = aggregates.try_lock() {
+                output.extend(
+                    aggregates
+                        .iter()
+                        .cloned()
+                        .map(|aggregate| Self::export_aggregate(key, aggregate)),
+                );
+            } else {
+                // Preserve concurrent reads of later groups when an earlier lock is held.
+                let remaining = core::iter::once((key, aggregates))
+                    .chain(entries)
+                    .map(|(key, aggregates)| Self::export_group(key, aggregates))
+                    .collect::<FuturesOrdered<_>>()
+                    .collect::<Vec<_>>()
+                    .await;
+                output.extend(remaining.into_iter().flatten());
+                break;
+            }
+        }
+        output
     }
 
     pub async fn aggregate_in_committee(
@@ -424,3 +443,7 @@ impl<P: Preset> Pool<P> {
             .is_some()
     }
 }
+
+#[cfg(test)]
+#[path = "export_collect_tests.rs"]
+mod export_collect_tests;
