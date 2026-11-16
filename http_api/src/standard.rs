@@ -1396,13 +1396,30 @@ pub async fn block_headers<P: Preset, W: Wait>(
         BlockHeadersQuery {
             slot: None,
             parent_root: Some(parent_root),
-        } => controller
-            .stored_block_by_root(parent_root)?
-            .and_then(|parent_block| parent_block.value.message().slot().checked_add(1))
-            .map(opt_block_by_slot)
-            .transpose()?
-            .flatten()
-            .filter(|(_, with_status)| with_status.value.message().parent_root() == parent_root),
+        } => {
+            // The child may be separated from its parent by empty slots,
+            // so look for the first canonical block after the parent.
+            // Use one snapshot so both lookups see the same store.
+            let snapshot = controller.snapshot();
+
+            let child = snapshot
+                .stored_block_by_root(parent_root)?
+                .map(|parent_block| {
+                    snapshot.canonical_block_after_slot(parent_block.value.message().slot())
+                })
+                .transpose()?
+                .flatten()
+                .map(|with_status| {
+                    let root = with_status.value.root;
+                    (
+                        root,
+                        with_status.map(|block_with_root| block_with_root.block),
+                    )
+                });
+
+            child
+                .filter(|(_, with_status)| with_status.value.message().parent_root() == parent_root)
+        }
         BlockHeadersQuery {
             slot: Some(slot),
             parent_root: Some(parent_root),
