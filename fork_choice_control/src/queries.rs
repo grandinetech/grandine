@@ -596,21 +596,7 @@ where
         &self,
         block_root: H256,
     ) -> Result<Option<WithStatus<StoredBlock<P>>>> {
-        if let Some(with_status) = self.store_snapshot().block(block_root) {
-            return Ok(Some(with_status.cloned().map(StoredBlock::Full)));
-        }
-
-        if let Some(block) = self.storage().finalized_block_by_root(block_root)? {
-            return Ok(Some(WithStatus::valid_and_finalized(block)));
-        }
-
-        if let Some(block) = self.storage().unfinalized_block_by_root(block_root)? {
-            return Ok(Some(WithStatus::valid_and_unfinalized(StoredBlock::Full(
-                block,
-            ))));
-        }
-
-        Ok(None)
+        self.snapshot().stored_block_by_root(block_root)
     }
 
     pub async fn block_by_slot(
@@ -1852,7 +1838,7 @@ impl<P: Preset> Snapshot<'_, P> {
 
         let mut block_roots = blocks
             .iter()
-            .chain(successor.as_ref())
+            .chain(successor.as_ref().map(|with_status| &with_status.value))
             .tuple_windows()
             .filter_map(|(current, child)| {
                 PayloadPresence::of_parent(child.block.message(), current.block.message())
@@ -1874,25 +1860,51 @@ impl<P: Preset> Snapshot<'_, P> {
         Ok(block_roots)
     }
 
-    fn canonical_block_after_slot(
+    pub fn stored_block_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<WithStatus<StoredBlock<P>>>> {
+        if let Some(with_status) = self.store_snapshot.block(block_root) {
+            return Ok(Some(with_status.cloned().map(StoredBlock::Full)));
+        }
+
+        if let Some(block) = self.storage.finalized_block_by_root(block_root)? {
+            return Ok(Some(WithStatus::valid_and_finalized(block)));
+        }
+
+        if let Some(block) = self.storage.unfinalized_block_by_root(block_root)? {
+            return Ok(Some(WithStatus::valid_and_unfinalized(StoredBlock::Full(
+                block,
+            ))));
+        }
+
+        Ok(None)
+    }
+
+    pub fn canonical_block_after_slot(
         &self,
         slot: Slot,
-    ) -> Result<Option<BlockWithRoot<StoredBlock<P>>>> {
+    ) -> Result<Option<WithStatus<BlockWithRoot<StoredBlock<P>>>>> {
+        let store = &self.store_snapshot;
+
         // The store only keeps the most recent finalized blocks. It has the successor as long
         // as it reaches back to `slot` itself.
-        if self.store_snapshot.chain_link_before_or_at(slot).is_some() {
-            return Ok(self
-                .store_snapshot
+        if store.chain_link_before_or_at(slot).is_some() {
+            return Ok(store
                 .canonical_chain()
                 .take_while(|chain_link| chain_link.slot() > slot)
                 .last()
-                .map(Into::into));
+                .map(|chain_link| WithStatus {
+                    value: chain_link.into(),
+                    status: store.reported_payload_status(chain_link),
+                    finalized: store.is_slot_finalized(chain_link.slot()),
+                }));
         }
 
         Ok(self
             .storage
             .finalized_block_after_slot(slot)?
-            .map(Into::into))
+            .map(|block_with_root| WithStatus::valid_and_finalized(block_with_root.into())))
     }
 
     #[must_use]
