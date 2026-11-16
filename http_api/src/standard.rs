@@ -40,6 +40,7 @@ use fork_choice_control::{
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+    StateCacheError,
 };
 use futures::{
     channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
@@ -590,13 +591,18 @@ pub async fn genesis<P: Preset>(
 }
 
 /// `GET /eth/v1/builder/states/{state_id}/expected_withdrawals`
+#[expect(clippy::type_complexity)]
 #[instrument(skip_all, level = "debug", name = "http_api::expected_withdrawals")]
 pub async fn expected_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ExpectedWithdrawalsQuery>,
-) -> Result<EthResponse<Vec<Withdrawal>>, Error> {
+    headers: HeaderMap,
+) -> Result<
+    EthResponse<ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>, (), JsonOrSsz>,
+    Error,
+> {
     let WithStatus {
         value: state,
         status,
@@ -621,14 +627,32 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
             tokio::task::block_in_place(|| {
                 controller.preprocessed_state_post_block_blocking(block_root, proposal_slot)
             })
+            .map_err(|error| match error.downcast_ref::<StateCacheError>() {
+                // The requested `proposal_slot` is too far ahead of the state.
+                // The default one is the next slot, so only a requested one is the client's fault.
+                Some(StateCacheError::StateFarBehind { .. }) if query.proposal_slot.is_some() => {
+                    Error::InvalidSlot(error)
+                }
+                _ => Error::Internal(error),
+            })
         })
         .transpose()?
         .unwrap_or(state);
 
-    let state = state.post_capella().ok_or(Error::StatePreCapella)?;
-    let expected_withdrawals = transition_functions::capella::get_expected_withdrawals(state)?;
+    let expected_withdrawals = if let Some(state) = state.post_gloas() {
+        transition_functions::gloas::get_expected_withdrawals(state)?.0
+    } else if let Some(state) = state.post_electra() {
+        transition_functions::electra::get_expected_withdrawals(state)?.0
+    } else if let Some(state) = state.post_capella() {
+        transition_functions::capella::get_expected_withdrawals(state)?
+    } else {
+        return Err(Error::StatePreCapella);
+    };
 
-    Ok(EthResponse::json(expected_withdrawals)
+    let expected_withdrawals =
+        ContiguousList::try_from_iter(expected_withdrawals).map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(expected_withdrawals, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
