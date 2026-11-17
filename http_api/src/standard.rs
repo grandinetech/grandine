@@ -3674,7 +3674,8 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     let duties = validator_indices
         .into_iter()
         .map(|validator_index| {
-            let validator_pubkey = accessors::public_key(&state, validator_index)?;
+            let validator_pubkey = accessors::public_key(&state, validator_index)
+                .map_err(|_| Error::InvalidValidatorIndex(validator_index))?;
 
             let validator_sync_committee_indices = committee
                 .pubkeys
@@ -3694,7 +3695,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
             }))
         })
         .filter_map(Result::transpose)
-        .collect::<Result<_>>()?;
+        .collect::<Result<_, Error>>()?;
 
     Ok(EthResponse::json(duties).execution_optimistic(status.is_optimistic()))
 }
