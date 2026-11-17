@@ -1381,6 +1381,16 @@ impl<P: Preset> Storage<P> {
         Ok((serialize_key(key), compressed_value))
     }
 
+    /// Returns the block most recently confirmed by the Fast Confirmation Rule before a restart.
+    pub(crate) fn fast_confirmed_root(&self) -> Result<Option<H256>> {
+        self.get(FastConfirmedRoot)
+    }
+
+    pub(crate) fn save_fast_confirmed_root(&self, block_root: H256) -> Result<()> {
+        self.database
+            .put_batch_raw(vec![serialize(FastConfirmedRoot, block_root)?])
+    }
+
     fn append_finalized_validator_pubkeys_to_batch(
         &self,
         batch: &mut Vec<(String, Vec<u8>)>,
@@ -1767,6 +1777,18 @@ impl FinalizedValidators {
 }
 
 impl PrefixableKey for FinalizedValidators {
+    const PREFIX: &'static str = Self::KEY;
+}
+
+#[derive(Display)]
+#[display("{}", Self::PREFIX)]
+pub struct FastConfirmedRoot;
+
+impl FastConfirmedRoot {
+    const KEY: &'static str = "fast_confirmed_root";
+}
+
+impl PrefixableKey for FastConfirmedRoot {
     const PREFIX: &'static str = Self::KEY;
 }
 

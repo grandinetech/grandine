@@ -270,6 +270,11 @@ pub struct BeaconNodeOptions {
     #[clap(long)]
     sync_without_reconstruction: bool,
 
+    /// Run the Fast Confirmation Rule and report fast confirmed blocks to the execution layer as safe
+    /// [default: disabled]
+    #[clap(long)]
+    fast_confirmation: bool,
+
     /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
     #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
     reconstruction_delay: u64,
@@ -478,6 +483,7 @@ impl BeaconNodeOptions {
             mut back_sync_enabled,
             force_reset_beacon_db,
             sync_without_reconstruction,
+            fast_confirmation,
             reconstruction_delay,
             blacklisted_blocks,
             builder_api_format: _,
@@ -674,6 +680,7 @@ impl BeaconNodeOptions {
                 kzg_backend,
                 sync_without_reconstruction,
                 disable_proposer_reorgs,
+                fast_confirmation,
                 builder_circuit_breaker,
             },
             reconstruction_delay: Duration::from_millis(reconstruction_delay),
@@ -2945,6 +2952,20 @@ mod tests {
         let config = config_from_args(["--back-sync"]);
         let node = beacon_node(&config);
         assert!(node.back_sync_enabled);
+    }
+
+    #[test]
+    fn fast_confirmation_is_disabled_by_default() {
+        let config = config_from_args([]);
+        let node = beacon_node(&config);
+        assert!(!node.store_config.fast_confirmation);
+    }
+
+    #[test]
+    fn supports_fast_confirmation_flag() {
+        let config = config_from_args(["--fast-confirmation"]);
+        let node = beacon_node(&config);
+        assert!(node.store_config.fast_confirmation);
     }
 
     #[test]

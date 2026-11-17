@@ -14,6 +14,7 @@
 use core::time::Duration;
 use std::sync::Arc;
 
+use bls::SignatureBytes;
 use clock::{Tick, TickKind};
 #[cfg(feature = "eth2-cache")]
 use eth2_cache_utils::medalla;
@@ -24,7 +25,7 @@ use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
-use ssz::{ContiguousList, ProgressiveList};
+use ssz::{BitVector, ContiguousList, ProgressiveList};
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
 #[cfg(feature = "eth2-cache")]
@@ -33,6 +34,10 @@ use types::{
     combined::{Attestation, DataColumnSidecar},
     config::Config,
     deneb::primitives::{KzgCommitment, KzgProof},
+    electra::containers::{
+        AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
+        SignedAggregateAndProof as ElectraSignedAggregateAndProof,
+    },
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
     gloas::{
         consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
@@ -51,12 +56,12 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use fork_choice_store::PayloadPresence;
+use fork_choice_store::{PayloadPresence, StoreConfig};
 
 use crate::{
     helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
     messages::P2pMessage,
-    misc::MutatorIgnoreReason,
+    misc::{MutatorIgnoreReason, MutatorRejectionReason},
     storage::StoredBlock,
 };
 
@@ -4637,4 +4642,373 @@ fn proposal_reorg_is_not_predicted_for_first_slot_of_epoch_on_non_finalizing_cha
     context.on_acceptable_block(&block_31);
 
     context.assert_predicted_proposer_head(root_31);
+}
+
+#[test]
+fn fast_confirmation_rule_runs_at_the_start_of_every_slot() {
+    let mut context =
+        Context::minimal_with_fast_confirmation(StoreConfig::default().max_empty_slots);
+
+    let (genesis_block, genesis_state) = context.genesis();
+    let genesis_root = genesis_block.message().hash_tree_root();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 3);
+
+    let confirmed_slot = |context: &Context<Minimal>| {
+        let confirmed_root = context.fast_confirmation().confirmed_root;
+
+        blocks
+            .iter()
+            .find(|block| block.message().hash_tree_root() == confirmed_root)
+            .map(|block| block.message().slot())
+            .unwrap_or_default()
+    };
+
+    let mut confirmed_slots = vec![];
+
+    for block in &blocks {
+        context.on_slot(block.message().slot());
+        context.on_acceptable_block(block);
+        confirmed_slots.push(confirmed_slot(&context));
+    }
+
+    // Each block contains attestations from the previous slot, so votes lag one slot behind.
+    // Epoch 1 is only justified by the block in slot 16. Until then the observed justified
+    // checkpoint stays in epoch 0, so the Fast Confirmation Rule falls back to the finalized block
+    // (genesis) for the whole of epoch 2.
+    assert_eq!(
+        confirmed_slots,
+        [
+            0, 0, 0, 0, 0, 1, 2, // slots 1-7
+            3, 5, 5, 5, 5, 7, 7, 7, // slots 8-15
+            0, 0, 0, 0, 0, 0, 0, 0,  // slots 16-23
+            19, // slot 24
+        ],
+    );
+
+    // The confirmed block is persisted whenever it changes.
+    let confirmed_root = context.fast_confirmation().confirmed_root;
+
+    assert_ne!(confirmed_root, genesis_root);
+    assert_eq!(
+        context.persisted_fast_confirmed_root(),
+        Some(confirmed_root)
+    );
+}
+
+#[test]
+fn fast_confirmation_rule_restores_block_confirmed_before_restart() {
+    // A small number of allowed empty slots makes it easy to start out of sync.
+    let max_empty_slots = 4;
+
+    // The node is not synced at this point, so the Fast Confirmation Rule does not run.
+    let mut context = Context::minimal_restarted_with_fast_confirmation(max_empty_slots, 16);
+
+    let (_, genesis_state) = context.genesis();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 2);
+    let root_before_restart = blocks[12].message().hash_tree_root();
+
+    assert_eq!(blocks[12].message().slot(), 13);
+
+    context.persist_fast_confirmed_root(root_before_restart);
+
+    // The last block brings the head to the current slot.
+    for block in &blocks {
+        context.on_acceptable_block(block);
+    }
+
+    // Running the Fast Confirmation Rule for the first time in epoch 2 falls back to the
+    // finalized block because the variables have not been updated in previous epochs.
+    // The block confirmed before the restart is newer, not old enough to have been finalized,
+    // and canonical, so it is restored.
+    context.on_slot(17);
+
+    assert_eq!(
+        context.fast_confirmation().confirmed_root,
+        root_before_restart,
+    );
+}
+
+// The head may still be where it was before the restart, so it says nothing about whether the block
+// confirmed before the restart is canonical.
+#[test]
+fn fast_confirmation_rule_does_not_restore_block_until_head_reaches_current_slot() {
+    // A small number of allowed empty slots makes it easy to start out of sync.
+    let max_empty_slots = 4;
+    let mut context = Context::minimal_restarted_with_fast_confirmation(max_empty_slots, 17);
+
+    let (_, genesis_state) = context.genesis();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 2);
+    let root_before_restart = blocks[12].message().hash_tree_root();
+
+    context.persist_fast_confirmed_root(root_before_restart);
+
+    for block in &blocks {
+        context.on_acceptable_block(block);
+    }
+
+    // The head is at slot 16, which counts as forward synced, but no block has reached
+    // the current slot since the restart.
+    context.on_slot(18);
+
+    assert_ne!(
+        context.fast_confirmation().confirmed_root,
+        root_before_restart,
+    );
+}
+
+// The stored root is the block to restore until it has been restored.
+#[test]
+fn fast_confirmation_rule_does_not_overwrite_stored_block_before_restoring_it() {
+    let mut context = Context::minimal_restarted_with_fast_confirmation(4, 1);
+
+    let (genesis_block, genesis_state) = context.genesis();
+    let genesis_root = genesis_block.message().hash_tree_root();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 2);
+    let root_before_restart = H256::repeat_byte(1);
+
+    context.persist_fast_confirmed_root(root_before_restart);
+
+    // Every block arrives one slot late, so the head never reaches the current slot.
+    for block in blocks
+        .iter()
+        .take_while(|block| block.message().slot() < 15)
+    {
+        context.on_slot(block.message().slot() + 1);
+        context.on_acceptable_block(block);
+    }
+
+    assert_ne!(context.fast_confirmation().confirmed_root, genesis_root);
+    assert_eq!(
+        context.persisted_fast_confirmed_root(),
+        Some(root_before_restart),
+    );
+}
+
+// Votes cast in the slot of their block count only toward its pending node.
+// Treating them as votes for the empty node made the balance of that node go below zero when the
+// justified balances decreased, which reset all balances of the block.
+#[test]
+fn justification_preserves_score_of_block_voted_for_in_its_own_slot() {
+    let balance = 16_000_000_000;
+    let mut context = Context::gloas_at_epoch_2_minimal_with_balance(balance);
+
+    let (_, state_0) = context.genesis();
+    let blocks = context.full_blocks_up_to_epoch(&state_0, 2);
+    let (last_block, earlier_blocks) = blocks
+        .split_last()
+        .expect("blocks up to epoch 2 should not be empty");
+
+    // A competing block in the first slot of Gloas. It gets no other votes.
+    let (voted_block, voted_state) = context.empty_block(&state_0, 16, H256::repeat_byte(1));
+    let voted_root = voted_block.message().hash_tree_root();
+
+    let validator_index = accessors::beacon_committees(voted_state.as_ref(), 16)
+        .expect("committees should be available")
+        .flatten()
+        .next()
+        .expect("slot 16 should have attesters");
+
+    for block in earlier_blocks {
+        context.on_slot(block.message().slot());
+        context.on_acceptable_block(block);
+    }
+
+    context.on_slot(16);
+    context.on_acceptable_block(&voted_block);
+    context.on_acceptable_singular_attestation(&voted_state, 2, validator_index);
+    context.on_slot(17);
+
+    assert_eq!(
+        context.stored_attestation_score(voted_root),
+        Some(32_000_000_000),
+    );
+
+    // The last block makes epoch 1 unrealized justified. Because it arrives after its epoch, the
+    // checkpoint is pulled up at once and the lower effective balances of epoch 1 take effect.
+    context.on_slot(24);
+    context.on_acceptable_block(last_block);
+
+    assert_eq!(context.stored_attestation_score(voted_root), Some(balance));
+}
+
+#[test]
+fn aggregate_from_multiple_committees_is_rejected_before_other_validations() {
+    let mut context = Context::electra_minimal();
+
+    let (genesis_block, _) = context.genesis();
+    let genesis_root = genesis_block.message().hash_tree_root();
+    let target = Checkpoint {
+        epoch: GENESIS_EPOCH,
+        root: genesis_root,
+    };
+
+    let unknown_block = AttestationData {
+        slot: 1,
+        beacon_block_root: H256::repeat_byte(1),
+        target,
+        ..AttestationData::default()
+    };
+
+    let future_slot = AttestationData {
+        slot: 2,
+        beacon_block_root: genesis_root,
+        target,
+        ..AttestationData::default()
+    };
+
+    // Outside the current and previous epoch once the clock reaches epoch 2.
+    // Without the committee check running first, this aggregate would be ignored.
+    let old_epoch = AttestationData {
+        slot: 1,
+        beacon_block_root: genesis_root,
+        target,
+        ..AttestationData::default()
+    };
+
+    let old_epoch_clock_slot = misc::compute_start_slot_at_epoch::<Minimal>(2);
+
+    for (clock_slot, data) in [
+        (1, unknown_block),
+        (1, future_slot),
+        (old_epoch_clock_slot, old_epoch),
+    ] {
+        context.on_slot(clock_slot);
+
+        let mut committee_bits = BitVector::default();
+
+        committee_bits.set(0, true);
+        committee_bits.set(1, true);
+
+        let aggregate_and_proof = ElectraSignedAggregateAndProof {
+            message: ElectraAggregateAndProof {
+                aggregator_index: 0,
+                aggregate: ElectraAttestation {
+                    data,
+                    committee_bits,
+                    ..ElectraAttestation::default()
+                },
+                selection_proof: SignatureBytes::default(),
+            },
+            signature: SignatureBytes::default(),
+        };
+
+        assert!(matches!(
+            context.on_gossip_aggregate_and_proof(aggregate_and_proof.into()),
+            Some(P2pMessage::Reject(
+                _,
+                MutatorRejectionReason::InvalidAggregateAndProof,
+            )),
+        ));
+    }
+}
+
+// Execution clients reject forkchoice states with a safe block outside the chain of the head.
+#[test]
+fn safe_block_is_finalized_block_if_confirmed_block_is_not_canonical() {
+    let mut context = Context::bellatrix_minimal_with_fast_confirmation();
+
+    let (_, state_0) = context.genesis();
+    let hash_1 = H256::repeat_byte(1);
+    let hash_2 = H256::repeat_byte(2);
+    let (block_1, _) = context.block_with_payload(&state_0, 1, H256::default(), hash_1);
+    let (block_2, _) = context.block_with_payload(&state_0, 1, H256::default(), hash_2);
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(1);
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    // Which of the two competing blocks becomes the head depends on their roots.
+    let (canonical_root, canonical_hash, other_root) = if context.head_root() == root_1 {
+        (root_1, hash_1, root_2)
+    } else {
+        (root_2, hash_2, root_1)
+    };
+
+    assert_eq!(context.head_root(), canonical_root);
+    assert_eq!(
+        context.safe_execution_payload_hash_if_confirmed(canonical_root),
+        canonical_hash,
+    );
+    assert_eq!(
+        context.safe_execution_payload_hash_if_confirmed(other_root),
+        H256::default(),
+    );
+}
+
+// Without this, a node that falls behind would keep reporting an old block as safe.
+#[test]
+fn fast_confirmation_rule_reverts_to_finalized_block_while_not_synced() {
+    // A small number of allowed empty slots makes it easy to fall out of sync.
+    let max_empty_slots = 4;
+    let mut context = Context::minimal_with_fast_confirmation(max_empty_slots);
+
+    let (_, genesis_state) = context.genesis();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 2);
+
+    // The block in slot 16 justifies epoch 1, which makes the rule fall back to genesis.
+    // Stop before it, while the block in slot 7 is confirmed.
+    for block in blocks
+        .iter()
+        .take_while(|block| block.message().slot() < 16)
+    {
+        context.on_slot(block.message().slot());
+        context.on_acceptable_block(block);
+    }
+
+    let confirmed_root = context.fast_confirmation().confirmed_root;
+
+    assert_eq!(confirmed_root, blocks[6].message().hash_tree_root());
+    assert_eq!(blocks[6].message().slot(), 7);
+    assert_eq!(
+        context.persisted_fast_confirmed_root(),
+        Some(confirmed_root)
+    );
+
+    // The node falls behind. The Fast Confirmation Rule does not run, but the confirmed block
+    // is now more than an epoch old, so `get_latest_confirmed` would revert to the finalized block.
+    context.on_slot(30);
+
+    let finalized_root = context.finalized_root();
+
+    assert_eq!(context.fast_confirmation().confirmed_root, finalized_root);
+    assert_eq!(
+        context.persisted_fast_confirmed_root(),
+        Some(finalized_root)
+    );
+}
+
+#[test]
+fn fast_confirmation_rule_keeps_block_confirmed_before_restart_while_not_synced() {
+    // A small number of allowed empty slots makes it easy to start out of sync.
+    let max_empty_slots = 4;
+    let mut context = Context::minimal_with_fast_confirmation(max_empty_slots);
+
+    let (genesis_block, genesis_state) = context.genesis();
+    let genesis_root = genesis_block.message().hash_tree_root();
+    let blocks = context.full_blocks_up_to_epoch(&genesis_state, 5);
+    let root_before_restart = blocks[12].message().hash_tree_root();
+
+    context.persist_fast_confirmed_root(root_before_restart);
+
+    context.on_slot(45);
+
+    for block in &blocks {
+        context.on_acceptable_block(block);
+    }
+
+    // The node is still not synced. Finality has advanced past the anchor, so the confirmed block
+    // reverts to the finalized block, but the block confirmed before the restart must not be
+    // overwritten before it has been restored.
+    context.on_slot(46);
+
+    let finalized_root = context.finalized_root();
+
+    assert_ne!(finalized_root, genesis_root);
+    assert_eq!(context.fast_confirmation().confirmed_root, finalized_root);
+    assert_eq!(
+        context.persisted_fast_confirmed_root(),
+        Some(root_before_restart),
+    );
 }

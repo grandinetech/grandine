@@ -13,7 +13,8 @@ use execution_engine::{
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
 use fork_choice_store::{
-    AttestationItem, AttestationOrigin, AttesterSlashingOrigin, PayloadPresence, StoreConfig,
+    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
+    FastConfirmationStore, PayloadPresence, StoreConfig,
 };
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use helper_functions::{misc, signing::SignForSingleFork as _};
@@ -24,7 +25,10 @@ use std_ext::ArcExt as _;
 use tokio::sync::broadcast::Receiver;
 use typenum::Unsigned as _;
 use types::{
-    combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     electra::containers::SingleAttestation,
@@ -36,9 +40,10 @@ use types::{
     },
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
+        consts::GENESIS_SLOT,
         containers::Checkpoint,
         primitives::{
-            Epoch, ExecutionBlockHash, H256, Slot, SubnetId, UnixSeconds, ValidatorIndex,
+            Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, UnixSeconds, ValidatorIndex,
         },
     },
     preset::{Minimal, Preset},
@@ -117,10 +122,25 @@ impl<P: Preset> Context<P> {
     }
 
     fn with_configs(config: Config, store_config: StoreConfig) -> Result<Self> {
+        Self::with_configs_at_slot(config, store_config, GENESIS_SLOT)
+    }
+
+    // Starting after the slot of the anchor is what happens when a node is restarted.
+    fn with_configs_at_slot(
+        config: Config,
+        store_config: StoreConfig,
+        start_slot: Slot,
+    ) -> Result<Self> {
         let config = Arc::new(config);
         let pubkey_cache = Arc::new(PubkeyCache::default());
         let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)?;
         let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+
+        let tick = if start_slot == GENESIS_SLOT {
+            Tick::block_proposal(&genesis_block)
+        } else {
+            Tick::start_of_slot(start_slot)
+        };
 
         Ok(Self::with_store_config(
             config,
@@ -128,6 +148,7 @@ impl<P: Preset> Context<P> {
             store_config,
             genesis_block,
             genesis_state,
+            tick,
             true,
             None,
         ))
@@ -143,6 +164,7 @@ impl<P: Preset> Context<P> {
         thread_pool_size: Option<usize>,
     ) -> Self {
         let store_config = StoreConfig::aggressive(&config);
+        let tick = Tick::block_proposal(&anchor_block);
 
         Self::with_store_config(
             config,
@@ -150,17 +172,20 @@ impl<P: Preset> Context<P> {
             store_config,
             anchor_block,
             anchor_state,
+            tick,
             optimistic_merge_block_validation,
             thread_pool_size,
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn with_store_config(
         config: Arc<Config>,
         pubkey_cache: Arc<PubkeyCache>,
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        tick: Tick,
         optimistic_merge_block_validation: bool,
         thread_pool_size: Option<usize>,
     ) -> Self {
@@ -187,6 +212,7 @@ impl<P: Preset> Context<P> {
             pubkey_cache.clone_arc(),
             anchor_block,
             anchor_state,
+            tick,
             execution_engine.clone_arc(),
             p2p_tx,
             PreparedPayloadSink(prepared_payload_tx),
@@ -351,6 +377,23 @@ impl<P: Preset> Context<P> {
             graffiti,
         )
         .expect("block should be constructed successfully")
+    }
+
+    /// Blocks in every slot up to the start of `end_epoch` with attestations from all validators
+    /// assigned to the previous slot.
+    #[must_use]
+    pub fn full_blocks_up_to_epoch(
+        &self,
+        genesis_state: &Arc<BeaconState<P>>,
+        end_epoch: Epoch,
+    ) -> Vec<Arc<SignedBeaconBlock<P>>> {
+        factory::full_blocks_up_to_epoch(
+            self.config(),
+            &self.pubkey_cache,
+            genesis_state.clone_arc(),
+            end_epoch,
+        )
+        .expect("blocks should be constructed successfully")
     }
 
     #[must_use]
@@ -1369,6 +1412,24 @@ impl<P: Preset> Context<P> {
         );
     }
 
+    pub fn on_fast_confirmation(&self) {
+        self.controller().on_fast_confirmation();
+        self.controller().wait_for_tasks();
+    }
+
+    pub fn assert_fast_confirmation(&self, expected: FastConfirmationStore) {
+        assert_eq!(self.controller().fast_confirmation(), expected);
+    }
+
+    pub fn assert_fast_confirmed_execution_payload_hash(&self, expected: ExecutionBlockHash) {
+        assert_eq!(
+            self.controller()
+                .store_snapshot()
+                .fast_confirmed_execution_payload_hash(),
+            expected,
+        );
+    }
+
     pub fn assert_payload_timeliness_vote(
         &self,
         block_root: H256,
@@ -1772,6 +1833,31 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message()
     }
 
+    pub fn on_gossip_aggregate_and_proof(
+        &mut self,
+        aggregate_and_proof: SignedAggregateAndProof<P>,
+    ) -> Option<P2pMessage<P>> {
+        self.controller().on_aggregate_and_proof(
+            self.controller().owned_wait_group(),
+            Arc::new(aggregate_and_proof),
+            AggregateAndProofOrigin::Gossip(GossipId::default()),
+        );
+
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
+    /// Returns the score of an unfinalized block as kept by the fork choice store.
+    pub fn stored_attestation_score(&self, block_root: H256) -> Option<Gwei> {
+        self.controller()
+            .store_snapshot()
+            .unfinalized()
+            .values()
+            .flatten()
+            .find(|unfinalized_block| unfinalized_block.block_root() == block_root)
+            .map(|unfinalized_block| unfinalized_block.attesting_balances.pending)
+    }
+
     // The single attestation `member` would send in `epoch`, signed by `signer`. `state` must
     // already be in `epoch`, as the genesis state is for epoch 0.
     pub fn single_attestation_signed_by(
@@ -1872,6 +1958,72 @@ impl Context<Minimal> {
         Self::with_config(Config::minimal()).expect("minimal configuration is valid")
     }
 
+    pub fn minimal_with_fast_confirmation(max_empty_slots: u64) -> Self {
+        Self::minimal_restarted_with_fast_confirmation(max_empty_slots, GENESIS_SLOT)
+    }
+
+    /// A node that is at `slot` as soon as it starts, like one that has been restarted.
+    pub fn minimal_restarted_with_fast_confirmation(max_empty_slots: u64, slot: Slot) -> Self {
+        let config = Config::minimal();
+
+        let store_config = StoreConfig {
+            fast_confirmation: true,
+            max_empty_slots,
+            ..StoreConfig::aggressive(&config)
+        };
+
+        Self::with_configs_at_slot(config, store_config, slot)
+            .expect("minimal configuration is valid")
+    }
+
+    pub fn bellatrix_minimal_with_fast_confirmation() -> Self {
+        let config = Config::minimal().start_and_stay_in(Phase::Bellatrix);
+
+        let store_config = StoreConfig {
+            fast_confirmation: true,
+            ..StoreConfig::aggressive(&config)
+        };
+
+        Self::with_configs(config, store_config)
+            .expect("minimal configuration modified to start in Bellatrix is valid")
+    }
+
+    pub fn fast_confirmation(&self) -> FastConfirmationStore {
+        self.controller().fast_confirmation()
+    }
+
+    pub fn head_root(&self) -> H256 {
+        self.controller().head().value.block_root
+    }
+
+    /// Returns the safe block hash the store would report if `confirmed_root` were confirmed.
+    pub fn safe_execution_payload_hash_if_confirmed(
+        &self,
+        confirmed_root: H256,
+    ) -> ExecutionBlockHash {
+        let mut store = self.controller().store_snapshot().as_ref().clone();
+        store.set_fast_confirmed_root(confirmed_root);
+        store.safe_execution_payload_hash()
+    }
+
+    pub fn persisted_fast_confirmed_root(&self) -> Option<H256> {
+        self.controller()
+            .storage()
+            .fast_confirmed_root()
+            .expect("fast confirmed root should be readable from storage")
+    }
+
+    pub fn finalized_root(&self) -> H256 {
+        self.controller().finalized_root()
+    }
+
+    pub fn persist_fast_confirmed_root(&self, block_root: H256) {
+        self.controller()
+            .storage()
+            .save_fast_confirmed_root(block_root)
+            .expect("fast confirmed root should be written to storage");
+    }
+
     pub fn bellatrix_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Bellatrix))
             .expect("minimal configuration modified to start in Bellatrix is valid")
@@ -1925,6 +2077,38 @@ impl Context<Minimal> {
                 .partial_validator_mut(validator_index)
                 .expect("slashed validators should be in the genesis state")
                 .slashed = true;
+        }
+
+        let anchor_block = Arc::new(genesis::beacon_block(&anchor_state));
+
+        Self::new(
+            config,
+            pubkey_cache,
+            anchor_block,
+            Arc::new(anchor_state),
+            true,
+            None,
+        )
+    }
+
+    // Blocks built by `factory` do not justify checkpoints in Gloas, so Gloas starts in epoch 2.
+    // All validators have `balance` in the anchor state.
+    // Their effective balances still have the original value until the end of epoch 0.
+    #[must_use]
+    pub fn gloas_at_epoch_2_minimal_with_balance(balance: Gwei) -> Self {
+        let config = Arc::new(Config::minimal().upgrade_once(Phase::Gloas, 2));
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+
+        let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)
+            .expect("minimal configuration modified to upgrade to Gloas in epoch 2 is valid");
+
+        let mut anchor_state = genesis_state.as_ref().clone();
+
+        for validator_index in 0..anchor_state.validators().len_u64() {
+            *anchor_state
+                .balances_mut()
+                .get_mut(validator_index)
+                .expect("every validator should have a balance") = balance;
         }
 
         let anchor_block = Arc::new(genesis::beacon_block(&anchor_state));

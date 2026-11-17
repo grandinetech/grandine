@@ -44,3 +44,8 @@ tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
+
+[features]
+# Compare attestation scores used by the Fast Confirmation Rule with a literal implementation of
+# `get_attestation_score`. Enabled in tests, which run in release mode without debug assertions.
+fast-confirmation-cross-check = []
