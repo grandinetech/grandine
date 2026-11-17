@@ -28,9 +28,10 @@ use crate::{
         BlockAttestationsTask, BlockPayloadAttestationsTask, BlockTask, BlockVerifyForGossipTask,
         CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
         ExecutionPayloadBidTask, ExecutionPayloadEnvelopeTask,
-        ExecutionPayloadEnvelopeVerifyForGossipTask, PayloadAttestationBatchTask,
-        PayloadAttestationTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        ExecutionPayloadEnvelopeVerifyForGossipTask, FastConfirmationTask,
+        PayloadAttestationBatchTask, PayloadAttestationTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
+        PersistFastConfirmedRootTask, PersistPubkeyCacheTask, PreprocessStateTask,
         ProposerPreferencesTask, PruneStateCacheTask, RetryDataColumnSidecarTask, Run,
         StateAtSlotCacheFlushTask,
     },
@@ -131,6 +132,8 @@ enum HighPriorityTask<P: Preset, E, W> {
 #[derive(From)]
 enum MidPriorityTask<P: Preset, W> {
     DataColumnSidecar(DataColumnSidecarTask<P, W>),
+    // The Fast Confirmation Rule should finish well within the slot, but blocks come first.
+    FastConfirmation(FastConfirmationTask<P, W>),
 }
 
 impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, W> {
@@ -152,6 +155,7 @@ impl<P: Preset, W> Run for MidPriorityTask<P, W> {
     fn run(self) {
         match self {
             Self::DataColumnSidecar(task) => task.run(),
+            Self::FastConfirmation(task) => task.run(),
         }
     }
 }
@@ -169,6 +173,7 @@ enum LowPriorityTask<P: Preset, W> {
     PayloadAttestationBatch(PayloadAttestationBatchTask<P, W>),
     ProposerPreferences(ProposerPreferencesTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
+    PersistFastConfirmedRootTask(PersistFastConfirmedRootTask<P, W>),
     PersistPubkeyCacheTask(PersistPubkeyCacheTask<P, W>),
     CacheDepositSignaturesTask(CacheDepositSignaturesTask<P, W>),
     PruneStateCacheTask(PruneStateCacheTask<P, W>),
@@ -190,6 +195,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::PayloadAttestationBatch(task) => task.run(),
             Self::ProposerPreferences(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
+            Self::PersistFastConfirmedRootTask(task) => task.run(),
             Self::PersistPubkeyCacheTask(task) => task.run(),
             Self::CacheDepositSignaturesTask(task) => task.run(),
             Self::PruneStateCacheTask(task) => task.run(),
@@ -229,6 +235,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for BlobSidecarTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for DataColumnSidecarTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.mid_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for FastConfirmationTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.mid_priority_tasks.push_back(self.into())
     }
@@ -301,6 +313,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for ProposerPreferencesTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for PersistBlobSidecarsTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for PersistFastConfirmedRootTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }

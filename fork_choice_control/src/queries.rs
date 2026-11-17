@@ -9,6 +9,8 @@ use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, MAX_PAYLOAD_BODIES_PER_REQUEST};
+#[cfg(test)]
+use fork_choice_store::FastConfirmationStore;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
@@ -112,6 +114,18 @@ where
     #[must_use]
     pub fn justified_checkpoint(&self) -> Checkpoint {
         self.store_snapshot().justified_checkpoint()
+    }
+
+    /// Returns the block most recently confirmed by the Fast Confirmation Rule.
+    ///
+    /// This is only updated when the Fast Confirmation Rule is enabled.
+    #[must_use]
+    pub fn fast_confirmed_chain_link(&self) -> Option<ChainLink<P>> {
+        let store = self.store_snapshot();
+
+        store
+            .chain_link(store.fast_confirmation().confirmed_root)
+            .cloned()
     }
 
     #[must_use]
@@ -1414,6 +1428,11 @@ where
     #[must_use]
     pub fn tick(&self) -> Tick {
         self.store_snapshot().tick()
+    }
+
+    #[must_use]
+    pub fn fast_confirmation(&self) -> FastConfirmationStore {
+        *self.store_snapshot().fast_confirmation()
     }
 
     #[must_use]

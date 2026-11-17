@@ -102,6 +102,7 @@ use crate::{
     data_column_cache::DataColumnCache,
     error::Error,
     execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
+    fast_confirmation::FastConfirmationStore,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
@@ -154,6 +155,9 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // though it would only matter in an extremely unlikely edge case that `consensus-specs` assumes
     // won't happen.
     proposer_boost_root: H256,
+    // Updated by the Fast Confirmation Rule, which is not part of the fork choice rule itself.
+    // See `Store::update_fast_confirmation_variables` and `Store::set_fast_confirmed_root`.
+    fast_confirmation: FastConfirmationStore,
     equivocating_indices: HashSet<ValidatorIndex>,
     // This contains blocks starting with the anchor and ending with the last finalized block.
     finalized: Vector<ChainLink<P>>,
@@ -383,6 +387,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             proposer_boost_root: H256::zero(),
+            fast_confirmation: FastConfirmationStore::new(checkpoint),
             equivocating_indices: HashSet::new(),
             finalized: Vector::unit(anchor),
             unfinalized: ordmap! {},
@@ -612,6 +617,101 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub const fn proposer_boost_root(&self) -> H256 {
         self.proposer_boost_root
+    }
+
+    #[must_use]
+    pub const fn fast_confirmation(&self) -> &FastConfirmationStore {
+        &self.fast_confirmation
+    }
+
+    /// [`update_fast_confirmation_variables`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#update_fast_confirmation_variables)
+    ///
+    /// First part of [`on_fast_confirmation`]. The rest is [`Store::latest_fast_confirmed_root`]
+    /// followed by [`Store::set_fast_confirmed_root`], which may happen later in the slot using a
+    /// snapshot of the store.
+    ///
+    /// Must be called once per slot, after attestations from past slots have been applied and
+    /// before attestations for the current slot are due.
+    ///
+    /// [`on_fast_confirmation`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#on_fast_confirmation
+    pub fn update_fast_confirmation_variables(&mut self) {
+        let mut fast_confirmation = self.fast_confirmation;
+        fast_confirmation.update_variables(self);
+        self.fast_confirmation = fast_confirmation;
+    }
+
+    /// [`get_latest_confirmed`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#get_latest_confirmed)
+    ///
+    /// This is expensive enough that it should not be called in the mutator thread.
+    #[must_use]
+    pub fn latest_fast_confirmed_root(&self) -> H256 {
+        // Failures can only be caused by bugs or by blocks missing from the store.
+        // Falling back to the finalized block is always safe.
+        self.fast_confirmation
+            .latest_confirmed(self)
+            .unwrap_or_else(|error| {
+                warn_with_peers!("fast confirmation rule failed: {error:?}");
+                self.finalized_checkpoint.root
+            })
+    }
+
+    pub const fn set_fast_confirmed_root(&mut self, confirmed_root: H256) {
+        self.fast_confirmation.confirmed_root = confirmed_root;
+    }
+
+    /// Reverts the confirmed block to the finalized block if it is too old or no longer canonical,
+    /// as [`get_latest_confirmed`] would, without running the Fast Confirmation Rule.
+    ///
+    /// Used while the node is not synced and the rule is not run.
+    ///
+    /// [`get_latest_confirmed`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#get_latest_confirmed
+    pub fn revert_outdated_fast_confirmed_root(&mut self) {
+        let revert = self
+            .fast_confirmation
+            .is_confirmed_root_outdated(self)
+            .unwrap_or_else(|error| {
+                warn_with_peers!("failed to check fast confirmed block: {error:?}");
+                true
+            });
+
+        if revert {
+            self.fast_confirmation.confirmed_root = self.finalized_checkpoint.root;
+        }
+    }
+
+    /// Restores the block confirmed before a restart if it is still safe to consider it confirmed.
+    ///
+    /// Corresponds to [`get_restart_resilient_confirmed_root`]. Must be called once, after the
+    /// result of the Fast Confirmation Rule for the current slot has been applied and both
+    /// [`Store::finished_initial_forward_sync`] and [`Store::is_forward_synced`] hold.
+    ///
+    /// [`get_restart_resilient_confirmed_root`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#get_restart_resilient_confirmed_root
+    pub fn restore_fast_confirmed_root(&mut self, root_before_restart: H256) {
+        match self
+            .fast_confirmation
+            .restart_resilient_confirmed_root(self, root_before_restart)
+        {
+            Ok(confirmed_root) => self.fast_confirmation.confirmed_root = confirmed_root,
+            Err(error) => {
+                warn_with_peers!("failed to restore fast confirmed block: {error:?}");
+            }
+        }
+    }
+
+    pub(crate) const fn latest_messages(&self) -> &Vector<Option<Arc<LatestMessage>>> {
+        &self.latest_messages
+    }
+
+    pub(crate) const fn equivocating_indices(&self) -> &HashSet<ValidatorIndex> {
+        &self.equivocating_indices
+    }
+
+    pub(crate) const fn justified_active_balances(&self) -> &Arc<[Gwei]> {
+        &self.justified_active_balances
+    }
+
+    pub(crate) fn pubkey_cache(&self) -> &PubkeyCache {
+        &self.pubkey_cache
     }
 
     #[must_use]
@@ -1464,7 +1564,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // The anchor feature is underdeveloped and poorly specified, so this might not be intended.
     fn is_block_viable(&self, unfinalized_block: &UnfinalizedBlock<P>) -> bool {
         let block_root = unfinalized_block.block_root();
-        let voting_source = self.voting_source(unfinalized_block);
+        let voting_source = self.voting_source(&unfinalized_block.chain_link);
 
         // > The voting source should be at the same height as the store's justified checkpoint or
         // > not more than two epochs ago
@@ -1512,13 +1612,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     /// [`get_voting_source`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_voting_source)
-    fn voting_source(&self, unfinalized_block: &UnfinalizedBlock<P>) -> Checkpoint {
-        if self.current_epoch() > unfinalized_block.epoch() {
+    pub(crate) fn voting_source(&self, chain_link: &ChainLink<P>) -> Checkpoint {
+        if self.current_epoch() > chain_link.epoch() {
             // > The block is from a prior epoch, the voting source will be pulled-up
-            unfinalized_block.chain_link.unrealized_justified_checkpoint
+            chain_link.unrealized_justified_checkpoint
         } else {
             // > The block is not from a prior epoch, therefore the voting source is not pulled up
-            unfinalized_block.chain_link.current_justified_checkpoint
+            chain_link.current_justified_checkpoint
         }
     }
 
@@ -1527,14 +1627,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .total_active_balance
             .get_or_init(|| self.justified_active_balances.iter().sum::<Gwei>());
 
-        let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
+        Self::committee_fraction(total_active_balance, committee_percent)
+    }
+
+    pub(crate) fn committee_fraction(total_balance: Gwei, committee_percent: u64) -> Gwei {
+        let committee_weight = total_balance / P::SlotsPerEpoch::non_zero();
 
         committee_weight.saturating_mul(committee_percent) / 100
     }
 
-    // The block with its `get_attestation_score` for its pending node.
-    // Only unfinalized blocks and the last finalized block have attestation scores.
     fn attestation_score(&self, block_root: H256) -> Result<(&ChainLink<P>, Gwei)> {
+        let Some(block_with_score) = self.stored_attestation_score(block_root) else {
+            bail!(Error::<P>::BlockNotFound { block_root })
+        };
+
+        Ok(block_with_score)
+    }
+
+    // The block with its `get_attestation_score` for its pending node, weighted by
+    // `Store.justified_active_balances`.
+    // Only unfinalized blocks and the last finalized block have attestation scores.
+    pub(crate) fn stored_attestation_score(
+        &self,
+        block_root: H256,
+    ) -> Option<(&ChainLink<P>, Gwei)> {
         if let Some(location) = self.unfinalized_locations.get(&block_root) {
             let Location {
                 segment_id,
@@ -1543,20 +1659,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let block = &self.unfinalized[segment_id][*position];
 
-            return Ok((&block.chain_link, block.attesting_balances.pending));
+            return Some((&block.chain_link, block.attesting_balances.pending));
         }
 
-        if let Some(index) = (self.last_finalized().block_root == block_root)
+        (self.last_finalized().block_root == block_root)
             .then(|| self.finalized_indices.get(&block_root))
             .flatten()
-        {
-            return Ok((
-                &self.finalized[*index],
-                self.last_finalized_attesting_balances().pending,
-            ));
-        }
-
-        bail!(Error::<P>::BlockNotFound { block_root })
+            .map(|index| {
+                (
+                    &self.finalized[*index],
+                    self.last_finalized_attesting_balances().pending,
+                )
+            })
     }
 
     // The conditions of `get_proposer_head` for building on the parent of `head` at `slot`.
@@ -2009,14 +2123,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         )
     }
 
-    fn timely_proposer_score(&self) -> Gwei {
-        let total_active_balance = *self
-            .total_active_balance
-            .get_or_init(|| self.justified_active_balances.iter().sum::<Gwei>());
-
-        let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
-
-        committee_weight.saturating_mul(self.chain_config.proposer_score_boost) / 100
+    pub(crate) fn timely_proposer_score(&self) -> Gwei {
+        self.calculate_committee_fraction(self.chain_config.proposer_score_boost)
     }
 
     /// [`get_ancestor`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_ancestor)
@@ -2024,7 +2132,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// This should never return `None` in normal operation, but the reasons for that are slightly
     /// different at each call site, so we call `Option::expect` every time we use this instead of
     /// changing the type.
-    fn ancestor(&self, descendant_root: H256, ancestor_slot: Slot) -> Option<H256> {
+    pub(crate) fn ancestor(&self, descendant_root: H256, ancestor_slot: Slot) -> Option<H256> {
         if let Some(location) = self.unfinalized_locations.get(&descendant_root).copied() {
             let descendant_segment = &self.unfinalized[&location.segment_id];
 
@@ -2111,11 +2219,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     /// [`get_safe_execution_payload_hash`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/fork_choice/safe-block.md#get_safe_execution_payload_hash)
+    ///
+    /// Uses the block confirmed by the Fast Confirmation Rule if it is enabled.
     #[must_use]
     pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
+        if self.store_config.fast_confirmation {
+            return self.fast_confirmed_execution_payload_hash();
+        }
+
         self.justified_chain_link()
             .map(Self::checkpoint_execution_payload_hash)
             .unwrap_or_default()
+    }
+
+    /// [`get_safe_execution_block_hash`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/gloas/fast-confirmation.md#modified-get_safe_execution_block_hash)
+    /// from the Fast Confirmation Rule.
+    ///
+    /// Falls back to the finalized block if, since [`get_latest_confirmed`] last ran, the confirmed
+    /// block has been pruned, finality has advanced past it, or the head has moved to a chain that
+    /// does not contain it. `get_latest_confirmed` would revert to the finalized block in all of
+    /// those cases. Until then, reporting the confirmed block would make the safe block older than
+    /// the finalized one or put it outside the chain of the head. Execution clients reject such
+    /// forkchoice states.
+    ///
+    /// [`get_latest_confirmed`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/phase0/fast-confirmation.md#get_latest_confirmed
+    #[must_use]
+    pub fn fast_confirmed_execution_payload_hash(&self) -> ExecutionBlockHash {
+        let finalized = self.last_finalized();
+        let confirmed_root = self.fast_confirmation.confirmed_root;
+
+        let safe_block = self
+            .chain_link(confirmed_root)
+            .filter(|confirmed| {
+                confirmed.slot() >= finalized.slot()
+                    && self.ancestor(self.head().block_root, confirmed.slot())
+                        == Some(confirmed_root)
+            })
+            .unwrap_or(finalized);
+
+        Self::checkpoint_execution_payload_hash(safe_block)
     }
 
     // In Post-Gloas phases, block being finalized does not guarantee that the block hash in payload bid
@@ -2930,6 +3072,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let selection_proof = message.selection_proof();
         let aggregate = Arc::new(message.aggregate());
 
+        self.ensure_single_committee(&aggregate)?;
+
         match self.validate_attestation_internal(&aggregate, false)? {
             PartialAttestationAction::Accept => {}
             PartialAttestationAction::Ignore => {
@@ -3098,6 +3242,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         attestation: AttestationItem<P, I>,
         skip_signatures_verification: bool,
     ) -> Result<AttestationAction<P, I>, AttestationValidationError<P, I>> {
+        if attestation.origin.must_be_singular()
+            && let Err(source) = self.ensure_single_committee(&attestation.item)
+        {
+            return Err(AttestationValidationError::Other {
+                attestation: Box::new(attestation),
+                source,
+            });
+        }
+
         match self
             .validate_attestation_internal(&attestation.item, attestation.origin.is_from_block())
         {
@@ -3283,6 +3436,32 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         })
     }
 
+    /// Gossip validation for attestations in Electra and Fulu.
+    ///
+    /// This must run before [`Store::validate_attestation_internal`]. The networking specification
+    /// lists this `REJECT` before the conditions that ignore or delay an attestation.
+    ///
+    /// This is not part of [`Store::validate_attestation_internal`] because the Fork Choice
+    /// specification does not limit the number of committees. `fast_confirmation` test cases in
+    /// `consensus-spec-tests` contain bare aggregates spanning multiple committees.
+    fn ensure_single_committee(&self, attestation: &Arc<Attestation<P>>) -> Result<()> {
+        if (Phase::Electra..Phase::Gloas).contains(&self.phase())
+            && let Attestation::Electra(electra_attestation) = attestation.as_ref()
+        {
+            let committee_indices =
+                misc::get_committee_indices::<P>(electra_attestation.committee_bits);
+
+            ensure!(
+                committee_indices.count() == 1,
+                Error::AttestationFromMultipleCommittees {
+                    attestation: attestation.clone_arc()
+                }
+            );
+        }
+
+        Ok(())
+    }
+
     /// Performs validations needed for both singular attestations and aggregates.
     ///
     /// Roughly corresponds to [`validate_on_attestation`] from the Fork Choice specification.
@@ -3331,18 +3510,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         attestation: attestation.clone_arc()
                     }
                 );
-
-                if let Attestation::Electra(electra_attestation) = attestation.as_ref() {
-                    let committee_indices =
-                        misc::get_committee_indices::<P>(electra_attestation.committee_bits);
-
-                    ensure!(
-                        committee_indices.count() == 1,
-                        Error::AttestationFromMultipleCommittees {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
-                }
             }
 
             // > Attestations must be from the current or previous epoch
@@ -5690,10 +5857,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
+            // Votes cast in the slot of their block only count toward the pending node.
+            let payload_present = (latest_message.post_gloas::<P>(&self.chain_config)
+                && self
+                    .chain_link(latest_message.root)
+                    .is_some_and(|chain_link| chain_link.slot() < latest_message.slot))
+            .then_some(latest_message.payload_present);
+
             let differences_entry = differences.entry(latest_message.root).or_default();
-            let payload_present = latest_message
-                .post_gloas::<P>(&self.chain_config)
-                .then(|| latest_message.payload_present);
 
             differences_entry
                 .checked_sub_balance_mut(old_balance, payload_present)
@@ -5956,6 +6127,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let index = usize::try_from(validator_index)?;
                 let balance = self.justified_active_balance(index);
 
+                // The justified state may contain validators added after the last finalized block.
+                // Without a latest message, every new vote of one would add its balance again.
+                if index >= self.latest_messages.len() {
+                    let missing = index
+                        .saturating_add(1)
+                        .saturating_sub(self.latest_messages.len());
+
+                    self.latest_messages
+                        .extend(core::iter::repeat_n(None, missing));
+                }
+
                 if let Some(Some(old_message)) = &self.latest_messages.get(index) {
                     let LatestMessage {
                         slot: old_slot,
@@ -5981,9 +6163,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                         if !payload_status_changed {
                             // If nothing changed, it should still update latest message's slot
-                            if index < self.latest_messages.len() {
-                                self.latest_messages[index] = Some(latest_message.clone_arc());
-                            }
+                            self.latest_messages[index] = Some(latest_message.clone_arc());
 
                             continue;
                         }
@@ -6027,9 +6207,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // Note that we mutate `Store.latest_messages` as we go along.
                 // This prevents duplicate attestations from being counted more than once.
-                if index < self.latest_messages.len() {
-                    self.latest_messages[index] = Some(latest_message.clone_arc());
-                }
+                self.latest_messages[index] = Some(latest_message.clone_arc());
             }
         }
 
@@ -6648,7 +6826,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.head_segment_id = best.map(|(_, segment_id)| segment_id);
     }
 
-    fn active_balances(state: &BeaconState<P>) -> Arc<[Gwei]> {
+    pub(crate) fn active_balances(state: &BeaconState<P>) -> Arc<[Gwei]> {
         let epoch = accessors::get_current_epoch(state);
 
         state

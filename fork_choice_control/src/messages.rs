@@ -85,6 +85,16 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         is_back_synced: bool,
     },
+    #[cfg(test)]
+    FastConfirmation {
+        wait_group: W,
+    },
+    FastConfirmedRoot {
+        wait_group: W,
+        // The slot of the store snapshot the root was computed from.
+        slot: Slot,
+        confirmed_root: H256,
+    },
     Block {
         wait_group: W,
         result: Box<Result<BlockAction<P>>>,

@@ -281,7 +281,7 @@ fn verify_batch(pubkey_cache: &PubkeyCache, batch: &[Entry]) -> Vec<(DepositSign
     results
 }
 
-fn verify_decompressed(
+pub(crate) fn verify_decompressed(
     signing_root: H256,
     signature: SignatureBytes,
     public_key: Arc<PublicKey>,
@@ -300,6 +300,8 @@ mod tests {
         PendingDeposits, electra::beacon_state::BeaconState as ElectraBeaconState,
         phase0::primitives::Slot, preset::Minimal,
     };
+
+    use crate::predicates::is_valid_deposit_signature;
 
     use super::*;
 
@@ -555,5 +557,37 @@ mod tests {
 
         assert_eq!(cache.get(&deposit_signature_key(&config, &old)), Some(true));
         assert_eq!(cache.get(&deposit_signature_key(&config, &new)), Some(true));
+    }
+
+    #[test]
+    fn is_valid_deposit_signature_verifies_uncached_deposits() {
+        let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
+
+        let valid = valid_deposit(&config, 0, 0);
+        let invalid = invalid_deposit(&config, 1, 0);
+
+        assert!(is_valid_deposit_signature(&config, &pubkey_cache, &valid));
+        assert!(!is_valid_deposit_signature(
+            &config,
+            &pubkey_cache,
+            &invalid
+        ));
+    }
+
+    #[test]
+    fn is_valid_deposit_signature_returns_cached_results() {
+        let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
+        let cache = pubkey_cache.deposit_signatures();
+
+        let valid = valid_deposit(&config, 0, 0);
+        let invalid = invalid_deposit(&config, 1, 0);
+
+        cache.insert(deposit_signature_key(&config, &valid), false);
+        cache.insert(deposit_signature_key(&config, &invalid), true);
+
+        assert!(!is_valid_deposit_signature(&config, &pubkey_cache, &valid));
+        assert!(is_valid_deposit_signature(&config, &pubkey_cache, &invalid));
     }
 }

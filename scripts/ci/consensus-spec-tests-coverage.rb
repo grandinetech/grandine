@@ -22,7 +22,6 @@ CONSENSUS_IGNORED_GLOBS = %w[
   tests/*/*/ssz_static/PartialDataColumnPartsMetadata/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnSidecar/*/*/*.{ssz_snappy,yaml}
   tests/*/heze/*/*/*/*/*.{ssz_snappy,yaml}
-  tests/*/*/fast_confirmation/*/*/*/*.{ssz_snappy,yaml}
   tests/*/*/networking/*/pyspec_tests/*/*.{ssz_snappy,yaml}
 ].map! { |glob| File.join(CONSENSUS_SPEC_TESTS, glob) }
 

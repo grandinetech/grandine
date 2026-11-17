@@ -18,7 +18,7 @@ use core::panic::AssertUnwindSafe;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{
-        Arc,
+        Arc, Mutex,
         mpsc::{Receiver, Sender},
     },
     thread::Builder,
@@ -96,9 +96,10 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
         BlockTask, CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
-        ExecutionPayloadEnvelopeTask, PayloadAttestationTask, PersistBlobSidecarsTask,
-        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, ProposerPreferencesTask, PruneStateCacheTask,
+        ExecutionPayloadEnvelopeTask, FastConfirmationTask, PayloadAttestationTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PersistExecutionPayloadEnvelopesTask, PersistFastConfirmedRootTask, PersistPubkeyCacheTask,
+        PreprocessStateTask, ProposerPreferencesTask, PruneStateCacheTask,
         RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
@@ -158,6 +159,8 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     has_pending_archive_tasks: bool,
     is_archiving_finalized: bool,
     consecutive_failed_archives: u8,
+    fast_confirmed_root_restoration: FastConfirmedRootRestoration,
+    last_persisted_fast_confirmed_slot: Arc<Mutex<Option<Slot>>>,
     pending_state_cache_prune: Option<bool>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
@@ -167,6 +170,14 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
+}
+
+// The block confirmed by the Fast Confirmation Rule before a restart is restored at most once,
+// the first time the rule runs while the node is synced.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FastConfirmedRootRestoration {
+    Pending,
+    Done,
 }
 
 impl<P, E, W, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, TS, PS, LS, NS, SS, VS>
@@ -228,6 +239,8 @@ where
             has_pending_archive_tasks: false,
             is_archiving_finalized: false,
             consecutive_failed_archives: 0,
+            fast_confirmed_root_restoration: FastConfirmedRootRestoration::Pending,
+            last_persisted_fast_confirmed_slot: Arc::default(),
             pending_state_cache_prune: None,
             mutator_tx,
             mutator_rx,
@@ -253,6 +266,15 @@ where
                     wait_group,
                     is_back_synced,
                 } => self.handle_back_sync_status(wait_group, is_back_synced),
+                #[cfg(test)]
+                MutatorMessage::FastConfirmation { wait_group } => {
+                    self.handle_fast_confirmation(wait_group);
+                }
+                MutatorMessage::FastConfirmedRoot {
+                    wait_group,
+                    slot,
+                    confirmed_root,
+                } => self.handle_fast_confirmed_root(wait_group, slot, confirmed_root),
                 MutatorMessage::Block {
                     wait_group,
                     result,
@@ -614,6 +636,33 @@ where
             return Ok(());
         };
 
+        // `Store::apply_tick` has applied attestations from past slots by now.
+        // Running the Fast Confirmation Rule while syncing would be useless and expensive.
+        //
+        // Only the variables have to be updated at the start of the slot.
+        // Finding the confirmed block takes tens of milliseconds with a mainnet validator set,
+        // so it is done in a task to avoid delaying blocks arriving at the start of the slot.
+        if changes.is_slot_updated() && self.store.store_config().fast_confirmation {
+            if self.store.is_forward_synced() {
+                self.store_mut().update_fast_confirmation_variables();
+
+                self.spawn(FastConfirmationTask {
+                    store_snapshot: self.owned_store(),
+                    mutator_tx: self.owned_mutator_tx(),
+                    wait_group: wait_group.clone(),
+                    metrics: self.metrics.clone(),
+                });
+            } else {
+                // Without this the block confirmed before falling behind would stay safe.
+                // `get_latest_confirmed` would revert it to the finalized block.
+                let old_confirmed_root = self.store.fast_confirmation().confirmed_root;
+                let old_safe_block_hash = self.store.safe_execution_payload_hash();
+
+                self.store_mut().revert_outdated_fast_confirmed_root();
+                self.after_fast_confirmation(wait_group, old_confirmed_root, old_safe_block_hash);
+            }
+        }
+
         // schedule state cache prune task on a new slot, but not at the beginning of the slot
         if changes.is_slot_updated() {
             // preserve unfinalized fork tips if not finalized or epoch did not change
@@ -732,6 +781,115 @@ where
         }
 
         drop(wait_group);
+    }
+
+    // Runs the Fast Confirmation Rule synchronously.
+    #[cfg(test)]
+    fn handle_fast_confirmation(&mut self, wait_group: W) {
+        let old_confirmed_root = self.store.fast_confirmation().confirmed_root;
+        let old_safe_block_hash = self.store.safe_execution_payload_hash();
+
+        self.store_mut().update_fast_confirmation_variables();
+
+        let confirmed_root = self.store.latest_fast_confirmed_root();
+
+        self.store_mut().set_fast_confirmed_root(confirmed_root);
+        self.after_fast_confirmation(&wait_group, old_confirmed_root, old_safe_block_hash);
+        self.update_store_snapshot();
+
+        drop(wait_group);
+    }
+
+    fn handle_fast_confirmed_root(&mut self, wait_group: W, slot: Slot, confirmed_root: H256) {
+        // The variables have been updated for a later slot by now.
+        // The next result will be computed from the current confirmed block, which is still safe.
+        if slot != self.store.slot() {
+            debug_with_peers!(
+                "discarding fast confirmed block computed for an earlier slot \
+                 (slot: {slot}, current slot: {})",
+                self.store.slot(),
+            );
+
+            return drop(wait_group);
+        }
+
+        let old_confirmed_root = self.store.fast_confirmation().confirmed_root;
+        let old_safe_block_hash = self.store.safe_execution_payload_hash();
+
+        self.store_mut().set_fast_confirmed_root(confirmed_root);
+        self.after_fast_confirmation(&wait_group, old_confirmed_root, old_safe_block_hash);
+        self.update_store_snapshot();
+
+        drop(wait_group);
+    }
+
+    fn after_fast_confirmation(
+        &mut self,
+        wait_group: &W,
+        old_confirmed_root: H256,
+        old_safe_block_hash: ExecutionBlockHash,
+    ) {
+        // > `get_restart_resilient_confirmed_root` MUST be called once the node is fully synced
+        // > and `on_fast_confirmation` has been called.
+        //
+        // `Store::is_forward_synced` alone is not enough. It is true while the head is up to
+        // `StoreConfig.max_empty_slots` behind, so right after a restart the head could still be
+        // where it was before the restart and the canonicality check would be meaningless.
+        if self.fast_confirmed_root_restoration == FastConfirmedRootRestoration::Pending
+            && self.store.finished_initial_forward_sync()
+            && self.store.is_forward_synced()
+        {
+            self.fast_confirmed_root_restoration = FastConfirmedRootRestoration::Done;
+
+            match self.storage.fast_confirmed_root() {
+                Ok(Some(root_before_restart)) => {
+                    self.store_mut()
+                        .restore_fast_confirmed_root(root_before_restart);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    warn_with_peers!("failed to load fast confirmed block: {error:?}");
+                }
+            }
+        }
+
+        let confirmed_root = self.store.fast_confirmation().confirmed_root;
+        let confirmed_slot = self.store.chain_link(confirmed_root).map(ChainLink::slot);
+
+        // Set the gauge even if the confirmed block has not changed.
+        // Otherwise it would read 0 after a restart until the rule confirms a newer block.
+        if let Some(metrics) = self.metrics.as_ref()
+            && let Some(confirmed_slot) = confirmed_slot
+        {
+            metrics.set_beacon_fast_confirmed_slot(confirmed_slot);
+        }
+
+        if confirmed_root != old_confirmed_root {
+            if let Some(confirmed_slot) = confirmed_slot {
+                debug_with_peers!(
+                    "fast confirmed block at slot {confirmed_slot}: {confirmed_root:?}"
+                );
+            }
+
+            // Until the block confirmed before the restart has been restored, the stored root is
+            // that block. Overwriting it while syncing would prevent restoring it.
+            if self.fast_confirmed_root_restoration == FastConfirmedRootRestoration::Done {
+                // Writing to the database in the mutator thread could block it behind other writers.
+                self.spawn(PersistFastConfirmedRootTask {
+                    storage: self.storage.clone_arc(),
+                    last_persisted_slot: self.last_persisted_fast_confirmed_slot.clone_arc(),
+                    slot: self.store.slot(),
+                    confirmed_root,
+                    wait_group: wait_group.clone(),
+                });
+            }
+        }
+
+        // The safe block is only sent to the execution engine along with the head.
+        // The head usually changes every slot, but the safe block should not wait for it.
+        if self.store.safe_execution_payload_hash() != old_safe_block_hash {
+            self.notify_forkchoice_updated(self.store.head());
+        }
     }
 
     fn spawn_state_cache_prune_task(&self, preserve_unfinalized_fork_tips: bool, wait_group: W) {

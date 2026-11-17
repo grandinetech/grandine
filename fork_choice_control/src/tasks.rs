@@ -1,6 +1,6 @@
 use core::panic::AssertUnwindSafe;
 use std::{
-    sync::{Arc, mpsc::Sender},
+    sync::{Arc, Mutex, mpsc::Sender},
     time::Instant,
 };
 
@@ -1055,6 +1055,36 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
     }
 }
 
+pub struct FastConfirmationTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for FastConfirmationTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "FastConfirmationTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_fast_confirmation_times.start_timer());
+
+        MutatorMessage::FastConfirmedRoot {
+            wait_group,
+            slot: store_snapshot.slot(),
+            confirmed_root: store_snapshot.latest_fast_confirmed_root(),
+        }
+        .send(&mutator_tx);
+    }
+}
+
 pub struct PreprocessStateTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub state_cache: Arc<StateCacheProcessor<P>>,
@@ -1111,6 +1141,44 @@ impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
                 warn_with_peers!("failed to preprocess beacon state for the next slot: {error:?}");
             }
         }
+    }
+}
+
+pub struct PersistFastConfirmedRootTask<P: Preset, W> {
+    pub storage: Arc<Storage<P>>,
+    // Tasks may run out of order. The slot keeps an older root from overwriting a newer one.
+    pub last_persisted_slot: Arc<Mutex<Option<Slot>>>,
+    pub slot: Slot,
+    pub confirmed_root: H256,
+    pub wait_group: W,
+}
+
+impl<P: Preset, W> Run for PersistFastConfirmedRootTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PersistFastConfirmedRootTask::run")]
+    fn run(self) {
+        let Self {
+            storage,
+            last_persisted_slot,
+            slot,
+            confirmed_root,
+            wait_group,
+        } = self;
+
+        // Holding the lock during the write keeps writes in slot order.
+        let mut last_persisted_slot = last_persisted_slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        if last_persisted_slot.is_some_and(|last_slot| last_slot > slot) {
+            return drop(wait_group);
+        }
+
+        match storage.save_fast_confirmed_root(confirmed_root) {
+            Ok(()) => *last_persisted_slot = Some(slot),
+            Err(error) => warn_with_peers!("failed to persist fast confirmed block: {error:?}"),
+        }
+
+        drop(wait_group);
     }
 }
 

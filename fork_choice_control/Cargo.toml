@@ -62,6 +62,7 @@ bytesize = { workspace = true }
 duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
+fork_choice_store = { workspace = true, features = ['fast-confirmation-cross-check'] }
 fs-err = { workspace = true }
 interop = { workspace = true }
 serde-aux = { workspace = true }
