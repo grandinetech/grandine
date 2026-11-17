@@ -1130,6 +1130,10 @@ pub enum UnblindError {
     MissingWithdrawals,
     #[error("pre-Capella block cannot be unblinded with withdrawals")]
     UnexpectedWithdrawals,
+    #[error("payload body has more transactions than the block can hold")]
+    TooManyTransactions,
+    #[error("payload body has more withdrawals than the block can hold")]
+    TooManyWithdrawals,
 }
 
 impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
@@ -1345,8 +1349,17 @@ impl<P: Preset> SignedBlindedBeaconBlock<P> {
             block_access_list: _,
         } = payload_body;
 
-        let transactions = Arc::new(Arc::unwrap_or_clone(transactions).map(Into::into).into());
-        let withdrawals = withdrawals.map(Into::into);
+        let transactions = Arc::new(
+            Arc::unwrap_or_clone(transactions)
+                .map(Into::into)
+                .try_into()
+                .map_err(|_| UnblindError::TooManyTransactions)?,
+        );
+
+        let withdrawals = withdrawals
+            .map(TryInto::try_into)
+            .transpose()
+            .map_err(|_| UnblindError::TooManyWithdrawals)?;
 
         let block: SignedBeaconBlock<P> = match (self, withdrawals) {
             (Self::Bellatrix(block), None) => {
