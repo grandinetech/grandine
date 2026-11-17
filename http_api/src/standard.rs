@@ -84,7 +84,7 @@ use transition_functions::attestation_rewards::{
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    Ptc,
+    ProposerLookahead, Ptc,
     altair::{
         consts::SyncCommitteeSubnetCount,
         containers::{
@@ -489,6 +489,13 @@ struct StateSyncCommitteeResponse<'indices> {
     #[serde(with = "As::<Vec<&[DisplayFromStr]>>")]
     validator_aggregates: Vec<&'indices [ValidatorIndex]>,
 }
+
+#[derive(Serialize, Ssz)]
+#[serde(transparent)]
+#[ssz(derive_hash = false, derive_read = false, transparent)]
+struct StateProposerLookaheadResponse<P: Preset>(
+    #[serde(with = "serde_utils::string_or_native_sequence")] ProposerLookahead<P>,
+);
 
 #[derive(Serialize, Ssz)]
 pub struct StatePtcResponse<P: Preset> {
@@ -1121,6 +1128,8 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     let proposer_lookahead = state
         .post_fulu()
         .map(PostFuluBeaconState::proposer_lookahead)
+        .cloned()
+        .map(StateProposerLookaheadResponse::<P>)
         .ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
