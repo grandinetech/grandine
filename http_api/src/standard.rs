@@ -1002,7 +1002,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
             }
             Either::Left(core::iter::once(slot))
         }
-        None => Either::Right(misc::slots_in_epoch::<P>(epoch)?),
+        None => Either::Right(misc::slots_in_epoch::<P>(epoch).map_err(Error::InvalidEpoch)?),
     };
 
     // TODO(Grandine Team): Optimize state lookup.
@@ -1024,8 +1024,15 @@ pub async fn state_committees<P: Preset, W: Wait>(
         .await??;
     }
 
-    let relative_epoch = accessors::relative_epoch(&state, epoch)?;
+    // Committees are only available for the previous, current and next epoch of the state.
+    let relative_epoch = accessors::relative_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
     let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
+
+    if let Some(index) = query.index
+        && index >= committee_count_per_slot
+    {
+        return Err(Error::CommitteeIndexOutOfRange { index, epoch });
+    }
 
     let indices = query
         .index
