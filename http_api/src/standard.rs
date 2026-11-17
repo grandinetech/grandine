@@ -1578,7 +1578,7 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     headers: HeaderMap,
-) -> Result<EthResponse<SignedBlindedBeaconBlock<P>, (), JsonOrSsz>, Error> {
+) -> Result<Response, Error> {
     let WithStatus {
         value: block,
         status,
@@ -1586,6 +1586,16 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let signed_blinded_block = match block {
+        // Blocks before Bellatrix have no execution payload, so their blinded form is the same.
+        StoredBlock::Full(block) if block.phase() < Phase::Bellatrix => {
+            let version = block.phase();
+
+            return Ok(EthResponse::json_or_ssz(block, &headers)?
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized)
+                .version(version)
+                .into_response());
+        }
         StoredBlock::Full(block) => Arc::unwrap_or_clone(block)
             .try_into()
             .map_err(Error::BlockNotBlindable)?,
@@ -1597,7 +1607,8 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     Ok(EthResponse::json_or_ssz(signed_blinded_block, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
-        .version(version))
+        .version(version)
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
