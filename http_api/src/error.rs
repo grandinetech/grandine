@@ -24,7 +24,7 @@ use types::{
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
     nonstandard::Phase,
-    phase0::primitives::{Epoch, Slot, ValidatorIndex},
+    phase0::primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
 };
 
 #[derive(Debug, Error)]
@@ -54,6 +54,8 @@ pub enum Error {
          the expected number of committees ({computed})"
     )]
     CommitteesAtSlotMismatch { requested: u64, computed: u64 },
+    #[error("committee index {index} does not exist in epoch {epoch}")]
+    CommitteeIndexOutOfRange { index: CommitteeIndex, epoch: Epoch },
     #[error("current slot has no sync committee")]
     CurrentSlotHasNoSyncCommittee,
     #[error("endpoint not implemented")]
@@ -301,6 +303,7 @@ impl Error {
             | Self::BlockPreFulu
             | Self::BlockPreGloas
             | Self::CommitteesAtSlotMismatch { .. }
+            | Self::CommitteeIndexOutOfRange { .. }
             | Self::ContentTypeHeaderInvalid(_)
             | Self::CurrentSlotHasNoSyncCommittee
             | Self::EpochBeforePrevious { .. }
