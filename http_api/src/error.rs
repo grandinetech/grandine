@@ -158,6 +158,8 @@ pub enum Error {
     InvalidSignedVoluntaryExit(#[source] AnyhowError),
     #[error("invalid sync committee messages")]
     InvalidSyncCommitteeMessages(Vec<IndexedError>),
+    #[error("invalid validator index {0}")]
+    InvalidValidatorIndex(ValidatorIndex),
     #[error("invalid validator indices")]
     InvalidValidatorIndices(#[source] JsonRejection),
     #[error("invalid validator signatures")]
@@ -333,6 +335,7 @@ impl Error {
             | Self::InvalidSyncCommitteeMessages(_)
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
+            | Self::InvalidValidatorIndex(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::InvalidSlot(_)
             | Self::ExecutionPayloadEnvelopeSlotMismatch { .. }
