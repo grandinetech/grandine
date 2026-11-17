@@ -6,12 +6,13 @@ use ssz::H256;
 use std_ext::ArcExt as _;
 use types::{combined::BeaconState, config::Config, phase0::primitives::Slot, preset::Preset};
 
-use crate::{hierarchy::Hierarchy, storage::StateByBlockRoot};
+use crate::{derived_fields::ProposerRewards, hierarchy::Hierarchy, storage::StateByBlockRoot};
 
 struct Entry<P: Preset> {
     slot: Slot,
     key: StateByBlockRoot,
     state: Arc<BeaconState<P>>,
+    rewards: Option<ProposerRewards>,
 }
 
 /// Hierarchy ancestors of the state persisted last, kept in memory to
@@ -50,6 +51,12 @@ impl<P: Preset> Spine<P> {
             .map(|entry| (entry.key.clone(), entry.state.clone_arc()))
     }
 
+    pub fn rewards(&self, slot: Slot) -> Option<ProposerRewards> {
+        self.entries()
+            .find(|entry| entry.slot == slot)
+            .and_then(|entry| entry.rewards)
+    }
+
     pub fn get_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {
         self.entries()
             .find(|entry| entry.key.block_root == block_root)
@@ -58,7 +65,13 @@ impl<P: Preset> Spine<P> {
 
     /// Track a persisted state, superseding the one previously tracked in the
     /// same hierarchy layer.
-    pub fn insert(&self, slot: Slot, key: StateByBlockRoot, state: Arc<BeaconState<P>>) {
+    pub fn insert(
+        &self,
+        slot: Slot,
+        key: StateByBlockRoot,
+        state: Arc<BeaconState<P>>,
+        rewards: Option<ProposerRewards>,
+    ) {
         let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
 
         // The number of hierarchy ancestors above a slot is its layer index.
@@ -68,14 +81,24 @@ impl<P: Preset> Spine<P> {
             .len();
 
         if let Some(entry) = self.layers.get(layer) {
-            entry.store(Some(Arc::new(Entry { slot, key, state })));
+            entry.store(Some(Arc::new(Entry {
+                slot,
+                key,
+                state,
+                rewards,
+            })));
         }
     }
 
     /// Copy every tracked state into `other`, as if it had been inserted there.
     pub fn copy_into(&self, other: &Self) {
         for entry in self.entries() {
-            other.insert(entry.slot, entry.key.clone(), entry.state.clone_arc());
+            other.insert(
+                entry.slot,
+                entry.key.clone(),
+                entry.state.clone_arc(),
+                entry.rewards,
+            );
         }
     }
 
@@ -149,7 +172,7 @@ mod tests {
         // One distinct byte per hierarchy node, so keys are comparable.
         let byte = u8::try_from(slot / 32 % 256).expect("remainder fits in u8");
 
-        spine.insert(slot, key(byte), state(slot));
+        spine.insert(slot, key(byte), state(slot), None);
     }
 
     fn tracked(spine: &Spine<Mainnet>) -> Vec<Option<Slot>> {

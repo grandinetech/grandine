@@ -213,6 +213,11 @@ impl<N: Unsigned> ValidatorList<N> {
         }
     }
 
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        self.buf.into_columns()
+    }
+
     fn depth(&self) -> u8 {
         <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(self.len_usize())
     }

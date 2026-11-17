@@ -157,7 +157,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // refactor, including `post_electra`/`post_fulu`/`post_gloas` methods, and
     // maybe few dozen other places.
     fn validators(&self) -> &dyn SszValidatorList;
-    fn balances(&self) -> &dyn SszList<Gwei>;
+    fn balances(&self) -> &dyn SszListMut<Gwei>;
     fn randao_mixes(&self) -> &RandaoMixes<P>;
     fn slashings(&self) -> &Slashings<P>;
     fn justification_bits(&self) -> BitVector<JustificationBitsLength>;
@@ -474,7 +474,7 @@ impl<parameters> BeaconState<P> for implementor {
         [historical_roots] [HistoricalRoots<P>];
         [eth1_data_votes]  [Eth1DataVotes<P>];
         [validators]       [dyn SszValidatorList];
-        [balances]         [dyn SszList<Gwei>];
+        [balances]         [dyn SszListMut<Gwei>];
         [randao_mixes]     [RandaoMixes<P>];
         [slashings]        [Slashings<P>];
         [cache]            [Cache];
@@ -866,9 +866,9 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn earliest_exit_epoch(&self) -> Epoch;
     fn consolidation_balance_to_consume(&self) -> Gwei;
     fn earliest_consolidation_epoch(&self) -> Epoch;
-    fn pending_deposits(&self) -> &dyn SszList<PendingDeposit>;
-    fn pending_partial_withdrawals(&self) -> &dyn SszList<PendingPartialWithdrawal>;
-    fn pending_consolidations(&self) -> &dyn SszList<PendingConsolidation>;
+    fn pending_deposits(&self) -> &dyn SszListMut<PendingDeposit>;
+    fn pending_partial_withdrawals(&self) -> &dyn SszListMut<PendingPartialWithdrawal>;
+    fn pending_consolidations(&self) -> &dyn SszListMut<PendingConsolidation>;
 
     fn deposit_requests_start_index_mut(&mut self) -> &mut u64;
     fn deposit_balance_to_consume_mut(&mut self) -> &mut Gwei;
@@ -928,9 +928,9 @@ impl<parameters> PostElectraBeaconState<P> for implementor {
 
     #[duplicate_item(
         field                         return_type;
-        [pending_deposits]            [dyn SszList<PendingDeposit>];
-        [pending_partial_withdrawals] [dyn SszList<PendingPartialWithdrawal>];
-        [pending_consolidations]      [dyn SszList<PendingConsolidation>];
+        [pending_deposits]            [dyn SszListMut<PendingDeposit>];
+        [pending_partial_withdrawals] [dyn SszListMut<PendingPartialWithdrawal>];
+        [pending_consolidations]      [dyn SszListMut<PendingConsolidation>];
     )]
     fn field(&self) -> &return_type {
         get_ref([field])

@@ -543,6 +543,13 @@ where
             .as_mut()
             .update_at(0, indices, f)
     }
+
+    fn clone_boxed_mut(&self) -> Box<dyn SszListMut<T>>
+    where
+        T: Clone + 'static,
+    {
+        Box::new(self.clone())
+    }
 }
 
 type Height = u8;

@@ -16,7 +16,7 @@ use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::{IsGreaterOrEqual, Sub1, True, Unsigned as _};
 use types::{
-    Ptc,
+    Ptc, RandaoMixes,
     altair::{
         consts::{
             DOMAIN_SYNC_COMMITTEE, TIMELY_HEAD_FLAG_INDEX, TIMELY_SOURCE_FLAG_INDEX,
@@ -36,7 +36,8 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        AttestationEpoch, ForkInfo, PartialValidator, Participation, Phase, RelativeEpoch,
+        AttestationEpoch, ForkInfo, PartialValidator, PartialValidatorList, Participation, Phase,
+        RelativeEpoch,
     },
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
@@ -98,7 +99,11 @@ pub fn relative_epoch<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<RelativeEpoch> {
-    match get_next_epoch(state)?.checked_sub(epoch) {
+    compute_relative_epoch(get_current_epoch(state), epoch)
+}
+
+pub fn compute_relative_epoch(current_epoch: Epoch, epoch: Epoch) -> Result<RelativeEpoch> {
+    match current_epoch.try_add(1)?.checked_sub(epoch) {
         None => bail!(Error::EpochAfterNext),
         Some(0) => Ok(RelativeEpoch::Next),
         Some(1) => Ok(RelativeEpoch::Current),
@@ -209,16 +214,20 @@ fn get_active_validator_indices_by_epoch<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     epoch: Epoch,
 ) -> impl Iterator<Item = ValidatorIndex> + '_ {
-    get_filtered_active_validator_indices_by_epoch(state, epoch, |_| true)
+    get_filtered_active_validator_indices_by_epoch(
+        state.validators().partial_validators(),
+        epoch,
+        |_| true,
+    )
 }
 
-fn get_filtered_active_validator_indices_by_epoch<'a, P: Preset>(
-    state: &'a (impl BeaconState<P> + ?Sized),
+fn get_filtered_active_validator_indices_by_epoch<'a>(
+    partial_validators: impl Iterator<Item = &'a PartialValidator> + 'a,
     epoch: Epoch,
     filter: impl Fn(&PartialValidator) -> bool + 'a,
 ) -> impl Iterator<Item = ValidatorIndex> + 'a {
     (0..)
-        .zip(state.validators().partial_validators())
+        .zip(partial_validators)
         .filter(move |&(_, validator)| predicates::is_active_validator(validator, epoch))
         .filter(move |(_, validator)| filter(validator))
         .map(|(index, _)| index)
@@ -393,8 +402,15 @@ fn get_seed_by_epoch<P: Preset>(
     epoch: Epoch,
     domain_type: DomainType,
 ) -> Result<H256> {
-    let mix = get_randao_mix(
-        state,
+    compute_seed::<P>(state.randao_mixes(), epoch, domain_type)
+}
+
+fn compute_seed<P: Preset>(
+    randao_mixes: &RandaoMixes<P>,
+    epoch: Epoch,
+    domain_type: DomainType,
+) -> Result<H256> {
+    let mix = *randao_mixes.mod_index(
         epoch
             .try_add(P::EpochsPerHistoricalVector::U64)?
             .try_sub(P::MinSeedLookahead::U64)?
@@ -437,13 +453,39 @@ pub fn beacon_committee<P: Preset>(
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
     let committees_per_slot = get_committee_count_per_slot(state, relative_epoch)?;
+    let indices = active_validator_indices_shuffled(state, relative_epoch)?;
 
+    compute_beacon_committee::<P>(indices, committees_per_slot, slot, committee_index)
+}
+
+pub fn compute_shuffled_active_validator_indices<P: Preset>(
+    partial_validators: &PartialValidatorList,
+    randao_mixes: &RandaoMixes<P>,
+    epoch: Epoch,
+) -> Result<PackedIndices>
+where
+    P::ValidatorRegistryLimit: FitsInU64,
+{
+    let ordered = pack_indices(
+        get_filtered_active_validator_indices_by_epoch(partial_validators.iter(), epoch, |_| true)
+            .collect(),
+    );
+    let seed = compute_seed::<P>(randao_mixes, epoch, DOMAIN_BEACON_ATTESTER)?;
+
+    Ok(shuffle_indices::<P>(&ordered, seed))
+}
+
+pub fn compute_beacon_committee<P: Preset>(
+    indices: &PackedIndices,
+    committees_per_slot: u64,
+    slot: Slot,
+    committee_index: CommitteeIndex,
+) -> Result<IndexSlice<'_>> {
     ensure!(
         committee_index < committees_per_slot,
         Error::CommitteeIndexOutOfBounds,
     );
 
-    let indices = active_validator_indices_shuffled(state, relative_epoch)?;
     let validator_count = ValidatorIndex::try_from(indices.len())?;
     let committees_in_epoch = committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?;
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
@@ -611,19 +653,28 @@ pub fn get_or_init_total_active_balance<P: Preset>(
                 }
             }
 
-            let current_epoch = get_current_epoch(state);
-            state
-                .validators()
-                .partial_validators()
-                .zip(state.validators().effective_balances())
-                .filter(|&(validator, _)| predicates::is_active_validator(validator, current_epoch))
-                .map(|(_, effective_balance)| *effective_balance)
-                .sum::<Gwei>()
-                .max(P::EFFECTIVE_BALANCE_INCREMENT.get())
-                .try_into()
-                .expect("the value is at least P::EFFECTIVE_BALANCE_INCREMENT, which is nonzero")
+            compute_total_active_balance::<P>(
+                state.validators().partial_validators(),
+                state.validators().effective_balances(),
+                get_current_epoch(state),
+            )
+            .try_into()
+            .expect("the value is at least P::EFFECTIVE_BALANCE_INCREMENT, which is nonzero")
         })
         .get()
+}
+
+pub fn compute_total_active_balance<'a, P: Preset>(
+    partial_validators: impl Iterator<Item = &'a PartialValidator>,
+    effective_balances: impl Iterator<Item = &'a Gwei>,
+    epoch: Epoch,
+) -> Gwei {
+    partial_validators
+        .zip(effective_balances)
+        .filter(|&(validator, _)| predicates::is_active_validator(validator, epoch))
+        .map(|(_, effective_balance)| *effective_balance)
+        .sum::<Gwei>()
+        .max(P::EFFECTIVE_BALANCE_INCREMENT.get())
 }
 
 fn get_next_sync_committee_indices<P: Preset>(
@@ -818,10 +869,14 @@ pub fn compute_base_reward<P: Preset>(
 }
 
 pub fn get_base_reward_per_increment<P: Preset>(state: &impl BeaconState<P>) -> Result<Gwei> {
+    compute_base_reward_per_increment::<P>(total_active_balance(state))
+}
+
+pub fn compute_base_reward_per_increment<P: Preset>(total_active_balance: Gwei) -> Result<Gwei> {
     P::EFFECTIVE_BALANCE_INCREMENT
         .get()
         .try_mul(P::BASE_REWARD_FACTOR)?
-        .try_div(total_active_balance(state).sqrt())
+        .try_div(total_active_balance.sqrt())
         .map_err(Into::into)
 }
 
@@ -1097,9 +1152,11 @@ pub fn get_beacon_proposer_indices<P: Preset>(
 ) -> Result<Vec<ValidatorIndex>> {
     let exclude_slashed = state.is_post_gloas();
 
-    let indices = get_filtered_active_validator_indices_by_epoch(state, epoch, |validator| {
-        !(exclude_slashed && validator.slashed)
-    });
+    let indices = get_filtered_active_validator_indices_by_epoch(
+        state.validators().partial_validators(),
+        epoch,
+        |validator| !(exclude_slashed && validator.slashed),
+    );
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER)?;
 
     misc::compute_proposer_indices(

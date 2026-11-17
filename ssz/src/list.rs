@@ -60,6 +60,10 @@ pub trait SszListMut<T>: SszList<T> {
     ) -> Result<(), anyhow::Error>
     where
         T: Clone;
+
+    fn clone_boxed_mut(&self) -> Box<dyn SszListMut<T>>
+    where
+        T: Clone + 'static;
 }
 
 pub trait SszBitList: SszHash<PackingFactor = U1> + Send + Sync + Debug {
@@ -75,6 +79,15 @@ pub trait SszBitList: SszHash<PackingFactor = U1> + Send + Sync + Debug {
 }
 
 impl<'a, T> IntoIterator for &'a (dyn SszList<T> + 'a) {
+    type Item = &'a T;
+    type IntoIter = Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a (dyn SszListMut<T> + 'a) {
     type Item = &'a T;
     type IntoIter = Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
 

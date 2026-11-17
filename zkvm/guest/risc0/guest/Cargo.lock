@@ -1030,6 +1030,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bitvec",
+ "ssz",
+ "strum",
+ "thiserror 2.0.16",
+ "try_from_iterator",
+ "typenum",
+ "unsigned-varint",
+ "zstd",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4071,6 +4086,7 @@ dependencies = [
  "bls",
  "derivative",
  "derive_more",
+ "diff",
  "duplicate",
  "enum-iterator",
  "enum-map",
@@ -4145,6 +4161,10 @@ name = "unsigned-varint"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb066959b24b5196ae73cb057f45598450d2c5f71460e98c49b738086eff9c06"
+dependencies = [
+ "bytes",
+ "tokio-util",
+]
 
 [[package]]
 name = "unwrap_none"
