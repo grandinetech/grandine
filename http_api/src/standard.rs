@@ -1334,14 +1334,14 @@ pub async fn state_randao<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    // If `epoch` is in the future, return the RANDAO mix for the current epoch.
-    // This matches how RANDAO mixes are updated during epoch transitions.
-    // RANDAO mixes for future epochs are unstable, but so is the one for the current epoch.
+    // `state.randao_mixes` only holds mixes for epochs in
+    // `(state_epoch - EPOCHS_PER_HISTORICAL_VECTOR, state_epoch]`.
+    // Mixes for future epochs are not known yet.
     let state_epoch = accessors::get_current_epoch(&state);
-    let epoch = query.epoch.unwrap_or(state_epoch).min(state_epoch);
-    let difference = state_epoch.saturating_sub(epoch);
+    let epoch = query.epoch.unwrap_or(state_epoch);
 
-    if difference > P::EpochsPerHistoricalVector::U64 {
+    if epoch > state_epoch || state_epoch.saturating_sub(epoch) >= P::EpochsPerHistoricalVector::U64
+    {
         return Err(Error::EpochOutOfRangeForStateRandao);
     }
 
