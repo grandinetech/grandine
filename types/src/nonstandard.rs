@@ -1100,6 +1100,17 @@ impl RawValidatorList {
     }
 
     #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        let Self {
+            pubkeys,
+            effective_balances,
+            items,
+        } = self;
+
+        (pubkeys, effective_balances, items)
+    }
+
+    #[must_use]
     pub const fn columns(&self) -> (&PubkeyList, &EffectiveBalanceList, &PartialValidatorList) {
         (&self.pubkeys, &self.effective_balances, &self.items)
     }

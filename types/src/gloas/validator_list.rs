@@ -200,6 +200,11 @@ impl ProgressiveValidatorList {
         }
     }
 
+    #[must_use]
+    pub fn into_columns(self) -> (PubkeyList, EffectiveBalanceList, PartialValidatorList) {
+        self.buf.into_columns()
+    }
+
     fn invalidate_index(&mut self, index: usize) {
         let len = self.len_usize();
 

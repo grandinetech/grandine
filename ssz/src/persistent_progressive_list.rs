@@ -747,6 +747,13 @@ where
     {
         Box::new(self.into_iter())
     }
+
+    fn clone_boxed_mut(&self) -> Box<dyn SszListMut<T>>
+    where
+        T: Clone + 'static,
+    {
+        Box::new(self.clone())
+    }
 }
 
 impl<'list, T, B> IntoIterator for &'list PersistentProgressiveList<T, B>

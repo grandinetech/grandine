@@ -15,7 +15,9 @@ use im::OrdMap;
 #[cfg(not(target_os = "zkvm"))]
 use itertools::Either;
 #[cfg(not(target_os = "zkvm"))]
-use libmdbx::{DatabaseFlags, Environment, Geometry, Info, ObjectLength, Stat, WriteFlags};
+use libmdbx::{
+    DatabaseFlags, Environment, Geometry, Info, ObjectLength, RO, Stat, Transaction, WriteFlags,
+};
 #[cfg(not(target_os = "zkvm"))]
 use logging::{debug_with_peers, error_with_peers};
 use snap::raw::{Decoder, Encoder};
@@ -769,9 +771,71 @@ impl Database {
         .pipe(Ok)
     }
 
+    pub fn view(&self) -> Result<View> {
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+                restart_tx: _,
+            } => {
+                let transaction = environment.begin_ro_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+
+                View(ViewKind::Persistent {
+                    transaction,
+                    database,
+                })
+            }
+            DatabaseKind::InMemory { map } => View(ViewKind::InMemory {
+                map: map
+                    .lock()
+                    .expect("in-memory database mutex is poisoned")
+                    .clone(),
+            }),
+        }
+        .pipe(Ok)
+    }
+
     const fn kind(&self) -> &DatabaseKind {
         &self.0
     }
+}
+
+pub struct View(ViewKind);
+
+impl View {
+    pub fn next_raw(&self, key: impl AsRef<[u8]>) -> Result<Option<(&[u8], &[u8])>> {
+        match &self.0 {
+            #[cfg(not(target_os = "zkvm"))]
+            ViewKind::Persistent {
+                transaction,
+                database,
+            } => match transaction
+                .cursor(database.dbi())?
+                .set_range(key.as_ref())?
+            {
+                Some((Cow::Borrowed(key), Cow::Borrowed(value))) => Some((key, value)),
+                Some(_) => unreachable!("read-only transactions return borrowed data"),
+                None => None,
+            },
+            ViewKind::InMemory { map } => map
+                .get_next(key.as_ref())
+                .map(|(key, value)| (&**key, &**value)),
+        }
+        .pipe(Ok)
+    }
+}
+
+enum ViewKind {
+    #[cfg(not(target_os = "zkvm"))]
+    Persistent {
+        transaction: Transaction<RO>,
+        database: libmdbx::Database,
+    },
+    InMemory {
+        map: InMemoryMap,
+    },
 }
 
 impl From<InMemoryMap> for Database {
@@ -1150,6 +1214,28 @@ mod tests {
 
         assert_eq!(key, to_bytes("A"));
         assert_eq!(decompress(&value)?, to_bytes("1"));
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn a_view_reads_values_as_stored_and_does_not_see_later_writes(
+        constructor: Constructor,
+    ) -> Result<()> {
+        let database = constructor()?;
+        let view = database.view()?;
+
+        database.delete_range("A".."F")?;
+
+        let (key, value) = view
+            .next_raw("D")?
+            .expect("E is the first key at or after D");
+
+        assert_eq!(key, to_bytes("E"));
+        assert_eq!(value, compress(b"5")?);
+        assert_eq!(view.next_raw("F")?, None);
+        assert_eq!(database.next_raw("D")?, None);
 
         Ok(())
     }

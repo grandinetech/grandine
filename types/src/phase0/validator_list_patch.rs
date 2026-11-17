@@ -253,6 +253,107 @@ impl<C: SszValidatorList + ?Sized> Patch<C> for ValidatorListPatch {
     }
 }
 
+impl Patch<(PartialValidatorList, EffectiveBalanceList)> for ValidatorListPatch {
+    fn diff(
+        _config: PatchConfig,
+        base: &(PartialValidatorList, EffectiveBalanceList),
+        changed: &(PartialValidatorList, EffectiveBalanceList),
+    ) -> Result<Self, Error> {
+        Self::diff_columns((&base.0, &base.1), (&changed.0, &changed.1))
+    }
+
+    fn apply(self, base: &mut (PartialValidatorList, EffectiveBalanceList)) -> Result<(), Error> {
+        let Self {
+            base_len,
+            effective_balances,
+            withdrawal_credentials_edits,
+            other_edits,
+            appended,
+        } = self;
+
+        let (base_partial_validators, base_effective_balances) = base;
+
+        if base_partial_validators.len()
+            != usize::try_from(base_len).map_err(|_| Error::InvalidPatchEncoding)?
+        {
+            return Err(Error::PatchBaseLengthMismatch);
+        }
+
+        effective_balances.apply_by_index(|index, patch| {
+            let ptr = usize::try_from(index)
+                .ok()
+                .and_then(|index| base_effective_balances.get_mut(index))
+                .ok_or(Error::PatchIndexOutOfBounds)?;
+
+            *ptr = patch(*ptr)?;
+
+            Ok(())
+        })?;
+
+        PositionalPatch::apply_edits(
+            withdrawal_credentials_edits,
+            |index, withdrawal_credentials| {
+                let ptr = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| base_partial_validators.get_mut(index))
+                    .ok_or(Error::PatchIndexOutOfBounds)?;
+
+                ptr.withdrawal_credentials = withdrawal_credentials;
+
+                Ok(())
+            },
+        )?;
+
+        PositionalPatch::apply_edits(other_edits, |index, edits| {
+            let ptr = usize::try_from(index)
+                .ok()
+                .and_then(|index| base_partial_validators.get_mut(index))
+                .ok_or(Error::PatchIndexOutOfBounds)?;
+
+            let OtherValidatorEdits {
+                slashed,
+                activation_eligibility_epoch,
+                activation_epoch,
+                exit_epoch,
+                withdrawable_epoch,
+            } = edits;
+
+            ptr.slashed = slashed;
+            ptr.activation_eligibility_epoch = activation_eligibility_epoch;
+            ptr.activation_epoch = activation_epoch;
+            ptr.exit_epoch = exit_epoch;
+            ptr.withdrawable_epoch = withdrawable_epoch;
+
+            Ok(())
+        })?;
+
+        base.extend(appended.into_iter().map(|validator| {
+            let AppendedValidator {
+                withdrawal_credentials,
+                effective_balance,
+                slashed,
+                activation_eligibility_epoch,
+                activation_epoch,
+                exit_epoch,
+                withdrawable_epoch,
+            } = validator;
+
+            let partial_validator = PartialValidator {
+                withdrawal_credentials,
+                slashed,
+                activation_eligibility_epoch,
+                activation_epoch,
+                exit_epoch,
+                withdrawable_epoch,
+            };
+
+            (partial_validator, effective_balance)
+        }));
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ssz::{SszHash as _, SszRead as _, SszWrite as _};

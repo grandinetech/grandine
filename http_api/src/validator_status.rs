@@ -1,13 +1,14 @@
 use bls::PublicKeyBytes;
-use helper_functions::{accessors, misc};
 use parse_display::{Display, FromStr};
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
-    combined::BeaconState,
-    phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator, primitives::ValidatorIndex},
-    preset::Preset,
-    traits::BeaconState as _,
+    nonstandard::PubkeyList,
+    phase0::{
+        consts::FAR_FUTURE_EPOCH,
+        containers::Validator,
+        primitives::{Epoch, ValidatorIndex},
+    },
 };
 
 pub trait ValidatorIdsAndStatuses {
@@ -80,10 +81,10 @@ pub enum ValidatorId {
 }
 
 impl ValidatorId {
-    pub fn validator_index<P: Preset>(self, state: &BeaconState<P>) -> Option<ValidatorIndex> {
+    pub fn validator_index(self, pubkeys: &PubkeyList) -> Option<ValidatorIndex> {
         match self {
             Self::ValidatorIndex(validator_index) => Some(validator_index),
-            Self::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey),
+            Self::PublicKey(pubkey) => pubkeys.index_of(&pubkey),
         }
     }
 }
@@ -108,9 +109,7 @@ pub enum ValidatorStatus {
 }
 
 impl ValidatorStatus {
-    pub fn new<P: Preset>(validator: &Validator, state: &BeaconState<P>) -> Self {
-        let current_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
-
+    pub const fn new(validator: &Validator, current_epoch: Epoch) -> Self {
         if validator.activation_epoch > current_epoch {
             if validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH {
                 return Self::PendingInitialized;

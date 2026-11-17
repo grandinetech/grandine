@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arc_swap::Guard;
+use diff::Patch as _;
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, MAX_PAYLOAD_BODIES_PER_REQUEST};
 #[cfg(test)]
@@ -21,16 +22,20 @@ use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use serde::Serialize;
+use ssz::{Hc, SszListMut};
 use std_ext::ArcExt;
 use thiserror::Error;
 use tokio::time::{sleep, timeout};
 use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
+    ProposerLookahead, RandaoMixes,
+    altair::containers::SyncCommittee,
     combined::{
         BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock, UnblindError,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
@@ -39,8 +44,12 @@ use types::{
         },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
-    nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{
+        BlockRewards, EffectiveBalanceList, ExecutionPayloadBody, PartialValidatorList,
+        PayloadStatus, Phase, PubkeyList, RawValidatorList, RelativeEpoch, WithStatus,
+    },
     phase0::{
+        consts::GENESIS_SLOT,
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
@@ -50,15 +59,16 @@ use types::{
 
 use crate::{
     controller::Controller,
+    derived_fields::DerivedFields,
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    storage::{Storage, StoredBlock, StoredEnvelope},
+    storage::{StateRow, Storage, StoredBlock, StoredEnvelope},
     unbounded_sink::UnboundedSink,
     wait::Wait,
 };
 
 #[cfg(test)]
-use ::{clock::Tick, fork_choice_store::Segment, types::phase0::consts::GENESIS_SLOT};
+use ::{clock::Tick, fork_choice_store::Segment};
 
 // TODO(Grandine Team): There is currently no way to persist payload statuses.
 //                      We previously treated blocks loaded from the database as optimistic.
@@ -203,6 +213,882 @@ where
             .storage()
             .block_root_before_or_at_slot(slot)?
             .map(|_| WithStatus::valid_and_finalized(())))
+    }
+
+    fn slot_before_or_at(&self, slot: Slot) -> Result<Option<WithStatus<Slot>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        let store = self.store_snapshot();
+
+        if let Some(stored_slot) = self.storage().stored_slot_before_or_at(slot)?
+            && store.is_slot_finalized(stored_slot)
+        {
+            return Ok(Some(WithStatus {
+                value: stored_slot,
+                status: store
+                    .chain_link_before_or_at(slot)
+                    .map_or(PayloadStatus::Valid, |chain_link| chain_link.payload_status),
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        Ok(None)
+    }
+
+    pub fn finality_checkpoints_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<FinalityCheckpoints>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(state.map(Into::into)));
+        }
+
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value) == requested_epoch
+        {
+            let mut previous_justified = None;
+            let mut current_justified = None;
+            let mut finalized = None;
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                match row? {
+                    StateRow::State(state) => {
+                        previous_justified
+                            .get_or_insert_with(|| state.previous_justified_checkpoint());
+                        current_justified
+                            .get_or_insert_with(|| state.current_justified_checkpoint());
+                        finalized.get_or_insert_with(|| state.finalized_checkpoint());
+                    }
+                    StateRow::Frame(frame) => {
+                        previous_justified.get_or_insert(frame.previous_justified_checkpoint()?);
+                        current_justified.get_or_insert(frame.current_justified_checkpoint()?);
+                        finalized.get_or_insert(frame.finalized_checkpoint()?);
+                    }
+                    StateRow::Delta(delta) => {
+                        previous_justified = previous_justified
+                            .or(delta.previous_justified_checkpoint()?.into_changed());
+
+                        current_justified = current_justified
+                            .or(delta.current_justified_checkpoint()?.into_changed());
+
+                        finalized = finalized.or(delta.finalized_checkpoint()?.into_changed());
+                    }
+                }
+
+                if let Some(previous_justified) = previous_justified
+                    && let Some(current_justified) = current_justified
+                    && let Some(finalized) = finalized
+                {
+                    return Ok(Some(stored_slot.map(|_| FinalityCheckpoints {
+                        previous_justified,
+                        current_justified,
+                        finalized,
+                    })));
+                }
+            }
+        }
+
+        Ok(self
+            .state_at_slot_blocking(slot)?
+            .map(|state| state.map(Into::into)))
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn sync_committees_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<(Arc<Hc<SyncCommittee<P>>>, Arc<Hc<SyncCommittee<P>>>)>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(altair) = state.value.post_altair() else {
+                bail!("Pre-Altair states don't have sync committees")
+            };
+
+            return Ok(Some(WithStatus {
+                value: (
+                    altair.current_sync_committee().clone_arc(),
+                    altair.next_sync_committee().clone_arc(),
+                ),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Altair {
+            bail!("Pre-Altair states don't have sync committees");
+        }
+
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value) == requested_epoch
+        {
+            let mut current = None;
+            let mut next = None;
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                match row? {
+                    StateRow::State(state) => {
+                        let state = state.post_altair().context(Error::FieldMissing)?;
+
+                        if current.is_none() {
+                            current = Some(state.current_sync_committee().clone_arc());
+                        }
+
+                        if next.is_none() {
+                            next = Some(state.next_sync_committee().clone_arc());
+                        }
+                    }
+                    StateRow::Frame(frame) => {
+                        if current.is_none() {
+                            current = Some(
+                                frame
+                                    .current_sync_committee()?
+                                    .context(Error::FieldMissing)?,
+                            );
+                        }
+
+                        if next.is_none() {
+                            next = Some(frame.next_sync_committee()?.context(Error::FieldMissing)?);
+                        }
+                    }
+                    StateRow::Delta(delta) => {
+                        if current.is_none() {
+                            current = delta
+                                .current_sync_committee()?
+                                .context(Error::FieldMissing)?
+                                .into_changed();
+                        }
+
+                        if next.is_none() {
+                            next = delta
+                                .next_sync_committee()?
+                                .context(Error::FieldMissing)?
+                                .into_changed();
+                        }
+                    }
+                }
+
+                if let Some(current) = &current
+                    && let Some(next) = &next
+                {
+                    return Ok(Some(
+                        stored_slot.map(|_| (current.clone_arc(), next.clone_arc())),
+                    ));
+                }
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(altair) = state.value.post_altair() else {
+            bail!("Pre-Altair states don't have sync committees")
+        };
+
+        Ok(Some(WithStatus {
+            value: (
+                altair.current_sync_committee().clone_arc(),
+                altair.next_sync_committee().clone_arc(),
+            ),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn proposer_lookahead_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<ProposerLookahead<P>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(fulu) = state.value.post_fulu() else {
+                bail!("Pre-Fulu states don't have proposer lookahead")
+            };
+
+            return Ok(Some(WithStatus {
+                value: fulu.proposer_lookahead().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Fulu {
+            bail!("Pre-Fulu states don't have proposer lookahead");
+        }
+
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value) == requested_epoch
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut proposer_lookahead = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(delta.proposer_lookahead()?.context(Error::FieldMissing)?);
+                        continue;
+                    }
+                    StateRow::Frame(frame) => {
+                        frame.proposer_lookahead()?.context(Error::FieldMissing)?
+                    }
+                    StateRow::State(state) => state
+                        .post_fulu()
+                        .context(Error::FieldMissing)?
+                        .proposer_lookahead()
+                        .clone(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut proposer_lookahead)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| proposer_lookahead)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(fulu) = state.value.post_fulu() else {
+            bail!("Pre-Fulu states don't have proposer lookahead")
+        };
+
+        Ok(Some(WithStatus {
+            value: fulu.proposer_lookahead().clone(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn balances_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<(PubkeyList, Box<dyn SszListMut<Gwei>>)>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(state.map(|state| {
+                (
+                    state.validators().pubkeys().clone(),
+                    state.balances().clone_boxed_mut(),
+                )
+            })));
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::balance_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut balances = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(delta.balances()?);
+                        continue;
+                    }
+                    StateRow::Frame(frame) => frame.balances()?,
+                    StateRow::State(state) => state.balances().clone_boxed_mut(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut *balances)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut *balances)?;
+                }
+
+                return Ok(Some(
+                    stored_slot.map(|_| (self.finalized_pubkeys(), balances)),
+                ));
+            }
+        }
+
+        Ok(self.state_at_slot_blocking(slot)?.map(|state| {
+            state.map(|state| {
+                (
+                    state.validators().pubkeys().clone(),
+                    state.balances().clone_boxed_mut(),
+                )
+            })
+        }))
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn validators_and_balances_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<(RawValidatorList, Box<dyn SszListMut<Gwei>>)>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(state.map(|state| {
+                let (pubkeys, effective_balances, partial_validators) =
+                    state.validators().columns();
+
+                let validators = RawValidatorList::from_columns(
+                    pubkeys.clone(),
+                    effective_balances.clone(),
+                    partial_validators.clone(),
+                );
+
+                (validators, state.balances().clone_boxed_mut())
+            })));
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some((derived_validator_patches, derived_balance_patches)) = self
+                .storage()
+                .slot_patches(stored_slot.value, slot, |fields, count| {
+                    fields
+                        .validator_patches(count)
+                        .zip(fields.balance_patches(count))
+                })?
+        {
+            let mut validator_patches = vec![];
+            let mut balance_patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let (mut columns, mut balances) = match row? {
+                    StateRow::Delta(delta) => {
+                        validator_patches.push(delta.validators()?);
+                        balance_patches.push(delta.balances()?);
+                        continue;
+                    }
+                    StateRow::Frame(frame) => (
+                        (frame.partial_validators()?, frame.effective_balances()?),
+                        frame.balances()?,
+                    ),
+                    StateRow::State(state) => {
+                        let (_, effective_balances, partial_validators) =
+                            state.validators().columns();
+
+                        (
+                            (partial_validators.clone(), effective_balances.clone()),
+                            state.balances().clone_boxed_mut(),
+                        )
+                    }
+                };
+
+                for patch in validator_patches.into_iter().rev() {
+                    patch.apply(&mut columns)?;
+                }
+
+                for patch in balance_patches.into_iter().rev() {
+                    patch.apply(&mut *balances)?;
+                }
+
+                for patch in derived_validator_patches {
+                    patch.apply(&mut columns)?;
+                }
+
+                for patch in derived_balance_patches {
+                    patch.apply(&mut *balances)?;
+                }
+
+                let (partial_validators, effective_balances) = columns;
+                let pubkeys = self.finalized_pubkeys().prefix(partial_validators.len());
+
+                let validators =
+                    RawValidatorList::from_columns(pubkeys, effective_balances, partial_validators);
+
+                return Ok(Some(stored_slot.map(|_| (validators, balances))));
+            }
+        }
+
+        Ok(self.state_at_slot_blocking(slot)?.map(|state| {
+            state.map(|state| {
+                let (pubkeys, effective_balances, partial_validators) =
+                    state.validators().columns();
+
+                let validators = RawValidatorList::from_columns(
+                    pubkeys.clone(),
+                    effective_balances.clone(),
+                    partial_validators.clone(),
+                );
+
+                (validators, state.balances().clone_boxed_mut())
+            })
+        }))
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn validators_and_randao_mixes_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<((PartialValidatorList, EffectiveBalanceList), RandaoMixes<P>)>>>
+    {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(state.map(|state| {
+                let (_, effective_balances, partial_validators) = state.validators().columns();
+
+                (
+                    (partial_validators.clone(), effective_balances.clone()),
+                    state.randao_mixes().clone(),
+                )
+            })));
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some((derived_validator_patches, randao_mix)) =
+                self.storage()
+                    .slot_patches(stored_slot.value, slot, |fields, count| {
+                        fields
+                            .validator_patches(count)
+                            .zip(fields.randao_mix(count))
+                            .map(|(patches, mix)| (patches, Some(mix)))
+                    })?
+        {
+            let mut validator_patches = vec![];
+            let mut randao_patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let (mut columns, mut randao_mixes) = match row? {
+                    StateRow::Delta(delta) => {
+                        validator_patches.push(delta.validators()?);
+                        randao_patches.push(delta.randao_mixes()?);
+                        continue;
+                    }
+                    StateRow::Frame(frame) => (
+                        (frame.partial_validators()?, frame.effective_balances()?),
+                        frame.randao_mixes()?,
+                    ),
+                    StateRow::State(state) => {
+                        let (_, effective_balances, partial_validators) =
+                            state.validators().columns();
+
+                        (
+                            (partial_validators.clone(), effective_balances.clone()),
+                            state.randao_mixes().clone(),
+                        )
+                    }
+                };
+
+                for patch in validator_patches.into_iter().rev() {
+                    patch.apply(&mut columns)?;
+                }
+
+                for patch in randao_patches.into_iter().rev() {
+                    patch.apply(&mut randao_mixes)?;
+                }
+
+                for patch in derived_validator_patches {
+                    patch.apply(&mut columns)?;
+                }
+
+                if let Some(randao_mix) = randao_mix {
+                    *randao_mixes.mod_index_mut(misc::compute_epoch_at_slot::<P>(slot)) =
+                        randao_mix;
+                }
+
+                return Ok(Some(stored_slot.map(|_| (columns, randao_mixes))));
+            }
+        }
+
+        Ok(self.state_at_slot_blocking(slot)?.map(|state| {
+            state.map(|state| {
+                let (_, effective_balances, partial_validators) = state.validators().columns();
+
+                (
+                    (partial_validators.clone(), effective_balances.clone()),
+                    state.randao_mixes().clone(),
+                )
+            })
+        }))
+    }
+
+    pub fn pending_deposits_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Box<dyn SszListMut<PendingDeposit>>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(electra) = state.value.post_electra() else {
+                bail!("Pre-Electra states don't have pending deposits")
+            };
+
+            return Ok(Some(WithStatus {
+                value: electra.pending_deposits().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Electra {
+            bail!("Pre-Electra states don't have pending deposits");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::pending_deposit_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut pending_deposits = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(delta.pending_deposits()?.context(Error::FieldMissing)?);
+                        continue;
+                    }
+                    StateRow::Frame(frame) => {
+                        frame.pending_deposits()?.context(Error::FieldMissing)?
+                    }
+                    StateRow::State(state) => state
+                        .post_electra()
+                        .context(Error::FieldMissing)?
+                        .pending_deposits()
+                        .clone_boxed_mut(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut *pending_deposits)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut *pending_deposits)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| pending_deposits)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(electra) = state.value.post_electra() else {
+            bail!("Pre-Electra states don't have pending deposits")
+        };
+
+        Ok(Some(WithStatus {
+            value: electra.pending_deposits().clone_boxed_mut(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn pending_partial_withdrawals_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Box<dyn SszListMut<PendingPartialWithdrawal>>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(electra) = state.value.post_electra() else {
+                bail!("Pre-Electra states don't have pending partial withdrawals")
+            };
+
+            return Ok(Some(WithStatus {
+                value: electra.pending_partial_withdrawals().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Electra {
+            bail!("Pre-Electra states don't have pending partial withdrawals");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::pending_partial_withdrawal_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut pending_partial_withdrawals = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(
+                            delta
+                                .pending_partial_withdrawals()?
+                                .context(Error::FieldMissing)?,
+                        );
+                        continue;
+                    }
+                    StateRow::Frame(frame) => frame
+                        .pending_partial_withdrawals()?
+                        .context(Error::FieldMissing)?,
+                    StateRow::State(state) => state
+                        .post_electra()
+                        .context(Error::FieldMissing)?
+                        .pending_partial_withdrawals()
+                        .clone_boxed_mut(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut *pending_partial_withdrawals)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut *pending_partial_withdrawals)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| pending_partial_withdrawals)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(electra) = state.value.post_electra() else {
+            bail!("Pre-Electra states don't have pending partial withdrawals")
+        };
+
+        Ok(Some(WithStatus {
+            value: electra.pending_partial_withdrawals().clone_boxed_mut(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn pending_consolidations_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Box<dyn SszListMut<PendingConsolidation>>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(electra) = state.value.post_electra() else {
+                bail!("Pre-Electra states don't have pending consolidations")
+            };
+
+            return Ok(Some(WithStatus {
+                value: electra.pending_consolidations().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Electra {
+            bail!("Pre-Electra states don't have pending consolidations");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::pending_consolidation_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut pending_consolidations = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(
+                            delta
+                                .pending_consolidations()?
+                                .context(Error::FieldMissing)?,
+                        );
+                        continue;
+                    }
+                    StateRow::Frame(frame) => frame
+                        .pending_consolidations()?
+                        .context(Error::FieldMissing)?,
+                    StateRow::State(state) => state
+                        .post_electra()
+                        .context(Error::FieldMissing)?
+                        .pending_consolidations()
+                        .clone_boxed_mut(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut *pending_consolidations)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut *pending_consolidations)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| pending_consolidations)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(electra) = state.value.post_electra() else {
+            bail!("Pre-Electra states don't have pending consolidations")
+        };
+
+        Ok(Some(WithStatus {
+            value: electra.pending_consolidations().clone_boxed_mut(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn randao_mix_at_slot(&self, slot: Slot, epoch: Epoch) -> Result<Option<WithStatus<H256>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(
+                state.map(|state| accessors::get_randao_mix(&*state, epoch)),
+            ));
+        }
+
+        let mix_slot = if epoch == misc::compute_epoch_at_slot::<P>(slot) {
+            // If mix is requested for current epoch, then we need to return
+            // what randao_mix was so far for current slot.
+            slot
+        } else {
+            // If mix is requested for past epoch, then such mix is frozen
+            // already - we can read the value directly from last slot at
+            // requested epoch.
+            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1)).saturating_sub(1)
+        };
+
+        let storage = self.storage();
+
+        if let Some(status) = self.finalized_status(slot)
+            && let Some(stored_slot) = storage.stored_slot_before_or_at(mix_slot)?
+            && let Some(fields) = storage.derived_fields(stored_slot)?
+            && let Some(randao_mix) =
+                fields.randao_mix(usize::try_from(mix_slot.saturating_sub(stored_slot))?)
+        {
+            return Ok(Some(WithStatus {
+                value: randao_mix,
+                status,
+                finalized: true,
+            }));
+        }
+
+        Ok(self
+            .state_at_slot_blocking(slot)?
+            .map(|state| state.map(|state| accessors::get_randao_mix(&*state, epoch))))
+    }
+
+    pub fn total_active_balance_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<Gwei>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            return Ok(Some(
+                state.map(|state| accessors::total_active_balance(&*state)),
+            ));
+        }
+
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value) == requested_epoch
+            && let Some(fields) = self.storage().derived_fields(stored_slot.value)?
+        {
+            return Ok(Some(stored_slot.map(|_| fields.total_active_balance())));
+        }
+
+        Ok(self
+            .state_at_slot_blocking(slot)?
+            .map(|state| state.map(|state| accessors::total_active_balance(&*state))))
+    }
+
+    pub fn block_rewards(
+        &self,
+        block: WithStatus<StoredBlock<P>>,
+    ) -> Result<WithStatus<BlockRewards>> {
+        let WithStatus {
+            value: block,
+            status,
+            finalized,
+        } = block;
+
+        let slot = block.message().slot();
+        let storage = self.storage();
+
+        if finalized
+            && let Some(stored_slot) = storage.stored_slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot)
+                == misc::compute_epoch_at_slot::<P>(slot)
+            && let Some(count) = slot.checked_sub(stored_slot)
+            && let Some(fields) = storage.derived_fields(stored_slot)?
+            && let Some(rewards) = fields.rewards(usize::try_from(count)?)
+        {
+            return Ok(WithStatus {
+                value: rewards.into(),
+                status,
+                finalized,
+            });
+        }
+
+        if slot == GENESIS_SLOT {
+            return Ok(WithStatus {
+                value: BlockRewards::default(),
+                status,
+                finalized,
+            });
+        }
+
+        let state =
+            self.preprocessed_state_post_block_blocking(block.message().parent_root(), slot)?;
+
+        let (_, rewards) = match block {
+            StoredBlock::Full(block) => self
+                .block_processor()
+                .process_trusted_block_with_report(state, &Arc::unwrap_or_clone(block).into())?,
+            StoredBlock::Blinded(block) => {
+                let (block, _) = Arc::unwrap_or_clone(block).split();
+
+                self.block_processor()
+                    .process_trusted_blinded_block_with_report(state, &block)?
+            }
+        };
+
+        Ok(WithStatus {
+            value: rewards.unwrap_or_default(),
+            status,
+            finalized,
+        })
+    }
+
+    #[must_use]
+    pub fn finalized_pubkeys(&self) -> PubkeyList {
+        self.store_snapshot()
+            .finalized_validators()
+            .pubkeys()
+            .clone()
     }
 
     pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {
@@ -504,6 +1390,56 @@ where
         }
 
         Ok(())
+    }
+
+    fn state_in_memory(&self, slot: Slot) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        let store = self.store_snapshot();
+        let state_cache = self.state_cache();
+
+        let chain_link = store.chain_link_before_or_at(slot);
+
+        if let Some(chain_link) = chain_link
+            && let Some(state) = state_cache
+                .before_or_at_slot_in_cache_only(chain_link.block_root, slot)
+                .or_else(|| chain_link.state.clone())
+        {
+            let state = state_cache.process_slots(
+                self.pubkey_cache(),
+                &store,
+                state,
+                chain_link.block_root,
+                slot,
+            )?;
+
+            return Ok(Some(WithStatus {
+                value: state,
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        if store.is_slot_finalized(slot)
+            && let Some(state) = self.storage().state_in_memory(slot)?
+        {
+            return Ok(Some(WithStatus {
+                value: state,
+                status: chain_link
+                    .map_or(PayloadStatus::Valid, |chain_link| chain_link.payload_status),
+                finalized: true,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    fn finalized_status(&self, slot: Slot) -> Option<PayloadStatus> {
+        let store = self.store_snapshot();
+
+        store.is_slot_finalized(slot).then(|| {
+            store
+                .chain_link_before_or_at(slot)
+                .map_or(PayloadStatus::Valid, |chain_link| chain_link.payload_status)
+        })
     }
 
     pub fn state_before_or_at_slot(
@@ -2019,6 +2955,23 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct FinalityCheckpoints {
+    previous_justified: Checkpoint,
+    current_justified: Checkpoint,
+    finalized: Checkpoint,
+}
+
+impl<P: Preset> From<Arc<BeaconState<P>>> for FinalityCheckpoints {
+    fn from(state: Arc<BeaconState<P>>) -> Self {
+        Self {
+            previous_justified: state.previous_justified_checkpoint(),
+            current_justified: state.current_justified_checkpoint(),
+            finalized: state.finalized_checkpoint(),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum Error {
     #[error(
@@ -2040,6 +2993,8 @@ enum Error {
     },
     #[error("state not found in fork choice store: {block_root:?}")]
     StateNotFound { block_root: H256 },
+    #[error("stored state row lacks a field its phase has")]
+    FieldMissing,
 }
 
 #[derive(Debug, Error)]
@@ -2128,6 +3083,35 @@ mod tests {
 
         assert!(controller.status_at_slot(15)?.is_some());
         assert!(controller.status_at_slot(16).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn finality_checkpoints_at_slot_reads_the_store_and_rejects_unreachable_slots() -> Result<()> {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let genesis_checkpoints = FinalityCheckpoints {
+            previous_justified: genesis_state.previous_justified_checkpoint(),
+            current_justified: genesis_state.current_justified_checkpoint(),
+            finalized: genesis_state.finalized_checkpoint(),
+        };
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        assert_eq!(
+            controller
+                .finality_checkpoints_at_slot(15)?
+                .map(|with_status| with_status.value),
+            Some(genesis_checkpoints),
+        );
+        assert!(controller.finality_checkpoints_at_slot(16).is_err());
 
         Ok(())
     }

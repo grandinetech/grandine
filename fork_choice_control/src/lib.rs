@@ -24,7 +24,9 @@ pub use crate::{
         MutatorIgnoreReason, MutatorRejectionReason, SidecarsPendingReconstruction,
         VerifyAggregateAndProofResult, VerifyAttestationResult, VerifyPayloadAttestationResult,
     },
-    queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
+    queries::{
+        BlockError, BlockWithRoot, FinalityCheckpoints, ForkChoiceContext, ForkTip, Snapshot,
+    },
     specialized::{AdHocBenchController, BenchController},
     state_storage_config::StateStorageConfig,
     storage::{
@@ -45,6 +47,7 @@ pub mod controller;
 
 mod archival_pool;
 mod block_processor;
+mod derived_fields;
 mod events;
 mod frame_cache;
 mod hierarchy;

@@ -5,9 +5,9 @@ use core::{
 };
 use std::{borrow::Cow, collections::HashSet, sync::Arc, thread::Builder};
 
-use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
+use anyhow::{Context as _, Error as AnyhowError, Result, anyhow, bail, ensure};
 use bls::SignatureBytes;
-use database::{Database, PrefixableKey, decompress};
+use database::{Database, PrefixableKey, View, decompress};
 use derive_more::Display;
 use diff::{Patch as _, PatchConfig};
 use fork_choice_store::{ChainLink, Store};
@@ -19,7 +19,8 @@ use parking_lot::Mutex;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use ssz::{
-    ReadError, Size, Ssz, SszHash as _, SszRead, SszReadDefault, SszSize, SszWrite, WriteError,
+    Compressed, ReadError, Size, Ssz, SszHash as _, SszRead, SszReadDefault, SszSize, SszWrite,
+    WriteError,
 };
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -48,12 +49,16 @@ use types::{
     },
     preset::Preset,
     redacting_url::RedactingUrl,
-    storage::{BeaconStateFrame, BeaconStatePatch},
+    storage::{BeaconStateFrame, BeaconStateFrameCursor, BeaconStatePatch, BeaconStatePatchCursor},
     traits::{self, BeaconBlock, BeaconState as _, SignedBeaconBlock as _, SszValidatorList},
 };
 
 use crate::{
-    checkpoint_sync, frame_cache::FrameCache, hierarchy::Hierarchy, spine::Spine,
+    checkpoint_sync,
+    derived_fields::{self, DerivedFields, ProposerRewards},
+    frame_cache::FrameCache,
+    hierarchy::Hierarchy,
+    spine::Spine,
     state_storage_config::StateStorageConfig,
 };
 
@@ -427,7 +432,7 @@ impl<P: Preset> Storage<P> {
         // delta parent without reading it back from disk.
         if let Some(key) = self.state_key_by_block_root(anchor_block_root)? {
             self.forward_spine
-                .insert(anchor_slot, key, anchor_state.clone_arc());
+                .insert(anchor_slot, key, anchor_state.clone_arc(), None);
         }
 
         let unfinalized_blocks = unfinalized_blocks.map(|result| match result? {
@@ -460,8 +465,36 @@ impl<P: Preset> Storage<P> {
         }
     }
 
+    fn block_rewards_from_parent(
+        &self,
+        stored_state: &BeaconState<P>,
+        block_root: H256,
+        finalized_validators: &dyn SszValidatorList,
+    ) -> Result<Option<ProposerRewards>> {
+        let slot = stored_state.slot();
+
+        if stored_state.latest_block_header().slot != slot {
+            return Ok(Some(ProposerRewards::default()));
+        }
+
+        let Some(parent_slot) = slot.checked_sub(1) else {
+            return Ok(None);
+        };
+
+        let Some(mut state) = self.stored_state(parent_slot, Some(finalized_validators))? else {
+            return Ok(None);
+        };
+
+        let block = self
+            .finalized_block_by_root(block_root)?
+            .ok_or(Error::BlockNotFound { block_root })?;
+
+        derived_fields::block_rewards(&self.config, &self.pubkey_cache, state.make_mut(), &block)
+            .map(Some)
+    }
+
     #[inline]
-    #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     pub(crate) fn append_finalized_state(
         &self,
         state: Arc<BeaconState<P>>,
@@ -473,6 +506,97 @@ impl<P: Preset> Storage<P> {
         batch: &mut Vec<(String, Vec<u8>)>,
         update_finalized_validators: &mut bool,
     ) -> Result<Option<StateByBlockRoot>> {
+        let previous_slot = self.hierarchy.node_before_or_at::<P>(
+            &self.config,
+            anchor_slot,
+            slot.saturating_sub(1),
+        );
+
+        let intermediate_slots = previous_slot.saturating_add(1)..=slot;
+        let mut rewards = None;
+
+        if !self.prune_storage_enabled()
+            && !intermediate_slots.is_empty()
+            && misc::compute_epoch_at_slot::<P>(previous_slot)
+                == misc::compute_epoch_at_slot::<P>(slot.saturating_sub(1))
+            && *intermediate_slots.start() >= self.pruned_up_to_slot()?
+            && !self.contains_key(DerivedFieldsBySlot(previous_slot))?
+        {
+            let previous_state = match spine.get(previous_slot) {
+                Some((_, previous_state)) => Some(previous_state),
+                None => match self.block_root_by_slot_value(previous_slot)? {
+                    Some(value) => self
+                        .state_with_key_by_block_root(
+                            value.state_key_root(),
+                            Some(finalized_validators),
+                        )?
+                        .map(|(_, previous_state)| previous_state),
+                    None => None,
+                },
+            };
+
+            if let Some(mut previous_state) = previous_state {
+                let mut blocks = vec![];
+                let mut previous_root = accessors::get_block_root_at_slot(&*state, previous_slot)?;
+
+                let previous_rewards = match spine.rewards(previous_slot) {
+                    Some(rewards) => Some(rewards),
+                    None if previous_slot == anchor_slot => None,
+                    None => self.block_rewards_from_parent(
+                        &previous_state,
+                        previous_root,
+                        finalized_validators,
+                    )?,
+                };
+
+                for intermediate_slot in previous_slot.saturating_add(1)..slot {
+                    let block_root = accessors::get_block_root_at_slot(&*state, intermediate_slot)?;
+
+                    if block_root != previous_root {
+                        blocks.push(
+                            self.finalized_block_by_root(block_root)?
+                                .ok_or(Error::BlockNotFound { block_root })?,
+                        );
+                    }
+
+                    previous_root = block_root;
+                }
+
+                let derived_fields = DerivedFields::new(
+                    &self.config,
+                    &self.pubkey_cache,
+                    &mut previous_state,
+                    previous_rewards,
+                    &blocks,
+                    slot,
+                )?;
+
+                let stored_block_root = accessors::latest_block_root(&*state);
+
+                rewards = Some(if stored_block_root == previous_root {
+                    ProposerRewards::default()
+                } else {
+                    let block = self.finalized_block_by_root(stored_block_root)?.ok_or(
+                        Error::BlockNotFound {
+                            block_root: stored_block_root,
+                        },
+                    )?;
+
+                    derived_fields::block_rewards(
+                        &self.config,
+                        &self.pubkey_cache,
+                        previous_state.make_mut(),
+                        &block,
+                    )?
+                });
+
+                batch.push(serialize_raw(
+                    DerivedFieldsBySlot(previous_slot),
+                    Compressed::with_level(derived_fields, self.zstd_compression_level),
+                )?);
+            }
+        }
+
         let stored_key = self.state_key_by_block_root(block_root)?;
 
         // We have to check, if state was already persisted, and if so, how:
@@ -511,7 +635,12 @@ impl<P: Preset> Storage<P> {
                     Some(finalized_validators),
                 )?
                 .inspect(|(key, ancestor_state)| {
-                    spine.insert(candidate_slot, key.clone(), ancestor_state.clone_arc())
+                    spine.insert(
+                        candidate_slot,
+                        key.clone(),
+                        ancestor_state.clone_arc(),
+                        None,
+                    )
                 })
             } else {
                 None
@@ -544,7 +673,7 @@ impl<P: Preset> Storage<P> {
             let patch = BeaconStatePatch::diff(patch_config, &parent_state, &state)?;
 
             batch.push(serialize_raw(&key, patch)?);
-            spine.insert(slot, key, state);
+            spine.insert(slot, key, state, rewards);
 
             Ok(to_replace)
         } else {
@@ -574,7 +703,7 @@ impl<P: Preset> Storage<P> {
 
                 batch.push((serialize_key(&key), serialized_frame));
                 *update_finalized_validators = true;
-                spine.insert(slot, key, state);
+                spine.insert(slot, key, state, rewards);
             }
 
             Ok(None)
@@ -1021,6 +1150,7 @@ impl<P: Preset> Storage<P> {
             }
 
             keys_to_remove.push(key_bytes);
+            keys_to_remove.push(DerivedFieldsBySlot(slot).to_string().into());
 
             let state_prefix = StateByBlockRoot::prefix(value.state_key_root());
             let state_keys = self.database.keys_ascending(state_prefix.as_bytes()..)?;
@@ -1705,6 +1835,86 @@ impl<P: Preset> Storage<P> {
         Ok(Some(state))
     }
 
+    pub(crate) fn stored_slot_before_or_at(&self, slot: Slot) -> Result<Option<Slot>> {
+        let stored_slot = self.hierarchy.node_before_or_at::<P>(
+            &self.config,
+            self.anchor_slot.load(Ordering::SeqCst),
+            slot,
+        );
+
+        Ok((stored_slot >= self.pruned_up_to_slot()?).then_some(stored_slot))
+    }
+
+    pub(crate) fn walk(&self, stored_slot: Slot) -> Result<StateHierarchyWalker<'_, P>> {
+        let value = self.block_root_by_slot_value(stored_slot)?;
+
+        Ok(StateHierarchyWalker {
+            next_block_root: value.map(BlockRootBySlotValue::state_key_root),
+            storage: self,
+            view: self.database.view()?,
+        })
+    }
+
+    pub(crate) fn slot_patches<T: Default>(
+        &self,
+        stored_slot: Slot,
+        slot: Slot,
+        patches: impl FnOnce(&DerivedFields, usize) -> Option<T>,
+    ) -> Result<Option<T>> {
+        let count = usize::try_from(slot.saturating_sub(stored_slot))?;
+
+        if count == 0 {
+            return Ok(Some(T::default()));
+        }
+
+        Ok(self
+            .derived_fields(stored_slot)?
+            .and_then(|fields| patches(&fields, count)))
+    }
+
+    pub(crate) fn derived_fields(&self, stored_slot: Slot) -> Result<Option<DerivedFields>> {
+        let Some(bytes) = self
+            .database
+            .get_raw(DerivedFieldsBySlot(stored_slot).to_string())?
+        else {
+            return Ok(None);
+        };
+
+        let fields = Compressed::<DerivedFields>::from_ssz(&self.config, bytes)?;
+
+        Ok(Some(fields.into_inner()))
+    }
+
+    pub(crate) fn state_in_memory(&self, slot: Slot) -> Result<Option<Arc<BeaconState<P>>>> {
+        if let Some((_, state)) = self.forward_spine.get(slot) {
+            return Ok(Some(state));
+        }
+
+        let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
+
+        if !self
+            .hierarchy
+            .contains::<P>(&self.config, anchor_slot, slot)
+        {
+            return Ok(None);
+        }
+
+        let layer = self
+            .hierarchy
+            .spine::<P>(&self.config, anchor_slot, slot)
+            .len();
+
+        if layer >= self.hierarchy.depth() {
+            return Ok(None);
+        }
+
+        let Some(value) = self.block_root_by_slot_value(slot)? else {
+            return Ok(None);
+        };
+
+        self.frame_cache.get(layer, &value.state_key_root())
+    }
+
     pub(crate) fn state_post_block(
         &self,
         mut block_root: H256,
@@ -2233,6 +2443,12 @@ impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
     }
 }
 
+pub enum StateRow<'row, P: Preset> {
+    Delta(BeaconStatePatchCursor<'row, P>),
+    Frame(BeaconStateFrameCursor<'row, P>),
+    State(Arc<BeaconState<P>>),
+}
+
 #[derive(Clone, Debug)]
 pub enum StoredBlock<P: Preset> {
     Full(Arc<SignedBeaconBlock<P>>),
@@ -2525,6 +2741,14 @@ impl fmt::Display for FinalizedBlockByRoot {
 
         Ok(())
     }
+}
+
+#[derive(Display)]
+#[display("{}{_0:020}", Self::PREFIX)]
+pub struct DerivedFieldsBySlot(pub Slot);
+
+impl PrefixableKey for DerivedFieldsBySlot {
+    const PREFIX: &'static str = "u";
 }
 
 #[derive(Display)]
@@ -2952,24 +3176,134 @@ fn prepare_state<P: Preset>(
     state
 }
 
+pub struct StateHierarchyWalker<'a, P: Preset> {
+    next_block_root: Option<H256>,
+    storage: &'a Storage<P>,
+    view: View,
+}
+
+impl<'a, P: Preset> IntoIterator for &'a StateHierarchyWalker<'a, P> {
+    type Item = Result<StateRow<'a, P>>;
+    type IntoIter = StateHierarchyIter<'a, P>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StateHierarchyIter {
+            visited: HashSet::new(),
+            next_block_root: self.next_block_root,
+            storage: self.storage,
+            view: &self.view,
+        }
+    }
+}
+
+pub struct StateHierarchyIter<'a, P: Preset> {
+    next_block_root: Option<H256>,
+    visited: HashSet<H256>,
+    storage: &'a Storage<P>,
+    view: &'a View,
+}
+
+impl<'a, P: Preset> Iterator for StateHierarchyIter<'a, P> {
+    type Item = Result<StateRow<'a, P>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let block_root = self.next_block_root.take()?;
+
+        let prefix = StateByBlockRoot::prefix(block_root);
+
+        let (key, row) = match self.view.next_raw(&prefix) {
+            Ok(Some(k)) => k,
+            Ok(None) => return None,
+            Err(err) => return Some(Err(err)),
+        };
+
+        if !key.starts_with(prefix.as_bytes()) {
+            return None;
+        }
+
+        let key = match StateByBlockRoot::try_from(key) {
+            Ok(key) => key,
+            Err(err) => return Some(Err(err)),
+        };
+
+        if !self.visited.insert(block_root) {
+            return Some(Err(anyhow!(
+                "unable to read state rows: delta chain revisits block root {block_root:?}"
+            )));
+        }
+
+        if let Some(spine_frame) = self.storage.forward_spine.get_by_block_root(key.block_root) {
+            return Some(Ok(StateRow::State(spine_frame)));
+        }
+
+        let layer = key.parents.len();
+
+        match self.storage.frame_cache.get(layer, &key.block_root) {
+            Ok(Some(frame)) => return Some(Ok(StateRow::State(frame))),
+            Ok(None) => {}
+            Err(_) if layer >= self.storage.hierarchy.depth() => {
+                warn_with_peers!("state reconstruction chain is larger than hierarchy");
+            }
+            Err(err) => return Some(Err(err)),
+        }
+
+        match key.encoding {
+            StateEncoding::Frame => Some(
+                BeaconStateFrameCursor::new(&self.storage.config, row)
+                    .map(StateRow::Frame)
+                    .map_err(Into::into),
+            ),
+            StateEncoding::Delta => {
+                self.next_block_root = key.parents.first().copied();
+
+                Some(
+                    BeaconStatePatchCursor::new(row)
+                        .map(StateRow::Delta)
+                        .map_err(Into::into),
+                )
+            }
+            StateEncoding::LegacySnappy => {
+                // To reconstruct LegacySnappy-encoded state, we have to restore
+                // pubkeys to it. However, we don't have any pubkeys in here. It
+                // may be fixed, but returning "None" here will fall back to the
+                // full state loading, so the result will be correct either way,
+                // just slightly slower than it could be.
+                None
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bls::PublicKeyBytes;
     use bytesize::ByteSize;
     use database::DatabaseMode;
+    use diff::QueuePatch;
+    use ssz::{PersistentList, PersistentVector, SszListMut};
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
-        Validators,
+        Balances, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, Validators,
+        electra::{
+            beacon_state::BeaconState as ElectraBeaconState,
+            containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
+        },
+        nonstandard::{EffectiveBalanceList, PartialValidatorList},
         phase0::{
+            balances_patch::BalancesPatch,
             beacon_state::BeaconState as Phase0BeaconState,
             containers::{
-                BeaconBlock as Phase0BeaconBlock, SignedBeaconBlock as Phase0SignedBeaconBlock,
-                Validator,
+                BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader,
+                SignedBeaconBlock as Phase0SignedBeaconBlock, Validator,
             },
+            primitives::Gwei,
+            validator_list_patch::ValidatorListPatch,
         },
         preset::Mainnet,
     };
+
+    use crate::derived_fields::{DerivedFieldsV1, ElectraDerivedFields, ElectraSlotFields};
 
     use super::*;
 
@@ -3707,13 +4041,21 @@ mod tests {
     }
 
     fn state_with_slot(slot: Slot) -> Arc<BeaconState<Mainnet>> {
-        Arc::new(BeaconState::Phase0(
-            Phase0BeaconState {
-                slot,
-                ..Phase0BeaconState::default()
-            }
-            .into(),
-        ))
+        Arc::new(BeaconState::Phase0(blockless_state(slot).into()))
+    }
+
+    fn blockless_state(slot: Slot) -> Phase0BeaconState<Mainnet> {
+        let latest_block_header = BeaconBlockHeader {
+            state_root: H256::repeat_byte(0xff),
+            ..BeaconBlockHeader::default()
+        };
+
+        Phase0BeaconState {
+            slot,
+            block_roots: PersistentVector::repeat_element(latest_block_header.hash_tree_root()),
+            latest_block_header,
+            ..Phase0BeaconState::default()
+        }
     }
 
     #[test]
@@ -3769,6 +4111,7 @@ mod tests {
             0,
             StateByBlockRoot::snapshot(anchor_block_root),
             anchor_state.clone_arc(),
+            None,
         );
 
         let block_root = H256::repeat_byte(2);
@@ -3793,8 +4136,13 @@ mod tests {
 
         assert!(to_delete.is_none());
 
-        let [(key, _)] = batch.as_slice() else {
-            panic!("exactly one state must have been written, got {batch:?}");
+        let states = batch
+            .iter()
+            .filter(|(key, _)| key.starts_with(StateByBlockRoot::PREFIX))
+            .collect_vec();
+
+        let [(key, _)] = states.as_slice() else {
+            panic!("exactly one state must have been written, got {states:?}");
         };
 
         let key = StateByBlockRoot::try_from(key.as_bytes())?;
@@ -3925,6 +4273,7 @@ mod tests {
             0,
             StateByBlockRoot::snapshot(H256::repeat_byte(1)),
             state_with_slot(0),
+            None,
         );
 
         let validator_source = state_with_slot(0);
@@ -3994,18 +4343,21 @@ mod tests {
             0,
             StateByBlockRoot::snapshot(H256::repeat_byte(1)),
             state_with_slot(0),
+            None,
         );
 
         spine.insert(
             512,
             StateByBlockRoot::snapshot(H256::repeat_byte(2)),
             state_with_slot(512),
+            None,
         );
 
         spine.insert(
             1056,
             StateByBlockRoot::snapshot(H256::repeat_byte(3)),
             state_with_slot(1056),
+            None,
         );
 
         storage.prune_old_blocks_and_states(1025)?;
@@ -4109,7 +4461,7 @@ mod tests {
         storage.forward_spine().clear();
         storage
             .forward_spine()
-            .insert(512, parent_key, parent_state);
+            .insert(512, parent_key, parent_state, None);
 
         let (partial_key, partial_state) = storage
             .state_with_key_by_block_root(delta_root, Some(finalized_validators))?
@@ -4125,6 +4477,593 @@ mod tests {
         assert_eq!(partial_key.to_string(), cold_key.to_string());
         assert_eq!(warm_state.to_ssz()?, cold_state.to_ssz()?);
         assert_eq!(partial_state.to_ssz()?, cold_state.to_ssz()?);
+
+        Ok(())
+    }
+
+    fn append_states_with_randao_reveals(
+        storage: &Storage<Mainnet>,
+        block_slots: &[Slot],
+        stored_slots: &[Slot],
+        clear_spine: bool,
+    ) -> Result<Vec<Arc<BeaconState<Mainnet>>>> {
+        let config = Config {
+            min_genesis_active_validator_count: Config::minimal()
+                .min_genesis_active_validator_count,
+            ..Config::mainnet()
+        };
+
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, _) = factory::min_genesis_state::<Mainnet>(&config, &pubkey_cache)?;
+        let genesis_root = H256::repeat_byte(1);
+        let last_slot = stored_slots.iter().copied().max().unwrap_or_default();
+
+        let mut state = genesis_state.clone_arc();
+        let mut states = vec![genesis_state.clone_arc()];
+        let mut block_roots = vec![Some(genesis_root)];
+        let mut batch = vec![serialize(
+            BlockRootBySlot(0),
+            BlockRootBySlotValue::Block(genesis_root),
+        )?];
+
+        for slot in 1..=last_slot {
+            if block_slots.contains(&slot) {
+                let (block, post_state) =
+                    factory::empty_block(&config, &pubkey_cache, state, slot, H256::zero())?;
+
+                let block_root = block.message().hash_tree_root();
+
+                batch.push(serialize(
+                    BlockRootBySlot(slot),
+                    BlockRootBySlotValue::Block(block_root),
+                )?);
+                batch.push(serialize(
+                    FinalizedBlockByRoot::full(block_root),
+                    block.as_ref(),
+                )?);
+
+                state = post_state;
+                block_roots.push(Some(block_root));
+            } else {
+                combined::process_slots(&config, &pubkey_cache, state.make_mut(), slot)?;
+                block_roots.push(None);
+            }
+
+            states.push(state.clone_arc());
+        }
+
+        storage.database.put_batch_raw(batch)?;
+
+        storage.append_finalized_states(
+            [(0, Some(genesis_root), genesis_state.clone_arc())],
+            0,
+            genesis_state.validators(),
+        )?;
+
+        for &stored_slot in stored_slots {
+            if clear_spine {
+                storage.forward_spine().clear();
+            }
+
+            let index = usize::try_from(stored_slot)?;
+
+            storage.append_finalized_states(
+                [(stored_slot, block_roots[index], states[index].clone_arc())],
+                0,
+                genesis_state.validators(),
+            )?;
+        }
+
+        storage.clear_caches();
+
+        Ok(states)
+    }
+
+    #[test]
+    fn derived_fields_hold_the_randao_mix_of_every_slot() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, &[1, 3, 32], &[32], false)?;
+
+        let fields = storage
+            .derived_fields(0)?
+            .expect("the row of the anchor state is stored");
+
+        for (count, state) in (0..32).zip(&states) {
+            assert_eq!(
+                fields.randao_mix(count),
+                Some(accessors::get_randao_mix(
+                    state,
+                    accessors::get_current_epoch(state),
+                )),
+                "RANDAO mix in slot {count}",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_hold_the_total_active_balance_of_the_epoch() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, &[1, 3, 32], &[32], false)?;
+
+        let fields = storage
+            .derived_fields(0)?
+            .expect("the row of the anchor state is stored");
+
+        assert_eq!(
+            fields.total_active_balance(),
+            accessors::total_active_balance(&*states[0]),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_are_not_stored_without_a_state_in_every_epoch() -> Result<()> {
+        let directory = TempDir::new()?;
+        let storage = storage_with_hierarchy(&directory, [9, 6])?;
+
+        append_states_with_randao_reveals(&storage, &[1, 3, 64], &[64], false)?;
+
+        assert!(
+            !storage.contains_key(DerivedFieldsBySlot(0))?,
+            "the diffs between slots 0 and 64 would hold an epoch transition",
+        );
+
+        Ok(())
+    }
+
+    fn read_from_storage<V, D>(
+        storage: &Storage<Mainnet>,
+        states: &[Arc<BeaconState<Mainnet>>],
+        slot: Slot,
+        stored: impl FnOnce(&BeaconState<Mainnet>) -> V,
+        derived: impl FnOnce(&DerivedFields, usize) -> Option<Vec<D>>,
+        mut apply: impl FnMut(&mut V, D) -> Result<()>,
+    ) -> Result<V> {
+        let stored_slot = storage
+            .stored_slot_before_or_at(slot)?
+            .expect("the slot is not pruned");
+
+        let patches = storage
+            .slot_patches(stored_slot, slot, derived)?
+            .expect("every slot has stored diffs");
+
+        let mut value = stored(&states[usize::try_from(stored_slot)?]);
+
+        for patch in patches {
+            apply(&mut value, patch)?;
+        }
+
+        Ok(value)
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn validator_columns_and_balances(
+        storage: &Storage<Mainnet>,
+        states: &[Arc<BeaconState<Mainnet>>],
+        slot: Slot,
+    ) -> Result<(
+        (PartialValidatorList, EffectiveBalanceList),
+        Box<dyn SszListMut<Gwei>>,
+    )> {
+        let columns = read_from_storage(
+            storage,
+            states,
+            slot,
+            |state| {
+                let (_, effective_balances, partial_validators) = state.validators().columns();
+
+                (partial_validators.clone(), effective_balances.clone())
+            },
+            DerivedFields::validator_patches,
+            |columns, patch| Ok(patch.apply(columns)?),
+        )?;
+
+        let balances = read_from_storage(
+            storage,
+            states,
+            slot,
+            |state| state.balances().clone_boxed_mut(),
+            DerivedFields::balance_patches,
+            |balances, patch| Ok(patch.apply(&mut **balances)?),
+        )?;
+
+        Ok((columns, balances))
+    }
+
+    #[test]
+    fn derived_fields_give_the_registry_and_balances_between_stored_states() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, &[1, 3, 32], &[32], false)?;
+
+        for (slot, state) in (0..32).zip(&states) {
+            let ((partial_validators, effective_balances), balances) =
+                validator_columns_and_balances(&storage, &states, slot)?;
+
+            let (_, expected_effective_balances, expected_partial_validators) =
+                state.validators().columns();
+
+            assert_eq!(
+                &partial_validators, expected_partial_validators,
+                "registry in slot {slot}",
+            );
+            assert_eq!(
+                &effective_balances, expected_effective_balances,
+                "effective balances in slot {slot}",
+            );
+            assert_eq!(
+                balances.iter().collect_vec(),
+                state.balances().iter().collect_vec(),
+                "balances in slot {slot}",
+            );
+        }
+
+        let fields = storage
+            .derived_fields(0)?
+            .expect("the row of the anchor state is stored");
+
+        for count in 1..32 {
+            assert!(fields.rewards(count).is_some(), "rewards in slot {count}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_stop_before_the_next_stored_state() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        append_states_with_randao_reveals(&storage, &[1, 3, 32], &[32], false)?;
+
+        let Some(DerivedFields::V1(DerivedFieldsV1::Phase0(fields))) = storage.derived_fields(0)?
+        else {
+            panic!("the row is stored for a Phase 0 state");
+        };
+
+        assert_eq!(fields.slots.len(), 31);
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_carry_the_stored_block_rewards_through_the_spine() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        append_states_with_randao_reveals(&storage, &[1, 3, 32, 33], &[32, 64], false)?;
+
+        assert!(
+            storage
+                .derived_fields(32)?
+                .and_then(|fields| fields.rewards(0))
+                .is_some(),
+            "rewards of the block at the stored slot",
+        );
+
+        assert!(
+            storage
+                .derived_fields(0)?
+                .and_then(|fields| fields.rewards(0))
+                .is_none(),
+            "genesis has no parent state",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_replay_the_stored_block_rewards_missing_from_the_spine() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        append_states_with_randao_reveals(&storage, &[1, 3, 32, 33, 64, 65], &[32, 64, 96], true)?;
+
+        assert!(
+            storage
+                .derived_fields(64)?
+                .and_then(|fields| fields.rewards(0))
+                .is_some(),
+            "rewards of the block at the stored slot",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_fields_cover_every_slot_up_to_the_next_stored_state() -> Result<()> {
+        let storage = storage_for_chain_reads();
+        let states = append_states_with_randao_reveals(&storage, &[1, 3], &[32], false)?;
+
+        let Some(DerivedFields::V1(DerivedFieldsV1::Phase0(phase0_fields))) =
+            storage.derived_fields(0)?
+        else {
+            panic!("the row is stored for a Phase 0 state");
+        };
+
+        assert_eq!(phase0_fields.slots.len(), 31);
+
+        let fields = storage
+            .derived_fields(0)?
+            .expect("the row of the anchor state is stored");
+
+        for (count, state) in (0..32).zip(&states) {
+            assert_eq!(
+                fields.randao_mix(count),
+                Some(accessors::get_randao_mix(
+                    state,
+                    accessors::get_current_epoch(state),
+                )),
+                "RANDAO mix in slot {count}",
+            );
+
+            let (_, balances) =
+                validator_columns_and_balances(&storage, &states, Slot::try_from(count)?)?;
+
+            assert_eq!(
+                balances.iter().collect_vec(),
+                state.balances().iter().collect_vec(),
+                "balances in slot {count}",
+            );
+        }
+
+        for count in 4..32 {
+            let rewards = fields.rewards(count).expect("every slot has rewards");
+
+            assert_eq!(rewards.attestations, 0, "attestations in slot {count}");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    #[expect(clippy::too_many_lines)]
+    fn derived_fields_give_the_pending_queues_between_stored_states() -> Result<()> {
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet().start_and_stay_in(Phase::Electra)),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )?;
+
+        let validator_source = state_with_validators(0, 6, 0);
+        let finalized_validators = validator_source.validators();
+
+        let BeaconState::Phase0(validator_source_state) = validator_source.as_ref() else {
+            unreachable!("the state above is a Phase 0 state");
+        };
+
+        let deposit = |amount, slot| PendingDeposit {
+            amount,
+            slot,
+            ..PendingDeposit::default()
+        };
+
+        let withdrawal = |validator_index| PendingPartialWithdrawal {
+            validator_index,
+            ..PendingPartialWithdrawal::default()
+        };
+
+        let consolidation = |source_index| PendingConsolidation {
+            source_index,
+            ..PendingConsolidation::default()
+        };
+
+        let state = |slot,
+                     deposits: &[PendingDeposit],
+                     withdrawals: &[PendingPartialWithdrawal],
+                     consolidations: &[PendingConsolidation]|
+         -> Result<Arc<BeaconState<Mainnet>>> {
+            Ok(Arc::new(BeaconState::Electra(
+                ElectraBeaconState {
+                    slot,
+                    latest_block_header: BeaconBlockHeader {
+                        slot,
+                        ..BeaconBlockHeader::default()
+                    },
+                    validators: validator_source_state.validators.clone(),
+                    balances: Balances::<Mainnet>::try_from_iter([32_000_000_000; 6])?,
+                    pending_deposits: PendingDeposits::<Mainnet>::try_from_iter(
+                        deposits.iter().copied(),
+                    )?,
+                    pending_partial_withdrawals:
+                        PendingPartialWithdrawals::<Mainnet>::try_from_iter(
+                            withdrawals.iter().copied(),
+                        )?,
+                    pending_consolidations: PendingConsolidations::<Mainnet>::try_from_iter(
+                        consolidations.iter().copied(),
+                    )?,
+                    ..ElectraBeaconState::default()
+                }
+                .into(),
+            )))
+        };
+
+        let states = [
+            state(0, &[deposit(1, 0)], &[withdrawal(0), withdrawal(1)], &[])?,
+            state(
+                1,
+                &[deposit(1, 0), deposit(2, 1), deposit(3, 1)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0)],
+            )?,
+            state(
+                2,
+                &[deposit(1, 0), deposit(2, 1), deposit(3, 1)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0)],
+            )?,
+            state(
+                3,
+                &[deposit(2, 1), deposit(3, 1), deposit(4, 0)],
+                &[withdrawal(1), withdrawal(2)],
+                &[consolidation(0), consolidation(1)],
+            )?,
+            state(
+                4,
+                &[
+                    deposit(2, 1),
+                    deposit(3, 1),
+                    deposit(4, 0),
+                    deposit(5, 4),
+                    deposit(6, 0),
+                ],
+                &[withdrawal(2)],
+                &[consolidation(1)],
+            )?,
+        ];
+
+        let root = |slot| H256::from_low_u64_be(slot);
+
+        let slot_fields = states
+            .iter()
+            .tuple_windows()
+            .map(|(base, changed)| {
+                let config = PatchConfig::default();
+
+                let (Some(base_queues), Some(changed_queues)) =
+                    (base.post_electra(), changed.post_electra())
+                else {
+                    unreachable!("the states above are Electra states");
+                };
+
+                Ok(ElectraSlotFields {
+                    randao_mix: H256::zero(),
+                    rewards: ProposerRewards::default(),
+                    validators: ValidatorListPatch::diff(
+                        config,
+                        base.validators(),
+                        changed.validators(),
+                    )?,
+                    balances: BalancesPatch::diff(config, base.balances(), changed.balances())?,
+                    pending_deposits: QueuePatch::diff(
+                        config,
+                        base_queues.pending_deposits(),
+                        changed_queues.pending_deposits(),
+                    )?,
+                    pending_partial_withdrawals: QueuePatch::diff(
+                        config,
+                        base_queues.pending_partial_withdrawals(),
+                        changed_queues.pending_partial_withdrawals(),
+                    )?,
+                    pending_consolidations: QueuePatch::diff(
+                        config,
+                        base_queues.pending_consolidations(),
+                        changed_queues.pending_consolidations(),
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut batch = states
+            .iter()
+            .map(|state| {
+                serialize(
+                    BlockRootBySlot(state.slot()),
+                    BlockRootBySlotValue::Block(root(state.slot())),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        batch.push(serialize_raw(
+            DerivedFieldsBySlot(0),
+            Compressed::with_level(
+                DerivedFields::V1(DerivedFieldsV1::Electra(ElectraDerivedFields {
+                    block_rewards: None,
+                    randao_mix: H256::zero(),
+                    total_active_balance: 0,
+                    slots: slot_fields.try_into()?,
+                })),
+                DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            ),
+        )?);
+
+        storage.database.put_batch_raw(batch)?;
+
+        storage.append_finalized_states(
+            [(0, Some(root(0)), states[0].clone_arc())],
+            0,
+            finalized_validators,
+        )?;
+
+        storage.clear_caches();
+
+        for (slot, expected) in (0..).zip(&states) {
+            let expected = expected
+                .post_electra()
+                .expect("the states above are Electra states");
+
+            let pending_deposits = read_from_storage(
+                &storage,
+                &states,
+                slot,
+                |state| {
+                    state
+                        .post_electra()
+                        .expect("the states above are Electra states")
+                        .pending_deposits()
+                        .clone_boxed_mut()
+                },
+                DerivedFields::pending_deposit_patches,
+                |queue, patch| Ok(patch.apply(&mut **queue)?),
+            )?;
+
+            let pending_partial_withdrawals = read_from_storage(
+                &storage,
+                &states,
+                slot,
+                |state| {
+                    state
+                        .post_electra()
+                        .expect("the states above are Electra states")
+                        .pending_partial_withdrawals()
+                        .clone_boxed_mut()
+                },
+                DerivedFields::pending_partial_withdrawal_patches,
+                |queue, patch| Ok(patch.apply(&mut **queue)?),
+            )?;
+
+            let pending_consolidations = read_from_storage(
+                &storage,
+                &states,
+                slot,
+                |state| {
+                    state
+                        .post_electra()
+                        .expect("the states above are Electra states")
+                        .pending_consolidations()
+                        .clone_boxed_mut()
+                },
+                DerivedFields::pending_consolidation_patches,
+                |queue, patch| Ok(patch.apply(&mut **queue)?),
+            )?;
+
+            assert_eq!(
+                pending_deposits.iter().copied().collect_vec(),
+                expected.pending_deposits().iter().copied().collect_vec(),
+                "pending deposits in slot {slot}",
+            );
+            assert_eq!(
+                pending_partial_withdrawals.iter().copied().collect_vec(),
+                expected
+                    .pending_partial_withdrawals()
+                    .iter()
+                    .copied()
+                    .collect_vec(),
+                "pending partial withdrawals in slot {slot}",
+            );
+            assert_eq!(
+                pending_consolidations.iter().copied().collect_vec(),
+                expected
+                    .pending_consolidations()
+                    .iter()
+                    .copied()
+                    .collect_vec(),
+                "pending consolidations in slot {slot}",
+            );
+        }
 
         Ok(())
     }
@@ -4165,10 +5104,13 @@ mod tests {
 
         Arc::new(BeaconState::Phase0(
             Phase0BeaconState {
-                slot,
                 validators: Validators::<Mainnet>::try_from_iter((0..count).map(validator))
                     .expect("the registry limit is far above the test validator count"),
-                ..Phase0BeaconState::default()
+                balances: PersistentList::try_from_iter(
+                    (0..count).map(|_| 32_000_000_000_u64.saturating_add(balance_offset)),
+                )
+                .expect("the registry limit is far above the test validator count"),
+                ..blockless_state(slot)
             }
             .into(),
         ))
@@ -4423,7 +5365,7 @@ mod tests {
         let mut update_finalized_validators = false;
         let spine = storage.temporary_spine(0);
 
-        spine.insert(0, legacy_key, state_with_slot(0));
+        spine.insert(0, legacy_key, state_with_slot(0), None);
 
         storage.append_finalized_state(
             state_with_slot(512),
@@ -4772,6 +5714,15 @@ mod tests {
         let parent_root = H256::repeat_byte(2);
         let child_root = H256::repeat_byte(3);
 
+        storage.database.put_batch_raw(
+            [(0, anchor_root), (512, parent_root), (544, child_root)]
+                .into_iter()
+                .map(|(slot, root)| {
+                    serialize(BlockRootBySlot(slot), BlockRootBySlotValue::Block(root))
+                })
+                .collect::<Result<_>>()?,
+        )?;
+
         storage.append_finalized_states(
             [
                 (0, Some(anchor_root), state_with_slot(0)),
@@ -4800,6 +5751,12 @@ mod tests {
             .expect("the frame must be served from the cache");
 
         assert_eq!(from_cache.to_ssz()?, expected.to_ssz()?);
+
+        let in_memory = storage
+            .state_in_memory(0)?
+            .expect("the frame of the anchor state is cached");
+
+        assert_eq!(in_memory.to_ssz()?, state_with_slot(0).to_ssz()?);
 
         Ok(())
     }
@@ -4837,6 +5794,12 @@ mod tests {
 
         assert_eq!(key.parents, vec![parent_root, anchor_root]);
         assert_eq!(state.to_ssz()?, state_with_slot(544).to_ssz()?);
+
+        let in_memory = storage
+            .state_in_memory(544)?
+            .expect("the state is tracked by the spine");
+
+        assert_eq!(in_memory.to_ssz()?, state_with_slot(544).to_ssz()?);
 
         Ok(())
     }
@@ -4922,9 +5885,8 @@ mod tests {
     ) -> Arc<BeaconState<Mainnet>> {
         Arc::new(BeaconState::Phase0(
             Phase0BeaconState {
-                slot,
                 eth1_deposit_index,
-                ..Phase0BeaconState::default()
+                ..blockless_state(slot)
             }
             .into(),
         ))

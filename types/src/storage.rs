@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
-use diff::{Error as PatchError, Patch, PatchConfig};
+use diff::{Error as PatchError, Patch, PatchConfig, QueuePatch, ReplacePatch, VectorPatch};
 use enum_iterator::Sequence as _;
-use ssz::{Hc, ReadError, Size, Ssz, SszCursor, SszRead, SszSize, SszWrite, WriteError};
+use ssz::{
+    Compressed, Hc, ReadError, Size, Ssz, SszCursor, SszListMut, SszRead, SszSize, SszWrite,
+    WriteError,
+};
 
 use crate::{
+    altair::containers::SyncCommittee,
     altair::storage::{
         BeaconStateFrame as AltairBeaconStateFrame,
         BeaconStateFrameCursor as AltairBeaconStateFrameCursor,
@@ -24,6 +28,7 @@ use crate::{
         BeaconStatePatch as CapellaBeaconStatePatch,
         BeaconStatePatchCursor as CapellaBeaconStatePatchCursor,
     },
+    collections::{ProposerLookahead, RandaoMixes},
     combined::BeaconState,
     config::Config,
     deneb::storage::{
@@ -32,6 +37,7 @@ use crate::{
         BeaconStatePatch as DenebBeaconStatePatch,
         BeaconStatePatchCursor as DenebBeaconStatePatchCursor,
     },
+    electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     electra::storage::{
         BeaconStateFrame as ElectraBeaconStateFrame,
         BeaconStateFrameCursor as ElectraBeaconStateFrameCursor,
@@ -50,12 +56,18 @@ use crate::{
         BeaconStatePatch as GloasBeaconStatePatch,
         BeaconStatePatchCursor as GloasBeaconStatePatchCursor,
     },
-    nonstandard::{Phase, PubkeyList},
+    nonstandard::{EffectiveBalanceList, PartialValidatorList, Phase, PubkeyList},
     phase0::storage::{
         BeaconStateFrame as Phase0BeaconStateFrame,
         BeaconStateFrameCursor as Phase0BeaconStateFrameCursor,
         BeaconStatePatch as Phase0BeaconStatePatch,
         BeaconStatePatchCursor as Phase0BeaconStatePatchCursor,
+    },
+    phase0::{
+        balances_patch::BalancesPatch,
+        containers::Checkpoint,
+        primitives::{Gwei, H256, ValidatorIndex},
+        validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
     traits::BeaconState as BeaconStateTrait,
@@ -212,6 +224,301 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
         };
 
         Ok(cursor)
+    }
+
+    pub fn previous_justified_checkpoint(&self) -> Result<Checkpoint, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Altair(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Bellatrix(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Capella(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Deneb(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Electra(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Fulu(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Gloas(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn current_justified_checkpoint(&self) -> Result<Checkpoint, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Altair(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Bellatrix(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Capella(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Deneb(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Electra(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Fulu(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Gloas(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn finalized_checkpoint(&self) -> Result<Checkpoint, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Altair(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Bellatrix(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Capella(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Deneb(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Electra(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Fulu(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Gloas(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn current_sync_committee(&self) -> Result<Option<Arc<Hc<SyncCommittee<P>>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+            Self::Bellatrix(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+            Self::Capella(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+            Self::Deneb(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+            Self::Electra(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+            Self::Fulu(frame) => Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?)),
+            Self::Gloas(frame) => {
+                Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
+            }
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn next_sync_committee(&self) -> Result<Option<Arc<Hc<SyncCommittee<P>>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+            Self::Bellatrix(frame) => {
+                Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?))
+            }
+            Self::Capella(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+            Self::Deneb(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+            Self::Electra(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+            Self::Fulu(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+            Self::Gloas(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn proposer_lookahead(&self) -> Result<Option<ProposerLookahead<P>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_) => return Ok(None),
+            Self::Fulu(frame) => frame.get_proposer_lookahead()?.into_inner(),
+            Self::Gloas(frame) => frame.get_proposer_lookahead()?.into_inner(),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn randao_mixes(&self) -> Result<RandaoMixes<P>, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame.get_randao_mixes()?,
+            Self::Altair(frame) => frame.get_randao_mixes()?,
+            Self::Bellatrix(frame) => frame.get_randao_mixes()?,
+            Self::Capella(frame) => frame.get_randao_mixes()?,
+            Self::Deneb(frame) => frame.get_randao_mixes()?,
+            Self::Electra(frame) => frame.get_randao_mixes()?,
+            Self::Fulu(frame) => frame.get_randao_mixes()?,
+            Self::Gloas(frame) => frame.get_randao_mixes()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn partial_validators(&self) -> Result<PartialValidatorList, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Altair(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Bellatrix(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Capella(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Deneb(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Electra(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Fulu(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Gloas(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+        };
+
+        Ok(value)
+    }
+
+    pub fn effective_balances(&self) -> Result<EffectiveBalanceList, ReadError> {
+        let value = match self {
+            Self::Phase0(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Altair(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Bellatrix(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Capella(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Deneb(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Electra(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Fulu(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Gloas(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+        };
+
+        Ok(value)
+    }
+
+    pub fn balances(&self) -> Result<Box<dyn SszListMut<Gwei>>, ReadError> {
+        let value: Box<dyn SszListMut<Gwei>> = match self {
+            Self::Phase0(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Altair(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Bellatrix(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Capella(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Deneb(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Electra(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Fulu(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Gloas(frame) => Box::new(frame.get_balances()?.into_inner()),
+        };
+
+        Ok(value)
+    }
+
+    pub fn pending_deposits(
+        &self,
+    ) -> Result<Option<Box<dyn SszListMut<PendingDeposit>>>, ReadError> {
+        let value: Box<dyn SszListMut<PendingDeposit>> = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
+            Self::Fulu(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
+            Self::Gloas(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn pending_partial_withdrawals(
+        &self,
+    ) -> Result<Option<Box<dyn SszListMut<PendingPartialWithdrawal>>>, ReadError> {
+        let value: Box<dyn SszListMut<PendingPartialWithdrawal>> = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
+            Self::Fulu(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
+            Self::Gloas(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn pending_consolidations(
+        &self,
+    ) -> Result<Option<Box<dyn SszListMut<PendingConsolidation>>>, ReadError> {
+        let value: Box<dyn SszListMut<PendingConsolidation>> = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
+            Self::Fulu(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
+            Self::Gloas(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
+        };
+
+        Ok(Some(value))
     }
 }
 
@@ -453,12 +760,206 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             }),
         }
     }
+
+    pub fn previous_justified_checkpoint(&self) -> Result<ReplacePatch<Checkpoint>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Altair(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Bellatrix(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Capella(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Deneb(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Electra(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Fulu(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Gloas(patch) => patch.get_previous_justified_checkpoint()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn current_justified_checkpoint(&self) -> Result<ReplacePatch<Checkpoint>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Altair(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Bellatrix(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Capella(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Deneb(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Electra(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Fulu(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Gloas(patch) => patch.get_current_justified_checkpoint()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn finalized_checkpoint(&self) -> Result<ReplacePatch<Checkpoint>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_finalized_checkpoint()?,
+            Self::Altair(patch) => patch.get_finalized_checkpoint()?,
+            Self::Bellatrix(patch) => patch.get_finalized_checkpoint()?,
+            Self::Capella(patch) => patch.get_finalized_checkpoint()?,
+            Self::Deneb(patch) => patch.get_finalized_checkpoint()?,
+            Self::Electra(patch) => patch.get_finalized_checkpoint()?,
+            Self::Fulu(patch) => patch.get_finalized_checkpoint()?,
+            Self::Gloas(patch) => patch.get_finalized_checkpoint()?,
+        };
+
+        Ok(value)
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn current_sync_committee(
+        &self,
+    ) -> Result<Option<ReplacePatch<Arc<Hc<SyncCommittee<P>>>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(patch) => patch.get_current_sync_committee()?,
+            Self::Bellatrix(patch) => patch.get_current_sync_committee()?,
+            Self::Capella(patch) => patch.get_current_sync_committee()?,
+            Self::Deneb(patch) => patch.get_current_sync_committee()?,
+            Self::Electra(patch) => patch.get_current_sync_committee()?,
+            Self::Fulu(patch) => patch.get_current_sync_committee()?,
+            Self::Gloas(patch) => patch.get_current_sync_committee()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    #[expect(clippy::type_complexity)]
+    pub fn next_sync_committee(
+        &self,
+    ) -> Result<Option<ReplacePatch<Arc<Hc<SyncCommittee<P>>>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(patch) => patch.get_next_sync_committee()?,
+            Self::Bellatrix(patch) => patch.get_next_sync_committee()?,
+            Self::Capella(patch) => patch.get_next_sync_committee()?,
+            Self::Deneb(patch) => patch.get_next_sync_committee()?,
+            Self::Electra(patch) => patch.get_next_sync_committee()?,
+            Self::Fulu(patch) => patch.get_next_sync_committee()?,
+            Self::Gloas(patch) => patch.get_next_sync_committee()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn proposer_lookahead(
+        &self,
+    ) -> Result<Option<Compressed<VectorPatch<ValidatorIndex>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_) => return Ok(None),
+            Self::Fulu(patch) => patch.get_proposer_lookahead()?,
+            Self::Gloas(patch) => patch.get_proposer_lookahead()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn randao_mixes(&self) -> Result<VectorPatch<H256>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_randao_mixes()?,
+            Self::Altair(patch) => patch.get_randao_mixes()?,
+            Self::Bellatrix(patch) => patch.get_randao_mixes()?,
+            Self::Capella(patch) => patch.get_randao_mixes()?,
+            Self::Deneb(patch) => patch.get_randao_mixes()?,
+            Self::Electra(patch) => patch.get_randao_mixes()?,
+            Self::Fulu(patch) => patch.get_randao_mixes()?,
+            Self::Gloas(patch) => patch.get_randao_mixes()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn validators(&self) -> Result<Compressed<ValidatorListPatch>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_validators()?,
+            Self::Altair(patch) => patch.get_validators()?,
+            Self::Bellatrix(patch) => patch.get_validators()?,
+            Self::Capella(patch) => patch.get_validators()?,
+            Self::Deneb(patch) => patch.get_validators()?,
+            Self::Electra(patch) => patch.get_validators()?,
+            Self::Fulu(patch) => patch.get_validators()?,
+            Self::Gloas(patch) => patch.get_validators()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn balances(&self) -> Result<Compressed<BalancesPatch>, ReadError> {
+        let value = match self {
+            Self::Phase0(patch) => patch.get_balances()?,
+            Self::Altair(patch) => patch.get_balances()?,
+            Self::Bellatrix(patch) => patch.get_balances()?,
+            Self::Capella(patch) => patch.get_balances()?,
+            Self::Deneb(patch) => patch.get_balances()?,
+            Self::Electra(patch) => patch.get_balances()?,
+            Self::Fulu(patch) => patch.get_balances()?,
+            Self::Gloas(patch) => patch.get_balances()?,
+        };
+
+        Ok(value)
+    }
+
+    pub fn pending_deposits(
+        &self,
+    ) -> Result<Option<Compressed<QueuePatch<PendingDeposit>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(patch) => patch.get_pending_deposits()?,
+            Self::Fulu(patch) => patch.get_pending_deposits()?,
+            Self::Gloas(patch) => patch.get_pending_deposits()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn pending_partial_withdrawals(
+        &self,
+    ) -> Result<Option<Compressed<QueuePatch<PendingPartialWithdrawal>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(patch) => patch.get_pending_partial_withdrawals()?,
+            Self::Fulu(patch) => patch.get_pending_partial_withdrawals()?,
+            Self::Gloas(patch) => patch.get_pending_partial_withdrawals()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn pending_consolidations(
+        &self,
+    ) -> Result<Option<Compressed<QueuePatch<PendingConsolidation>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_) => return Ok(None),
+            Self::Electra(patch) => patch.get_pending_consolidations()?,
+            Self::Fulu(patch) => patch.get_pending_consolidations()?,
+            Self::Gloas(patch) => patch.get_pending_consolidations()?,
+        };
+
+        Ok(Some(value))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
-    use ssz::{H256, SszHash as _, SszListMut as _};
+    use ssz::{H256, SszHash as _};
     use std_ext::ArcExt as _;
 
     use crate::{

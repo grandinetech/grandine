@@ -4,7 +4,7 @@
 
 use core::{fmt::Display, str::FromStr, time::Duration};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -34,7 +34,7 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
-    Event, EventChannels, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
+    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -45,7 +45,12 @@ use futures::{
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, error::Error as AccessorError, misc};
+use helper_functions::{
+    accessors,
+    error::Error as AccessorError,
+    misc,
+    slot_report::{Delta, RealSlotReport, SlotReport as _},
+};
 use http_api_utils::{
     BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz,
     StateId, ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
@@ -69,7 +74,7 @@ use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, ProgressiveList, Ssz,
-    SszHash as _, SszRead,
+    SszHash as _, SszList, SszListMut, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -115,8 +120,8 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        BlockRewards, KzgProofs, PayloadStatus, Phase, RelativeEpoch, ValidationOutcome,
-        ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
+        BlockRewards, KzgProofs, PayloadStatus, Phase, RawValidatorList, RelativeEpoch,
+        ValidationOutcome, ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -132,7 +137,8 @@ use types::{
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         self, BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        BlockBodyWithPayloadBid, PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
+        BlockBodyWithPayloadBid, BlockBodyWithSyncAggregate, PostGloasBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 use validator::{
@@ -429,13 +435,6 @@ pub struct TotalAttestationRewardsResponse {
     inclusion_delay: Option<Gwei>,
     #[serde(with = "serde_utils::string_or_native")]
     inactivity: i64,
-}
-
-#[derive(Serialize)]
-pub struct StateFinalityCheckpointsResponse {
-    previous_justified: Checkpoint,
-    current_justified: Checkpoint,
-    finalized: Checkpoint,
 }
 
 #[derive(Serialize)]
@@ -737,22 +736,33 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
-) -> Result<EthResponse<StateFinalityCheckpointsResponse>, Error> {
-    let WithStatus {
-        value: state,
-        status,
-        finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+) -> Result<EthResponse<FinalityCheckpoints>, Error> {
+    let response = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => Some(
+            state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?
+                .map(FinalityCheckpoints::from),
+        ),
 
-    let response = StateFinalityCheckpointsResponse {
-        previous_justified: state.previous_justified_checkpoint(),
-        current_justified: state.current_justified_checkpoint(),
-        finalized: state.finalized_checkpoint(),
-    };
+        StateId::Slot(slot) => {
+            tokio::task::block_in_place(|| controller.finality_checkpoints_at_slot(slot))?
+        }
 
-    Ok(EthResponse::json(response)
-        .execution_optimistic(status.is_optimistic())
-        .finalized(finalized))
+        StateId::Root(state_root) => tokio::task::block_in_place(|| {
+            let slot = controller.slot_by_state_root(state_root)?;
+
+            slot.and_then(|slot| {
+                controller
+                    .finality_checkpoints_at_slot(slot.value)
+                    .transpose()
+            })
+            .transpose()
+        })?,
+    }
+    .ok_or(Error::StateNotFound)?;
+
+    Ok(EthResponse::json(response.value)
+        .execution_optimistic(response.status.is_optimistic())
+        .finalized(response.finalized))
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators`
@@ -825,34 +835,31 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
     Error,
 > {
     let WithStatus {
-        value: state,
+        value: (_, validators, _),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let ids = ids.into_iter().collect::<HashSet<_>>();
 
-    let validators = (0..)
-        .zip(state.validators().iter())
-        .filter_map(|(index, validator)| {
-            if !ids.is_empty() {
-                let validator_index = ValidatorId::ValidatorIndex(index);
-                let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
+    let validators = (0..).zip(&validators).filter_map(|(index, validator)| {
+        if !ids.is_empty() {
+            let validator_index = ValidatorId::ValidatorIndex(index);
+            let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
 
-                let allowed_by_id =
-                    ids.contains(&validator_index) || ids.contains(&validator_pubkey);
+            let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
 
-                if !allowed_by_id {
-                    return None;
-                }
+            if !allowed_by_id {
+                return None;
             }
+        }
 
-            Some(StateValidatorIdentityResponse {
-                index,
-                pubkey: validator.pubkey,
-                activation_epoch: validator.activation_epoch,
-            })
-        });
+        Some(StateValidatorIdentityResponse {
+            index,
+            pubkey: validator.pubkey,
+            activation_epoch: validator.activation_epoch,
+        })
+    });
 
     let validators = ContiguousList::try_from_iter(validators).map_err(AnyhowError::new)?;
 
@@ -869,22 +876,20 @@ pub async fn state_validator<P: Preset, W: Wait>(
     EthPath((state_id, validator_id)): EthPath<(StateId, ValidatorId)>,
 ) -> Result<EthResponse<StateValidatorResponse>, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, validators, balances),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let validator_index = validator_id
-        .validator_index(&state)
+        .validator_index(validators.pubkeys())
         .ok_or(Error::ValidatorNotFound)?;
 
-    let validator = state
-        .validators()
+    let validator = validators
         .get(validator_index)
         .map_err(|_| Error::ValidatorNotFound)?;
 
-    let balance = state
-        .balances()
+    let balance = balances
         .get(validator_index)
         .copied()
         .expect("list of validators and list of balances should have the same length");
@@ -892,7 +897,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     let response = StateValidatorResponse {
         balance,
         index: validator_index,
-        status: ValidatorStatus::new(&validator, &state),
+        status: ValidatorStatus::new(&validator, misc::compute_epoch_at_slot::<P>(slot)),
         validator: validator.clone(),
     };
 
@@ -977,27 +982,48 @@ fn state_validator_balances<P: Preset, W: Wait>(
     >,
     Error,
 > {
+    let response = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => Some(
+            state_id::state(&state_id, controller, anchor_checkpoint_provider)?.map(|state| {
+                (
+                    state.validators().pubkeys().clone(),
+                    state.balances().clone_boxed_mut(),
+                )
+            }),
+        ),
+        StateId::Slot(slot) => tokio::task::block_in_place(|| controller.balances_at_slot(slot))?,
+        StateId::Root(state_root) => tokio::task::block_in_place(|| {
+            let slot = controller.slot_by_state_root(state_root)?;
+
+            slot.and_then(|slot| controller.balances_at_slot(slot.value).transpose())
+                .transpose()
+        })?,
+    };
+
     let WithStatus {
-        value: state,
+        value: (pubkeys, balances),
         status,
         finalized,
-    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let balances = ContiguousList::try_from_iter(
-        izip!(
-            0..,
-            state.validators().iter(),
-            state.balances().into_iter().copied(),
+    let balances = if validator_ids.is_empty() {
+        ContiguousList::try_from_iter(
+            izip!(0.., balances.iter().copied())
+                .map(|(index, balance)| StateValidatorBalanceResponse { index, balance }),
         )
-        .filter(|(index, validator, _)| {
-            validator_ids.is_empty()
-                || validator_ids.iter().any(|validator_id| match validator_id {
-                    ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                    ValidatorId::PublicKey(pubkey) => &validator.pubkey == pubkey,
-                })
-        })
-        .map(|(index, _, balance)| StateValidatorBalanceResponse { index, balance }),
-    )
+    } else {
+        ContiguousList::try_from_iter(
+            validator_ids
+                .iter()
+                .filter_map(|validator_id| validator_id.validator_index(&pubkeys))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|index| {
+                    let balance = balances.get(index).copied().ok()?;
+                    Some(StateValidatorBalanceResponse { index, balance })
+                }),
+        )
+    }
     .map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(balances, headers)?
@@ -1006,6 +1032,7 @@ fn state_validator_balances<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/committees`
+#[expect(clippy::too_many_lines)]
 #[instrument(skip_all, level = "debug", name = "http_api::state_committees")]
 pub async fn state_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
@@ -1013,13 +1040,48 @@ pub async fn state_committees<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
+    let (mut state_slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let slot = state.value.slot();
+
+            let response = state.map(|state| {
+                let (_, effective_balances, partial_validators) = state.validators().columns();
+
+                (
+                    (partial_validators.clone(), effective_balances.clone()),
+                    state.randao_mixes().clone(),
+                )
+            });
+
+            (slot, Some(response))
+        }
+        StateId::Slot(slot) => (
+            slot,
+            tokio::task::block_in_place(|| controller.validators_and_randao_mixes_at_slot(slot))?,
+        ),
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            (
+                slot,
+                tokio::task::block_in_place(|| {
+                    controller.validators_and_randao_mixes_at_slot(slot)
+                })?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: mut state,
+        value: mut fields,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+    let state_epoch = misc::compute_epoch_at_slot::<P>(state_slot);
     let epoch = query.epoch.unwrap_or(state_epoch);
 
     let slots = match query.slot {
@@ -1033,15 +1095,15 @@ pub async fn state_committees<P: Preset, W: Wait>(
     };
 
     // TODO(Grandine Team): Optimize state lookup.
-    //                      The state is looked up twice, first in `StateId::state` above,
+    //                      The state is looked up twice, first in `state_id::field` above,
     //                      then in `Controller::state_at_slot`.
     //                      That means twice the amount of database lookups and state transitions.
-    if epoch == accessors::get_next_epoch(&state)?
+    if epoch == state_epoch.saturating_add(1)
         || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()).saturating_add(1)
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        state = tokio::task::spawn_blocking(move || {
+        let state = tokio::task::spawn_blocking(move || {
             controller
                 .state_at_slot_blocking(start_slot)?
                 .ok_or(Error::StateNotFound)?
@@ -1049,11 +1111,31 @@ pub async fn state_committees<P: Preset, W: Wait>(
                 .pipe(Ok::<_, AnyhowError>)
         })
         .await??;
+
+        state_slot = state.slot();
+        let (_, effective_balances, partial_validators) = state.validators().columns();
+
+        fields = (
+            (partial_validators.clone(), effective_balances.clone()),
+            state.randao_mixes().clone(),
+        );
     }
 
     // Committees are only available for the previous, current and next epoch of the state.
-    let relative_epoch = accessors::relative_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
-    let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
+    accessors::compute_relative_epoch(misc::compute_epoch_at_slot::<P>(state_slot), epoch)
+        .map_err(Error::InvalidEpoch)?;
+
+    let ((partial_validators, _), randao_mixes) = fields;
+
+    let indices = accessors::compute_shuffled_active_validator_indices::<P>(
+        &partial_validators,
+        &randao_mixes,
+        epoch,
+    )?;
+
+    let committee_count_per_slot = misc::committee_count_from_active_validator_count::<P>(
+        u64::try_from(indices.len()).map_err(AnyhowError::new)?,
+    );
 
     if let Some(index) = query.index
         && index >= committee_count_per_slot
@@ -1061,16 +1143,21 @@ pub async fn state_committees<P: Preset, W: Wait>(
         return Err(Error::CommitteeIndexOutOfRange { index, epoch });
     }
 
-    let indices = query
+    let committee_indices = query
         .index
         .map(core::iter::once)
         .map(Either::Left)
         .unwrap_or_else(|| Either::Right(0..committee_count_per_slot));
 
     let responses = slots
-        .cartesian_product(indices)
+        .cartesian_product(committee_indices)
         .map(|(slot, index)| {
-            let committee = accessors::beacon_committee(&state, slot, index)?;
+            let committee = accessors::compute_beacon_committee::<P>(
+                &indices,
+                committee_count_per_slot,
+                slot,
+                index,
+            )?;
 
             Ok(StateCommitteeResponse {
                 index,
@@ -1088,37 +1175,80 @@ pub async fn state_committees<P: Preset, W: Wait>(
 /// `GET /eth/v1/beacon/states/{state_id}/sync_committees`
 #[instrument(skip_all, level = "debug", name = "http_api::state_sync_committees")]
 pub async fn state_sync_committees<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateSyncCommitteesQuery>,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let altair = state.value.post_altair().ok_or(Error::StatePreAltair)?;
+
+            let response = WithStatus {
+                value: (
+                    altair.current_sync_committee().clone_arc(),
+                    altair.next_sync_committee().clone_arc(),
+                ),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Altair {
+                return Err(Error::StatePreAltair);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.sync_committees_at_slot(slot))?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Altair {
+                return Err(Error::StatePreAltair);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.sync_committees_at_slot(slot))?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: (current, next),
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    // States before Altair have no sync committees.
-    let state = state.post_altair().ok_or(Error::StatePreAltair)?;
-
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+    let state_epoch = misc::compute_epoch_at_slot::<P>(slot);
     let state_period = misc::sync_committee_period::<P>(state_epoch);
     let requested_epoch = query.epoch.unwrap_or(state_epoch);
     let requested_period = misc::sync_committee_period::<P>(requested_epoch);
 
     let committee = if requested_period == state_period {
-        state.current_sync_committee()
+        current
     } else if requested_period == state_period.saturating_add(1) {
-        state.next_sync_committee()
+        next
     } else {
         return Err(Error::EpochNotInSyncCommitteePeriod);
     };
 
+    let head_state = controller.head_state().value;
+
     let validator_indices = committee
         .pubkeys
         .iter()
-        .filter_map(|pubkey| accessors::index_of_public_key(state, pubkey))
+        .filter_map(|pubkey| accessors::index_of_public_key(&*head_state, pubkey))
         .collect_vec();
 
     let validators = validator_indices.clone();
@@ -1143,27 +1273,62 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let fulu = state.value.post_fulu().ok_or(Error::StatePreFulu)?;
+
+            let response = WithStatus {
+                value: fulu.proposer_lookahead().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Fulu {
+                return Err(Error::StatePreFulu);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.proposer_lookahead_at_slot(slot))?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Fulu {
+                return Err(Error::StatePreFulu);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.proposer_lookahead_at_slot(slot))?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: proposer_lookahead,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let version = state.phase();
-    let proposer_lookahead = state
-        .post_fulu()
-        .map(PostFuluBeaconState::proposer_lookahead)
-        .cloned()
-        .map(StateProposerLookaheadResponse::<P>)
-        .ok_or(Error::StatePreFulu)?;
+    let proposer_lookahead = StateProposerLookaheadResponse::<P>(proposer_lookahead);
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
-        .version(version)
+        .version(chain_config.phase_at_slot::<P>(slot))
         .into_response())
 }
 
@@ -1242,25 +1407,63 @@ pub async fn state_builder_pending_payments<P: Preset, W: Wait>(
 pub async fn state_pending_consolidations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let electra = state.value.post_electra().ok_or(Error::StatePreElectra)?;
+
+            let response = WithStatus {
+                value: electra.pending_consolidations().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.pending_consolidations_at_slot(slot))?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.pending_consolidations_at_slot(slot))?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: pending_consolidations,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let pending_consolidations: &dyn SszList<_> = &*pending_consolidations;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_consolidations(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
-    )
+    Ok(EthResponse::json_or_ssz(pending_consolidations, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(chain_config.phase_at_slot::<P>(slot))
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_deposits`
@@ -1268,25 +1471,63 @@ pub async fn state_pending_consolidations<P: Preset, W: Wait>(
 pub async fn state_pending_deposits<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let electra = state.value.post_electra().ok_or(Error::StatePreElectra)?;
+
+            let response = WithStatus {
+                value: electra.pending_deposits().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.pending_deposits_at_slot(slot))?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.pending_deposits_at_slot(slot))?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: pending_deposits,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let pending_deposits: &dyn SszList<_> = &*pending_deposits;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_deposits(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
-    )
+    Ok(EthResponse::json_or_ssz(pending_deposits, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(chain_config.phase_at_slot::<P>(slot))
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_partial_withdrawals`
@@ -1298,23 +1539,67 @@ pub async fn state_pending_deposits<P: Preset, W: Wait>(
 pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let electra = state.value.post_electra().ok_or(Error::StatePreElectra)?;
+
+            let response = WithStatus {
+                value: electra.pending_partial_withdrawals().clone_boxed_mut(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| {
+                    controller.pending_partial_withdrawals_at_slot(slot)
+                })?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Electra {
+                return Err(Error::StatePreElectra);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| {
+                    controller.pending_partial_withdrawals_at_slot(slot)
+                })?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: pending_partial_withdrawals,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
-    let version = state.phase();
-    let state = state.post_electra().ok_or(Error::StatePreElectra)?;
+    let pending_partial_withdrawals: &dyn SszList<_> = &*pending_partial_withdrawals;
 
     Ok(
-        EthResponse::json_or_ssz(state.pending_partial_withdrawals(), &headers)?
+        EthResponse::json_or_ssz(pending_partial_withdrawals, &headers)?
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
-            .version(version)
+            .version(chain_config.phase_at_slot::<P>(slot))
             .into_response(),
     )
 }
@@ -1365,16 +1650,26 @@ pub async fn state_randao<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateRandaoQuery>,
 ) -> Result<EthResponse<StateRandaoResponse>, Error> {
-    let WithStatus {
-        value: state,
-        status,
-        finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    let (slot, state) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            (state.value.slot(), Some(state))
+        }
+        StateId::Slot(slot) => (slot, None),
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            (slot, None)
+        }
+    };
 
     // `state.randao_mixes` only holds mixes for epochs in
     // `(state_epoch - EPOCHS_PER_HISTORICAL_VECTOR, state_epoch]`.
     // Mixes for future epochs are not known yet.
-    let state_epoch = accessors::get_current_epoch(&state);
+    let state_epoch = misc::compute_epoch_at_slot::<P>(slot);
     let epoch = query.epoch.unwrap_or(state_epoch);
 
     if epoch > state_epoch || state_epoch.saturating_sub(epoch) >= P::EpochsPerHistoricalVector::U64
@@ -1382,7 +1677,16 @@ pub async fn state_randao<P: Preset, W: Wait>(
         return Err(Error::EpochOutOfRangeForStateRandao);
     }
 
-    let randao = accessors::get_randao_mix(&state, epoch);
+    let WithStatus {
+        value: randao,
+        status,
+        finalized,
+    } = match state {
+        Some(state) => state.map(|state| accessors::get_randao_mix(&*state, epoch)),
+        None => tokio::task::block_in_place(|| controller.randao_mix_at_slot(slot, epoch))?
+            .ok_or(Error::StateNotFound)?,
+    };
+
     let response = StateRandaoResponse { randao };
 
     Ok(EthResponse::json(response)
@@ -2307,42 +2611,25 @@ pub async fn block_rewards<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
 ) -> Result<EthResponse<BlockRewardsResponse>, Error> {
+    let block = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let proposer_index = block.value.message().proposer_index();
+
     let WithStatus {
-        value: signed_block,
+        value:
+            BlockRewards {
+                total,
+                attestations,
+                sync_aggregate,
+                proposer_slashings,
+                attester_slashings,
+            },
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
-
-    let block: BeaconBlock<P> = Arc::unwrap_or_clone(signed_block).into();
-    let block_slot = block.slot();
-
-    let block_rewards = (block_slot > GENESIS_SLOT)
-        .then(|| {
-            tokio::task::block_in_place(|| {
-                let parent_root = block.parent_root();
-
-                let state =
-                    controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
-
-                controller
-                    .block_processor()
-                    .process_trusted_block_with_report(state, &block)
-            })
-        })
-        .transpose()?
-        .and_then(|(_, rewards)| rewards)
-        .unwrap_or_default();
-
-    let BlockRewards {
-        total,
-        attestations,
-        sync_aggregate,
-        proposer_slashings,
-        attester_slashings,
-    } = block_rewards;
+    } = tokio::task::block_in_place(|| controller.block_rewards(block))?;
 
     let rewards_response = BlockRewardsResponse {
-        proposer_index: block.proposer_index(),
+        proposer_index,
         total,
         attestations,
         sync_aggregate,
@@ -2535,9 +2822,9 @@ fn attestation_rewards_response<P: Preset>(
 }
 
 /// `POST /eth/v1/beacon/rewards/sync_committee/{block_id}`
+#[expect(clippy::too_many_lines)]
 #[instrument(skip_all, level = "debug", name = "http_api::sync_committee_rewards")]
 pub async fn sync_committee_rewards<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
@@ -2557,36 +2844,107 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
             .finalized(finalized));
     }
 
-    let parent_root = block.message().parent_root();
+    let sync_aggregate = block
+        .message()
+        .body()
+        .with_sync_aggregate()
+        .map(BlockBodyWithSyncAggregate::sync_aggregate)
+        .expect("post-Altair blocks have a sync aggregate");
 
-    let (state, sync_committee_deltas) = tokio::task::spawn_blocking(move || {
-        let mut state =
-            controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
+    let total_active_balance =
+        tokio::task::block_in_place(|| controller.total_active_balance_at_slot(block_slot))?
+            .ok_or(Error::StateNotFound)?
+            .value;
 
-        let slot_report = match block {
-            StoredBlock::Full(block) => {
-                transition_functions::combined::state_transition_for_report(
-                    &chain_config,
-                    controller.pubkey_cache(),
-                    state.make_mut(),
-                    &block,
-                )?
+    let (committee, _) =
+        tokio::task::block_in_place(|| controller.sync_committees_at_slot(block_slot))?
+            .ok_or(Error::StateNotFound)?
+            .value;
+
+    let (participant_reward, proposer_reward) =
+        transition_functions::altair::sync_committee_rewards::<P>(total_active_balance)?;
+
+    let state = controller.head_state().value;
+    let block_epoch = misc::compute_epoch_at_slot::<P>(block_slot);
+    let proposer_index = block.message().proposer_index();
+
+    let seats = committee
+        .pubkeys
+        .iter()
+        .zip(sync_aggregate.sync_committee_bits)
+        .map(|(pubkey, participated)| {
+            let validator_index = accessors::index_of_public_key(&*state, pubkey)
+                .ok_or_else(|| anyhow!("sync committee member {pubkey:?} is not a validator"))?;
+
+            Ok((validator_index, participated))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut balances = HashMap::new();
+
+    for (validator_index, participated) in &seats {
+        if *participated {
+            continue;
+        }
+
+        let validator = state
+            .validators()
+            .get(*validator_index)
+            .map_err(AnyhowError::new)?;
+
+        if validator.slashed || validator.withdrawable_epoch <= block_epoch {
+            let pre_state = tokio::task::block_in_place(|| {
+                controller.preprocessed_state_post_block_blocking(
+                    block.message().parent_root(),
+                    block_slot,
+                )
+            })?;
+
+            for index in seats
+                .iter()
+                .map(|(index, _)| *index)
+                .chain([proposer_index])
+            {
+                balances.insert(
+                    index,
+                    *pre_state.balances().get(index).map_err(AnyhowError::new)?,
+                );
             }
-            StoredBlock::Blinded(block) => {
-                transition_functions::combined::blinded_state_transition_for_report(
-                    &chain_config,
-                    controller.pubkey_cache(),
-                    state.make_mut(),
-                    &block,
-                )?
+
+            break;
+        }
+    }
+
+    let mut slot_report = RealSlotReport::default();
+
+    for (validator_index, participated) in seats {
+        let delta = if participated {
+            if let Some(balance) = balances.get_mut(&validator_index) {
+                *balance = balance.saturating_add(participant_reward);
             }
+
+            if let Some(balance) = balances.get_mut(&proposer_index) {
+                *balance = balance.saturating_add(proposer_reward);
+            }
+
+            Delta::Reward(participant_reward)
+        } else {
+            let penalty =
+                balances
+                    .get_mut(&validator_index)
+                    .map_or(participant_reward, |balance| {
+                        let penalty = participant_reward.min(*balance);
+                        *balance = balance.saturating_sub(penalty);
+                        penalty
+                    });
+
+            Delta::Penalty(penalty)
         };
 
-        let sync_committee_deltas = slot_report.sync_committee_deltas;
+        slot_report.set_sync_committee_delta(validator_index, delta)?;
+    }
 
-        Ok::<_, AnyhowError>((state, sync_committee_deltas))
-    })
-    .await??;
+    let sync_committee_deltas = slot_report.sync_committee_deltas;
 
     let response = if validator_ids.is_empty() {
         sync_committee_deltas.into_iter().pipe(Either::Left)
@@ -2594,7 +2952,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         validator_ids
             .into_iter()
             .filter_map(|validator_id| {
-                let validator_index = validator_id.validator_index(&state)?;
+                let validator_index = validator_id.validator_index(state.validators().pubkeys())?;
                 let delta = *sync_committee_deltas.get(&validator_index)?;
                 Some((validator_index, delta))
             })
@@ -3647,30 +4005,42 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     let requested_period = misc::sync_committee_period::<P>(epoch);
     let head_state = controller.head_state();
 
-    let (
+    let WithStatus {
+        value: committee,
+        status,
+        // `duties` responses are not supposed to contain a `finalized` field.
+        finalized: _,
+    } = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
         WithStatus {
-            value: state,
-            status,
-            // `duties` responses are not supposed to contain a `finalized` field.
-            finalized: _,
-        },
-        committee,
-    ) = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
-        (head_state, committee)
+            value: committee,
+            status: head_state.status,
+            finalized: head_state.finalized,
+        }
     } else {
         // A committee is known a period ahead, so the state at the current epoch serves the next
         // period even while fork choice is still finishing the previous one.
         let current_epoch = current_epoch_with_clock_disparity(&controller)?;
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
-        let state = state_id::state_at_slot(start_slot, &controller)?;
-
-        if let Some(committee) = state_sync_committee(&state.value, requested_period) {
-            (state, committee)
-        } else {
+        if chain_config.phase_at_slot::<P>(start_slot) < Phase::Altair {
             return Err(Error::EpochNotInSyncCommitteePeriod);
         }
+
+        let WithStatus {
+            value: (committee, _),
+            status,
+            finalized,
+        } = tokio::task::block_in_place(|| controller.sync_committees_at_slot(start_slot))?
+            .ok_or(Error::StateNotFound)?;
+
+        WithStatus {
+            value: committee,
+            status,
+            finalized,
+        }
     };
+
+    let state = head_state.value;
 
     let duties = validator_indices
         .into_iter()
@@ -5025,6 +5395,54 @@ pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
 }
 
+#[expect(clippy::type_complexity)]
+fn validators_and_balances<P: Preset, W: Wait>(
+    state_id: &StateId,
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+) -> Result<WithStatus<(Slot, RawValidatorList, Box<dyn SszListMut<Gwei>>)>, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(state_id, controller, anchor_checkpoint_provider)?;
+
+            let slot = state.value.slot();
+
+            let response = state.map(|state| {
+                let (pubkeys, effective_balances, partial_validators) =
+                    state.validators().columns();
+
+                let validators = RawValidatorList::from_columns(
+                    pubkeys.clone(),
+                    effective_balances.clone(),
+                    partial_validators.clone(),
+                );
+
+                (validators, state.balances().clone_boxed_mut())
+            });
+
+            (slot, Some(response))
+        }
+        StateId::Slot(slot) => (
+            *slot,
+            tokio::task::block_in_place(|| controller.validators_and_balances_at_slot(*slot))?,
+        ),
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(*state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.validators_and_balances_at_slot(slot))?,
+            )
+        }
+    };
+
+    Ok(response
+        .ok_or(Error::StateNotFound)?
+        .map(|(validators, balances)| (slot, validators, balances)))
+}
+
 fn state_validators<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
@@ -5032,57 +5450,48 @@ fn state_validators<P: Preset, W: Wait>(
     ids_and_statuses: &impl ValidatorIdsAndStatuses,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
     let WithStatus {
-        value: state,
+        value: (slot, validators, balances),
         status,
         finalized,
-    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+    } = validators_and_balances(&state_id, controller, anchor_checkpoint_provider)?;
 
-    let ids = ids_and_statuses
-        .ids()
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let statuses = ids_and_statuses.statuses();
 
-    let validators = izip!(
-        0..,
-        state.validators().iter(),
-        state.balances().into_iter().copied(),
-    )
-    .filter(|(index, validator, _)| {
-        if !ids.is_empty() {
-            let validator_index = ValidatorId::ValidatorIndex(*index);
-            let validator_pubkey = ValidatorId::PublicKey(validator.pubkey);
+    let response = |index, validator: Validator, balance| {
+        let validator_status = ValidatorStatus::new(&validator, epoch);
 
-            let allowed_by_id = ids.contains(&validator_index) || ids.contains(&validator_pubkey);
-
-            if !allowed_by_id {
-                return false;
-            }
-        }
-
-        if !statuses.is_empty() {
-            let validator_status = ValidatorStatus::new(validator, &state);
-
-            let allowed_by_status = statuses
+        let allowed_by_status = statuses.is_empty()
+            || statuses
                 .iter()
                 .any(|status| status.matches(validator_status));
 
-            if !allowed_by_status {
-                return false;
-            }
-        }
+        allowed_by_status.then_some(StateValidatorResponse {
+            index,
+            balance,
+            status: validator_status,
+            validator,
+        })
+    };
 
-        true
-    })
-    .map(|(index, validator, balance)| StateValidatorResponse {
-        index,
-        balance,
-        status: ValidatorStatus::new(&validator, &state),
-        validator: validator.clone(),
-    })
-    .collect();
+    let validators = if ids_and_statuses.ids().is_empty() {
+        izip!(0.., &validators, balances.iter().copied())
+            .filter_map(|(index, validator, balance)| response(index, validator, balance))
+            .collect()
+    } else {
+        ids_and_statuses
+            .ids()
+            .iter()
+            .filter_map(|validator_id| validator_id.validator_index(validators.pubkeys()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|index| {
+                let validator = validators.get(index).ok()?;
+                let balance = balances.get(index).copied().ok()?;
+                response(index, validator, balance)
+            })
+            .collect()
+    };
 
     Ok(EthResponse::json(validators)
         .execution_optimistic(status.is_optimistic())
