@@ -5,9 +5,9 @@ use bytesize::ByteSize;
 use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
-    EnvelopeByBlockRoot, EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
-    FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
-    StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
+    EnvelopeByBlockRoot, EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FastConfirmedRoot,
+    FinalizedBlockByRoot, FinalizedValidatorCount, FinalizedValidators, SlotBlobId,
+    SlotByStateRoot, SlotColumnId, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use tracing::{info, warn};
 use types::preset::Preset;
@@ -80,6 +80,7 @@ pub fn print<P: Preset>(
     let mut envelope_by_block_root_entries = EntriesInfo::new("envelopes_by_block_root");
     let mut envelope_root_by_slot_entries = EntriesInfo::new("envelope_roots_by_slot");
     let mut finalized_validator_entries = EntriesInfo::new("finalized_validators");
+    let mut fast_confirmed_root_entries = EntriesInfo::new("fast_confirmed_root");
 
     for result in storage_database.iterate_all_keys_with_lengths()? {
         let (key, length) = result?;
@@ -117,6 +118,8 @@ pub fn print<P: Preset>(
         } else if FinalizedValidators::has_prefix(&key) || FinalizedValidatorCount::has_prefix(&key)
         {
             finalized_validator_entries.track(&key, length);
+        } else if FastConfirmedRoot::has_prefix(&key) {
+            fast_confirmed_root_entries.track(&key, length);
         } else {
             warn!("unknown database key: {}", String::from_utf8_lossy(&key));
         }
@@ -141,6 +144,7 @@ pub fn print<P: Preset>(
         envelope_by_block_root_entries,
         envelope_root_by_slot_entries,
         finalized_validator_entries,
+        fast_confirmed_root_entries,
     ];
 
     entries.sort_by_key(EntriesInfo::total_size);

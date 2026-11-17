@@ -28,7 +28,7 @@ pub use crate::{
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
         DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, EnvelopeByBlockRoot,
-        EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
+        EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FastConfirmedRoot, FinalizedBlockByRoot,
         FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
         StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
         UnfinalizedBlockByRoot, get, print_beacon_database_info, save,

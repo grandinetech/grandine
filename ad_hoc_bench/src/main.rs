@@ -2,7 +2,7 @@ use core::ops::RangeInclusive;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Instant};
 
 use allocator as _;
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use bytesize::ByteSize;
 use clap::{Parser, ValueEnum};
 use database::{Database, DatabaseMode};
@@ -46,6 +46,15 @@ struct Options {
     /// Defaults to a list of default blacklisted blocks of the specified `Config`.
     #[clap(long)]
     blacklisted_blocks: Option<Vec<H256>>,
+    /// Advance the clock to the slot of each block before processing it
+    /// instead of advancing it to the last slot before processing any blocks.
+    /// Requires `forward` order and `synchronous` mode.
+    #[clap(long)]
+    tick_every_slot: bool,
+    /// Run the Fast Confirmation Rule at the start of every slot. Requires `--tick-every-slot`.
+    /// Compare with a run using only `--tick-every-slot` to measure its cost.
+    #[clap(long, requires = "tick_every_slot")]
+    fast_confirmation: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -106,7 +115,7 @@ enum Blocks {
     HoleskyNonFinalityFull,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Order {
     Forward,
     Reverse,
@@ -362,7 +371,14 @@ fn run<P: Preset>(
         database_directory,
         batch_size,
         blacklisted_blocks,
+        tick_every_slot,
+        fast_confirmation,
     } = options;
+
+    ensure!(
+        !tick_every_slot || (order == Order::Forward && mode == Mode::Synchronous),
+        "--tick-every-slot requires forward order and synchronous mode",
+    );
 
     if let Some(blacklisted_blocks) = blacklisted_blocks {
         info_with_peers!("setting blacklisted blocks to: {blacklisted_blocks:?}");
@@ -392,6 +408,7 @@ fn run<P: Preset>(
 
     let store_config = StoreConfig {
         unfinalized_states_in_memory,
+        fast_confirmation,
         ..StoreConfig::default()
     };
 
@@ -431,8 +448,10 @@ fn run<P: Preset>(
         futures::sink::drain(),
     );
 
-    controller.on_slot(last_slot);
-    controller.wait_for_tasks();
+    if !tick_every_slot {
+        controller.on_slot(last_slot);
+        controller.wait_for_tasks();
+    }
 
     match order {
         Order::Forward => {}
@@ -452,6 +471,11 @@ fn run<P: Preset>(
     for chunk in &blocks.chunks(batch_size) {
         for block in chunk {
             let slot = block.message().slot();
+
+            if tick_every_slot {
+                controller.on_slot(slot);
+                controller.wait_for_tasks();
+            }
 
             controller.on_requested_block(block, None);
 
@@ -476,6 +500,14 @@ fn run<P: Preset>(
     let head = controller.head().value;
     assert_eq!(head.block_root, last_block_root);
     assert_eq!(head.slot(), last_slot);
+
+    if fast_confirmation {
+        let confirmed = controller
+            .fast_confirmed_chain_link()
+            .map(|chain_link| (chain_link.slot(), chain_link.block_root));
+
+        info_with_peers!("fast confirmed block:     {confirmed:?}");
+    }
 
     let time_per_block = time / block_count as f64;
     let time_per_slot = time / slot_count as f64;
