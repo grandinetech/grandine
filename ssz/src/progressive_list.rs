@@ -54,9 +54,11 @@ impl<T, N: Unsigned> From<ContiguousList<T, N>> for ProgressiveList<T> {
     }
 }
 
-impl<T, N: Unsigned> From<ProgressiveList<T>> for ContiguousList<T, N> {
-    fn from(list: ProgressiveList<T>) -> Self {
-        Self::try_from_iter(list).expect("list should fit in target ContiguousList")
+impl<T, N: Unsigned> TryFrom<ProgressiveList<T>> for ContiguousList<T, N> {
+    type Error = ReadError;
+
+    fn try_from(list: ProgressiveList<T>) -> Result<Self, Self::Error> {
+        Self::try_from_iter(list)
     }
 }
 

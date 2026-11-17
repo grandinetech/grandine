@@ -488,8 +488,12 @@ pub struct ExecutionPayloadV4<P: Preset> {
     pub slot_number: Slot,
 }
 
-impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
-    fn from(payload: GloasExecutionPayload<P>) -> Self {
+// Gloas payload lists are progressive (effectively unbounded in SSZ), while the engine API
+// type keeps the per-payload limits, so this conversion is checked.
+impl<P: Preset> TryFrom<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
+    type Error = ReadError;
+
+    fn try_from(payload: GloasExecutionPayload<P>) -> Result<Self, Self::Error> {
         let GloasExecutionPayload {
             parent_hash,
             fee_recipient,
@@ -514,10 +518,10 @@ impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
 
         let transactions = Arc::try_unwrap(transactions)
             .unwrap_or_else(|arc| (*arc).clone())
-            .into();
-        let withdrawals = ContiguousList::from(withdrawals).map(Into::into);
+            .try_into()?;
+        let withdrawals = ContiguousList::try_from(withdrawals)?.map(Into::into);
 
-        Self {
+        Ok(Self {
             parent_hash,
             fee_recipient,
             state_root,
@@ -537,7 +541,7 @@ impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
             excess_blob_gas,
             block_access_list,
             slot_number,
-        }
+        })
     }
 }
 
@@ -1348,9 +1352,11 @@ impl<P: Preset> From<RawExecutionRequests<P>> for ElectraExecutionRequests<P> {
     }
 }
 
-// The gloas `ExecutionRequests.deposits` list has a relaxed SSZ bound
-// (see `Preset::GloasDepositRequestsBound`), while the engine API type keeps
-// `MaxDepositRequestsPerPayload`, so this conversion is checked.
+// The gloas `ExecutionRequests` lists are progressive, while the engine API type keeps the
+// per-payload limits, so every conversion is checked. Envelope validation rejects over-limit
+// withdrawal, consolidation and builder requests earlier. Deposits are intentionally unbounded
+// in Gloas (see `Preset::GloasDepositRequestsBound`), so this is where they are checked against
+// `MaxDepositRequestsPerPayload`.
 impl<P: Preset> TryFrom<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
     type Error = ReadError;
 
@@ -1365,11 +1371,11 @@ impl<P: Preset> TryFrom<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
         } = execution_requests;
 
         Ok(Self(
-            narrow_list(deposits)?,
-            withdrawals.into(),
-            consolidations.into(),
-            builder_deposits.into(),
-            builder_exits.into(),
+            deposits.try_into()?,
+            withdrawals.try_into()?,
+            consolidations.try_into()?,
+            builder_deposits.try_into()?,
+            builder_exits.try_into()?,
         ))
     }
 }
@@ -1385,7 +1391,7 @@ impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
         ) = raw_execution_requests;
 
         Self {
-            deposits: widen_list(deposits),
+            deposits: deposits.into(),
             withdrawals: withdrawals.into(),
             consolidations: consolidations.into(),
             builder_deposits: builder_deposits.into(),
@@ -1393,25 +1399,6 @@ impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
             phantom: PhantomData,
         }
     }
-}
-
-/// Converts a list to one with a smaller length bound, failing if the length exceeds it.
-fn narrow_list<T, L, N: Unsigned>(list: L) -> Result<ContiguousList<T, N>, ReadError>
-where
-    L: IntoIterator<Item = T>,
-{
-    ContiguousList::try_from(list.into_iter().collect::<Vec<_>>())
-}
-
-/// Converts a list to one with a larger length bound. Infallible in practice.
-fn widen_list<T, L, U>(list: L) -> U
-where
-    L: IntoIterator<Item = T>,
-    U: TryFrom<Vec<T>>,
-    U::Error: core::fmt::Debug,
-{
-    U::try_from(list.into_iter().collect::<Vec<_>>())
-        .expect("target length bound should not be smaller than source bound")
 }
 
 impl<P: Preset> TryFrom<ExecutionRequests<P>> for RawExecutionRequests<P> {
@@ -1979,5 +1966,45 @@ mod tests {
             "invalid value: byte array, expected deposit requests to be unique \
              and in ascending order",
         );
+    }
+
+    #[test]
+    fn test_gloas_execution_requests_over_limit_conversion_returns_error() -> Result<()> {
+        let consolidations = ProgressiveList::try_from(vec![
+            ConsolidationRequest::default();
+            <Mainnet as Preset>::MaxConsolidationRequestsPerPayload::USIZE
+                + 1
+        ])?;
+
+        let execution_requests = GloasExecutionRequests::<Mainnet> {
+            consolidations,
+            ..GloasExecutionRequests::default()
+        };
+
+        RawExecutionRequests::try_from(execution_requests)
+            .expect_err("over-limit consolidation requests should not convert");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_gloas_execution_payload_over_limit_conversion_returns_error() -> Result<()> {
+        let withdrawals = ProgressiveList::try_from(vec![
+            Withdrawal::default();
+            <Mainnet as Preset>::MaxWithdrawalsPerPayload::USIZE
+                + 1
+        ])?;
+
+        let payload = GloasExecutionPayload::<Mainnet> {
+            withdrawals,
+            ..GloasExecutionPayload::default()
+        };
+
+        assert!(
+            ExecutionPayloadV4::try_from(payload).is_err(),
+            "over-limit withdrawals should not convert",
+        );
+
+        Ok(())
     }
 }

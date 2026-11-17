@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use arc_swap::ArcSwap;
 use core::ops::RangeInclusive;
 use either::Either;
@@ -492,7 +492,8 @@ impl Eth1Api {
                     )
                 });
 
-                let payload_v4 = ExecutionPayloadV4::from(payload);
+                let payload_v4 = ExecutionPayloadV4::try_from(payload)
+                    .context("Gloas execution payload exceeds engine API limits")?;
 
                 self.exec(move |adapter| {
                     adapter.engine_new_payload_v5(

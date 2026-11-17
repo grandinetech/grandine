@@ -130,13 +130,13 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                             );
                         }
                         Err(error) => {
-                            warn_with_peers!("engine_newPayload call failed: {error}");
+                            warn_with_peers!("engine_newPayload call failed: {error:#}");
 
                             features::log!(
                                 DebugEth1,
                                 "engine_newPayload call failed \
                                  (beacon block root: {beacon_block_root:?}, \
-                                  payload: {payload:?}, error: {error})",
+                                  payload: {payload:?}, error: {error:#})",
                             );
                         }
                     }

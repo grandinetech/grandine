@@ -1,7 +1,7 @@
 use core::{ops::RangeInclusive, time::Duration};
 use std::{collections::BTreeMap, sync::Arc};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
@@ -344,8 +344,10 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
-                let payload_v4 = ExecutionPayloadV4::from(payload);
-                let raw_execution_requests = RawExecutionRequests::try_from(execution_requests)?;
+                let payload_v4 = ExecutionPayloadV4::try_from(payload)
+                    .context("Gloas execution payload exceeds engine API limits")?;
+                let raw_execution_requests = RawExecutionRequests::try_from(execution_requests)
+                    .context("Gloas execution requests exceed engine API limits")?;
 
                 let params = vec![
                     serde_json::to_value(payload_v4)?,
