@@ -856,7 +856,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     let validator = state
         .validators()
         .get(validator_index)
-        .map_err(AnyhowError::new)?;
+        .map_err(|_| Error::ValidatorNotFound)?;
 
     let balance = state
         .balances()
