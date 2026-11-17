@@ -12,10 +12,14 @@ use anyhow::{Error as AnyhowError, Result};
 use axum::{
     Json, RequestExt as _, RequestPartsExt as _,
     body::{Body, Bytes},
-    extract::{FromRef, FromRequest, FromRequestParts, Path},
-    http::{Request, request::Parts},
+    extract::{FromRef, FromRequest, FromRequestParts, Path, rejection::MissingJsonContentType},
+    http::{HeaderMap, Request, header::CONTENT_TYPE, request::Parts},
 };
-use axum_extra::{TypedHeader, extract::Query, headers::ContentType};
+use axum_extra::{
+    TypedHeader,
+    extract::Query,
+    headers::{ContentType, Mime},
+};
 use block_producer::ProposerData;
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use eth2_libp2p::PeerId;
@@ -292,15 +296,13 @@ impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorIndex>> {
     }
 }
 
-impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
+// The spec makes the body optional for endpoints taking a plain list of validator IDs.
+// A missing body is treated like `[]`.
+impl<S: Send + Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
     type Rejection = Error;
 
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
-            .await
-            .map(|Json(indices)| Self(indices))
-            .map_err(Error::InvalidJsonBody)
+    async fn from_request(request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        optional_json_body(request, state).await.map(Self)
     }
 }
 
@@ -320,18 +322,45 @@ impl<S: Send + Sync> FromRequest<S, Body> for EthJson<BuilderIdsAndStatusesBody>
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
-        let bytes = Bytes::from_request(request, state)
-            .await
-            .map_err(Error::InvalidBytesBody)?;
-
-        if bytes.is_empty() {
-            return Ok(Self(BuilderIdsAndStatusesBody::default()));
-        }
-
-        let ids_and_statuses = serde_json::from_slice(&bytes).map_err(Error::InvalidJsonValue)?;
-
-        Ok(Self(ids_and_statuses))
+        optional_json_body(request, state).await.map(Self)
     }
+}
+
+// Deserializes a JSON body, or returns the default value if the body is empty.
+// A body that is present must be sent with a JSON `Content-Type`, as `Json` requires.
+async fn optional_json_body<T: DeserializeOwned + Default, S: Send + Sync>(
+    request: Request<Body>,
+    state: &S,
+) -> Result<T, Error> {
+    let has_json_content_type = has_json_content_type(request.headers());
+
+    let bytes = Bytes::from_request(request, state)
+        .await
+        .map_err(Error::InvalidBytesBody)?;
+
+    if bytes.is_empty() {
+        return Ok(T::default());
+    }
+
+    if !has_json_content_type {
+        return Err(Error::InvalidJsonBody(
+            MissingJsonContentType::default().into(),
+        ));
+    }
+
+    serde_json::from_slice(&bytes).map_err(Error::InvalidJsonValue)
+}
+
+// The same check `Json` does.
+fn has_json_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<Mime>().ok())
+        .is_some_and(|mime| {
+            mime.type_() == "application"
+                && (mime.subtype() == "json" || mime.suffix().is_some_and(|name| name == "json"))
+        })
 }
 
 impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<SyncCommitteeSubscription>> {
