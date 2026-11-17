@@ -280,8 +280,12 @@ impl IntoResponse for Error {
 impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
+            // The Beacon API reports malformed bodies as 400 and never uses 422.
             Self::InvalidJsonBody(json_rejection)
-            | Self::InvalidValidatorIndices(json_rejection) => json_rejection.status(),
+            | Self::InvalidValidatorIndices(json_rejection) => match json_rejection {
+                JsonRejection::JsonDataError(_) => StatusCode::BAD_REQUEST,
+                _ => json_rejection.status(),
+            },
             Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
