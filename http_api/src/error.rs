@@ -192,6 +192,8 @@ pub enum Error {
     SlotHeadNotAvailable,
     #[error("state is post-Gloas")]
     StatePostGloas,
+    #[error("state is pre-Altair")]
+    StatePreAltair,
     #[error("state is pre-Capella")]
     StatePreCapella,
     #[error("state is pre-Electra")]
@@ -350,6 +352,7 @@ impl Error {
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
             | Self::StatePostGloas
+            | Self::StatePreAltair
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
