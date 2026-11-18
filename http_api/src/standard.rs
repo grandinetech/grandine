@@ -142,7 +142,7 @@ use types::{
     },
 };
 use validator::{
-    ApiToValidator, ValidatorConfig, attester_duties_at_slot, proposer_duties_at_epoch,
+    ApiToValidator, ValidatorConfig, attester_duties_from_shuffling, proposer_duties_at_epoch,
     proposer_lookahead_applies, ptc_duties_at_epoch,
 };
 
@@ -3782,39 +3782,76 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
     }
 
     let head_state = controller.head_state();
-
-    let state = match accessors::relative_epoch(&head_state.value, epoch) {
-        Ok(_) => head_state,
-        Err(_) => {
-            // Committees are known an epoch ahead, so the state at the start of the previous
-            // epoch serves them without advancing through that whole epoch.
-            let start_slot = misc::compute_start_slot_at_epoch::<P>(misc::previous_epoch(epoch));
-
-            state_id::state_at_slot(start_slot, &controller)?
-        }
-    };
-
-    let WithStatus {
-        value: state,
-        status,
-        // `duties` responses are not supposed to contain a `finalized` field.
-        finalized: _,
-    } = state;
+    let relative_epoch = accessors::relative_epoch(&head_state.value, epoch).ok();
 
     // Unlike `GET /eth/v1/validator/duties/proposer/{epoch}`,
     // this endpoint is supposed to return the dependent root for the previous epoch.
     let previous_epoch = misc::previous_epoch(epoch);
-    let dependent_root = controller.dependent_root(&state, previous_epoch)?;
+
+    // Committees are known an epoch ahead, so the state at the start of the previous
+    // epoch serves them without advancing through that whole epoch.
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
+
+    let (dependent_root, status) = if relative_epoch.is_some() {
+        (
+            controller.dependent_root(&head_state.value, previous_epoch)?,
+            head_state.status,
+        )
+    } else {
+        let status = controller
+            .status_at_slot(start_slot)?
+            .ok_or(Error::StateNotFound)?
+            .status;
+
+        let dependent_root =
+            match controller.block_root_before_or_at_slot(start_slot.saturating_sub(1))? {
+                Some(dependent_root) => dependent_root,
+                None => {
+                    let state = state_id::state_at_slot(start_slot, &controller)?.value;
+
+                    controller.dependent_root(&state, previous_epoch)?
+                }
+            };
+
+        (dependent_root, status)
+    };
 
     let indices = validator_indices
         .into_iter()
         .collect::<HashSet<ValidatorIndex>>();
 
-    let response = misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| attester_duties_at_slot(&state, slot, &indices))
-        .flatten_ok()
-        .try_collect()
-        .map_err(Error::Internal)?;
+    let response = if indices.is_empty() {
+        vec![]
+    } else {
+        let shuffled = if let Some(relative_epoch) = relative_epoch {
+            accessors::active_validator_indices_shuffled(&head_state.value, relative_epoch)?.clone()
+        } else {
+            let ((partial_validators, _), randao_mixes) = tokio::task::block_in_place(|| {
+                controller.validators_and_randao_mixes_at_slot(start_slot)
+            })?
+            .ok_or(Error::StateNotFound)?
+            .value;
+
+            accessors::compute_shuffled_active_validator_indices::<P>(
+                &partial_validators,
+                &randao_mixes,
+                epoch,
+            )?
+        };
+
+        misc::slots_in_epoch::<P>(epoch)?
+            .map(|slot| {
+                attester_duties_from_shuffling::<P>(
+                    head_state.value.validators(),
+                    &shuffled,
+                    slot,
+                    &indices,
+                )
+            })
+            .flatten_ok()
+            .try_collect()
+            .map_err(Error::Internal)?
+    };
 
     Ok(EthResponse::json(response)
         .dependent_root(dependent_root)
