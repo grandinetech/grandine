@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_extra::{extract::QueryRejection, typed_header::TypedHeaderRejection};
-use bls::{SignatureBytes, traits::SignatureBytes as _};
+use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use fork_choice_control::BlockError;
 use futures::channel::oneshot::Canceled;
 use http_api_utils::{ApiError, PhaseHeaderError};
@@ -219,6 +219,8 @@ pub enum Error {
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
+    #[error("unknown validator public key {0:?}")]
+    UnknownValidatorPublicKey(PublicKeyBytes),
     #[error("validator not found")]
     ValidatorNotFound,
     #[error("validator {validator_index} is not in payload timeliness committee")]
@@ -345,6 +347,7 @@ impl Error {
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
             | Self::InvalidValidatorIndex(_)
+            | Self::UnknownValidatorPublicKey(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::InvalidSlot(_)
             | Self::ExecutionPayloadEnvelopeSlotMismatch { .. }

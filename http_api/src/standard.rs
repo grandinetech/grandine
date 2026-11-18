@@ -2367,6 +2367,9 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             .state_at_slot_cached_blocking(last_slot)?
             .ok_or(Error::StateNotFound)?;
 
+        // Reject unknown validators before computing rewards for the whole epoch.
+        let validator_indices = requested_validator_indices(&state, validator_ids)?;
+
         // The cached state is left intact. Its persistent parts are shared with the copy.
         let mut post_state = state.clone_arc();
 
@@ -2377,7 +2380,7 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             epoch,
         )?;
 
-        let response = attestation_rewards_response(&state, &rewards, validator_ids)?;
+        let response = attestation_rewards_response(&rewards, validator_indices)?;
 
         Ok::<_, Error>(
             EthResponse::json(response)
@@ -2388,27 +2391,42 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
     .await?
 }
 
-fn attestation_rewards_response<P: Preset>(
+// Unknown validators are rejected rather than skipped.
+fn requested_validator_indices<P: Preset>(
     state: &BeaconState<P>,
-    rewards: &AttestationRewards<P>,
     validator_ids: Vec<ValidatorId>,
+) -> Result<Vec<ValidatorIndex>, Error> {
+    let validator_count = state.validators().len_u64();
+
+    validator_ids
+        .into_iter()
+        .map(|validator_id| match validator_id {
+            ValidatorId::ValidatorIndex(validator_index) if validator_index < validator_count => {
+                Ok(validator_index)
+            }
+            ValidatorId::ValidatorIndex(validator_index) => {
+                Err(Error::InvalidValidatorIndex(validator_index))
+            }
+            ValidatorId::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey)
+                .ok_or(Error::UnknownValidatorPublicKey(pubkey)),
+        })
+        .collect()
+}
+
+fn attestation_rewards_response<P: Preset>(
+    rewards: &AttestationRewards<P>,
+    validator_indices: Vec<ValidatorIndex>,
 ) -> Result<AttestationRewardsResponse> {
     let validators = rewards.validators();
 
     // With no validators requested, respond with all that could have been rewarded or penalized.
-    let validator_indices = if validator_ids.is_empty() {
+    let validator_indices = if validator_indices.is_empty() {
         izip!(0.., validators)
             .filter(|(_, validator)| validator.eligible)
             .map(|(validator_index, _)| validator_index)
             .collect_vec()
     } else {
-        validator_ids
-            .into_iter()
-            .filter_map(|validator_id| validator_id.validator_index(state))
-            .filter(|validator_index| {
-                usize::try_from(*validator_index).is_ok_and(|index| index < validators.len())
-            })
-            .collect_vec()
+        validator_indices
     };
 
     // Effective balances are multiples of `EFFECTIVE_BALANCE_INCREMENT`,
@@ -2423,7 +2441,9 @@ fn attestation_rewards_response<P: Preset>(
                 effective_balance,
                 eligible,
                 reward,
-            } = validators[usize::try_from(validator_index)?];
+            } = *validators
+                .get(usize::try_from(validator_index)?)
+                .ok_or_else(|| anyhow!("no attestation reward for validator {validator_index}"))?;
 
             if eligible {
                 let increments =
