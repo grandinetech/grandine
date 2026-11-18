@@ -1,7 +1,7 @@
 use core::{fmt, iter, marker::PhantomData, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
@@ -39,49 +39,44 @@ pub struct ValidatorList<N: Unsigned> {
 
     /// Merkle root cache.
     #[derivative(PartialEq = "ignore")]
-    cache: Option<Arc<CacheNode>>,
+    cache: Arc<CacheNode>,
 
     phantom: PhantomData<N>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum CacheNode {
-    Leaf(OnceBox<H256>),
-    Internal {
-        root: OnceBox<H256>,
-        left: Arc<Self>,
-        right: Arc<Self>,
-    },
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CacheNode {
+    root: OnceBox<H256>,
+    children: OnceLock<(Arc<Self>, Arc<Self>)>,
 }
 
 impl CacheNode {
-    pub(crate) fn empty_leaf() -> Arc<Self> {
-        Arc::new(Self::Leaf(OnceBox::new()))
+    fn children(&self) -> &(Arc<Self>, Arc<Self>) {
+        self.children.get_or_init(Default::default)
     }
 
-    pub(crate) fn build_empty(length: usize) -> Arc<Self> {
-        if length == 1 {
-            return Self::empty_leaf();
-        }
+    fn unshare(self: &mut Arc<Self>) -> &mut (Arc<Self>, Arc<Self>) {
+        self.children();
 
-        let left_length = length.next_power_of_two() / 2;
-        let right_length = length
-            .checked_sub(left_length)
-            .expect("left_length never exceeds length");
+        let node = Arc::make_mut(self);
 
-        Arc::new(Self::Internal {
-            root: OnceBox::new(),
-            left: Self::build_empty(left_length),
-            right: Self::build_empty(right_length),
-        })
+        node.root = OnceBox::new();
+
+        node.children
+            .get_mut()
+            .expect("children are created before the node is copied")
     }
 
     pub(crate) fn push_leaf(self: &mut Arc<Self>, old_length: usize) {
+        if old_length == 0 {
+            *self = Arc::default();
+            return;
+        }
+
         if old_length.is_power_of_two() {
-            *self = Arc::new(Self::Internal {
+            *self = Arc::new(Self {
                 root: OnceBox::new(),
-                left: Arc::clone(self),
-                right: Self::empty_leaf(),
+                children: OnceLock::from((Arc::clone(self), Arc::default())),
             });
 
             return;
@@ -92,36 +87,29 @@ impl CacheNode {
             .checked_sub(left_length)
             .expect("left_length never exceeds old_length");
 
-        match Arc::make_mut(self) {
-            Self::Internal { root, right, .. } => {
-                *root = OnceBox::new();
-                right.push_leaf(right_length);
-            }
-            Self::Leaf(_) => unreachable!("non-power-of-two length implies an internal node"),
-        }
+        self.unshare().1.push_leaf(right_length);
     }
 
     pub(crate) fn invalidate(self: &mut Arc<Self>, index: usize, length: usize) {
-        match Arc::make_mut(self) {
-            Self::Leaf(root) => *root = OnceBox::new(),
-            Self::Internal { root, left, right } => {
-                *root = OnceBox::new();
+        if length == 1 {
+            *self = Arc::default();
+            return;
+        }
 
-                let left_length = length.next_power_of_two() / 2;
+        let left_length = length.next_power_of_two() / 2;
+        let (left, right) = self.unshare();
 
-                if index < left_length {
-                    left.invalidate(index, left_length);
-                } else {
-                    let right_index = index
-                        .checked_sub(left_length)
-                        .expect("index >= left_length in this branch");
-                    let right_length = length
-                        .checked_sub(left_length)
-                        .expect("left_length never exceeds length");
+        if index < left_length {
+            left.invalidate(index, left_length);
+        } else {
+            let right_index = index
+                .checked_sub(left_length)
+                .expect("index >= left_length in this branch");
+            let right_length = length
+                .checked_sub(left_length)
+                .expect("left_length never exceeds length");
 
-                    right.invalidate(right_index, right_length);
-                }
-            }
+            right.invalidate(right_index, right_length);
         }
     }
 
@@ -131,34 +119,34 @@ impl CacheNode {
             return;
         }
 
-        match Arc::make_mut(self) {
-            Self::Leaf(root) => *root = OnceBox::new(),
-            Self::Internal { root, left, right } => {
-                *root = OnceBox::new();
-
-                let left_length = length.next_power_of_two() / 2;
-                let right_length = length
-                    .checked_sub(left_length)
-                    .expect("left_length never exceeds length");
-
-                left.invalidate_range(
-                    range.start.min(left_length)..range.end.min(left_length),
-                    left_length,
-                );
-
-                right.invalidate_range(
-                    range.start.saturating_sub(left_length)
-                        ..range.end.saturating_sub(left_length).min(right_length),
-                    right_length,
-                );
-            }
+        if range == (0..length) {
+            *self = Arc::default();
+            return;
         }
+
+        let left_length = length.next_power_of_two() / 2;
+        let right_length = length
+            .checked_sub(left_length)
+            .expect("left_length never exceeds length");
+
+        let (left, right) = self.unshare();
+
+        left.invalidate_range(
+            range.start.min(left_length)..range.end.min(left_length),
+            left_length,
+        );
+
+        right.invalidate_range(
+            range.start.saturating_sub(left_length)
+                ..range.end.saturating_sub(left_length).min(right_length),
+            right_length,
+        );
     }
 
     pub(crate) fn hash(&self, buf: &RawValidatorList, len: usize, offset: usize) -> H256 {
-        match self {
-            Self::Leaf(root) => root
-                .get_or_init(|| {
+        self.root
+            .get_or_init(|| {
+                if len == 1 {
                     let validator = buf
                         .get(offset.try_into().expect("offset doesn't fit in usize"))
                         .expect(
@@ -166,40 +154,39 @@ impl CacheNode {
                                 validator list is out of sync with current length",
                         );
 
-                    Box::new(validator.hash_tree_root())
-                })
-                .copy(),
-            Self::Internal { root, left, right } => root
-                .get_or_init(|| {
-                    let left_len = len.next_power_of_two() / 2;
-                    let right_len = len
-                        .checked_sub(left_len)
-                        .expect("left_len never exceeds len");
+                    return Box::new(validator.hash_tree_root());
+                }
 
-                    let left_height =
-                        <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(
-                            left_len,
-                        );
-                    let right_height =
-                        <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(
-                            right_len,
-                        );
+                let left_len = len.next_power_of_two() / 2;
+                let right_len = len
+                    .checked_sub(left_len)
+                    .expect("left_len never exceeds len");
 
-                    let right_offset = offset
-                        .checked_add(left_len)
-                        .expect("offset + left_len never overflows usize");
+                let left_height =
+                    <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(
+                        left_len,
+                    );
+                let right_height =
+                    <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(
+                        right_len,
+                    );
 
-                    let left = left.hash(buf, left_len, offset);
-                    let right = right.hash(buf, right_len, right_offset);
+                let right_offset = offset
+                    .checked_add(left_len)
+                    .expect("offset + left_len never overflows usize");
 
-                    let right_hash = (right_height..left_height)
-                        .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)
-                        .fold(right, hashing::hash_256_256);
+                let (left, right) = self.children();
 
-                    Box::new(hashing::hash_256_256(left, right_hash))
-                })
-                .copy(),
-        }
+                let left = left.hash(buf, left_len, offset);
+                let right = right.hash(buf, right_len, right_offset);
+
+                let right_hash = (right_height..left_height)
+                    .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)
+                    .fold(right, hashing::hash_256_256);
+
+                Box::new(hashing::hash_256_256(left, right_hash))
+            })
+            .copy()
     }
 }
 
@@ -207,8 +194,8 @@ impl<N: Unsigned> ValidatorList<N> {
     /// Wraps `buf`, which must hold no more than `N` validators.
     pub(crate) fn from_raw(buf: RawValidatorList) -> Self {
         Self {
-            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize())),
             buf,
+            cache: Arc::default(),
             phantom: PhantomData,
         }
     }
@@ -235,18 +222,14 @@ impl<N: Unsigned> ValidatorList<N> {
             return;
         }
 
-        if let Some(cache) = self.cache.as_mut() {
-            cache.invalidate(index, len);
-        }
+        self.cache.invalidate(index, len);
     }
 
     /// Invalidates the cached hashes of the validators in `range`.
     fn invalidate_pubkey_range(&mut self, range: Range<usize>) {
         let length = self.len_usize();
 
-        if let Some(cache) = self.cache.as_mut() {
-            cache.invalidate_range(range, length);
-        }
+        self.cache.invalidate_range(range, length);
     }
 }
 
@@ -309,8 +292,7 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
 
     fn clear_pubkeys(&mut self, count: usize) {
         self.buf.clear_pubkeys(count);
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length));
+        self.cache = Arc::default();
     }
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
@@ -330,9 +312,7 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
         updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
     ) -> Result<(), anyhow::Error> {
         self.buf.update_effective_balances(updater, |index, len| {
-            if let Some(cache) = self.cache.as_mut() {
-                cache.invalidate(index, len);
-            }
+            self.cache.invalidate(index, len);
         })
     }
 
@@ -345,10 +325,7 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
 
         self.buf.push(validator);
 
-        match &mut self.cache {
-            Some(cache) => cache.push_leaf(old_length),
-            None => self.cache = Some(CacheNode::empty_leaf()),
-        }
+        self.cache.push_leaf(old_length);
 
         Ok(())
     }
@@ -384,10 +361,8 @@ impl<N: Unsigned> TryFromIterator<Validator> for ValidatorList<N> {
         }
 
         Ok(Self {
-            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize())),
-
             buf,
-
+            cache: Arc::default(),
             phantom: PhantomData,
         })
     }
@@ -443,15 +418,9 @@ impl<N: Unsigned> SszHash for ValidatorList<N> {
             0 => {
                 <MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash(Self::max_depth())
             }
-            _ => (self.depth()..Self::max_depth())
+            length => (self.depth()..Self::max_depth())
                 .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)
-                .fold(
-                    self.cache
-                        .as_ref()
-                        .expect("non-empty list has a cache")
-                        .hash(&self.buf, self.len_usize(), 0),
-                    hashing::hash_256_256,
-                ),
+                .fold(self.cache.hash(&self.buf, length, 0), hashing::hash_256_256),
         };
 
         mix_in_length(root, self.len_usize())
@@ -492,13 +461,260 @@ impl<N: Unsigned, const SIZE: usize> TryFrom<[Validator; SIZE]> for ValidatorLis
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::{sync::Barrier, thread};
+
+    use ssz::ContiguousList;
     use test_case::test_case;
-    use typenum::U16;
+    use typenum::{U16, U256};
 
     use super::*;
 
     type TestValidatorList = ValidatorList<U16>;
+    type LargeValidatorList = ValidatorList<U256>;
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn value(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, bound: usize) -> usize {
+            usize::try_from(self.value())
+                .expect("u64 fits in usize")
+                .checked_rem(bound)
+                .expect("bound is positive")
+        }
+
+        fn range(&mut self, length: usize) -> Range<usize> {
+            let first = self.below(length.saturating_add(1));
+            let second = self.below(length.saturating_add(1));
+
+            first.min(second)..first.max(second)
+        }
+
+        fn validator(&mut self) -> Validator {
+            Validator {
+                pubkey: PublicKeyBytes::from_low_u64_be(self.value() | 1),
+                withdrawal_credentials: H256::from_low_u64_be(self.value()),
+                effective_balance: self.value(),
+                slashed: self.value() & 1 == 1,
+                activation_eligibility_epoch: self.value(),
+                activation_epoch: self.value(),
+                exit_epoch: self.value(),
+                withdrawable_epoch: self.value(),
+            }
+        }
+    }
+
+    fn assert_matches<L: SszValidatorList>(
+        list: &L,
+        mirror: &[Validator],
+        oracle: &impl Fn(&[Validator]) -> H256,
+    ) {
+        assert_eq!(list.iter().collect::<Vec<_>>(), mirror);
+        assert_eq!(list.hash_tree_root(), oracle(mirror));
+    }
+
+    fn apply_random_operation<L: SszValidatorList + Clone>(
+        rng: &mut Rng,
+        lists: &mut Vec<(L, Vec<Validator>)>,
+        source: &PubkeyList,
+        oracle: &impl Fn(&[Validator]) -> H256,
+    ) {
+        let pick = rng.below(lists.len());
+        let operation = rng.below(9);
+
+        if operation == 0 {
+            if lists.len() < 6 {
+                lists.push(lists[pick].clone());
+            }
+
+            return;
+        }
+
+        let (list, mirror) = &mut lists[pick];
+        let length = mirror.len();
+
+        match operation {
+            1 if length > 0 => {
+                let index = rng.below(length);
+                let value = rng.value();
+                let list_index = u64::try_from(index).expect("index fits in u64");
+
+                *list
+                    .effective_balance_mut(list_index)
+                    .expect("index is in the list") = value;
+
+                mirror[index].effective_balance = value;
+            }
+            2 if length > 0 => {
+                let index = rng.below(length);
+                let value = rng.value();
+                let credentials = H256::from_low_u64_be(value);
+                let list_index = u64::try_from(index).expect("index fits in u64");
+                let partial = list
+                    .partial_validator_mut(list_index)
+                    .expect("index is in the list");
+
+                partial.exit_epoch = value;
+                partial.withdrawal_credentials = credentials;
+
+                mirror[index].exit_epoch = value;
+                mirror[index].withdrawal_credentials = credentials;
+            }
+            3 if length < source.len() => {
+                let validator = rng.validator();
+
+                list.push(validator.clone()).expect("the list has room");
+                mirror.push(validator);
+            }
+            4 => {
+                let range = rng.range(length);
+
+                list.restore_pubkeys_in(source, range.clone())
+                    .expect("the source covers the list");
+
+                for index in range {
+                    mirror[index].pubkey = *source.get(index).expect("source covers the list");
+                }
+            }
+            5 => {
+                let count = rng.below(length.saturating_add(1));
+
+                list.clear_pubkeys(count);
+
+                for validator in &mut mirror[..count] {
+                    validator.pubkey = PublicKeyBytes::zero();
+                }
+            }
+            6 => {
+                let cleared = mirror
+                    .iter()
+                    .take_while(|validator| validator.pubkey.is_zero())
+                    .count();
+
+                if mirror[cleared..]
+                    .iter()
+                    .all(|validator| !validator.pubkey.is_zero())
+                {
+                    list.restore_pubkeys(source)
+                        .expect("the source covers the list");
+
+                    for (index, validator) in mirror[..cleared].iter_mut().enumerate() {
+                        validator.pubkey = *source.get(index).expect("source covers the list");
+                    }
+                }
+            }
+            7 => {
+                let mut index = 0;
+
+                list.update_effective_balances(&mut |_, old| {
+                    let new = if rng.below(4) == 0 { rng.value() } else { old };
+
+                    mirror[index].effective_balance = new;
+                    index = index.saturating_add(1);
+
+                    Ok(new)
+                })
+                .expect("the updater never fails");
+            }
+            _ => assert_matches(list, mirror, oracle),
+        }
+    }
+
+    pub fn assert_random_operations_match_oracle<L: SszValidatorList + Clone>(
+        seed: u64,
+        max_length: usize,
+        build: impl Fn(Vec<Validator>) -> L,
+        oracle: impl Fn(&[Validator]) -> H256,
+    ) {
+        let mut rng = Rng(seed);
+
+        let source = build(
+            (0..max_length.saturating_mul(2))
+                .map(|_| rng.validator())
+                .collect(),
+        );
+
+        for _ in 0..2000 {
+            let length = rng.below(max_length.saturating_add(1));
+            let mirror = (0..length).map(|_| rng.validator()).collect::<Vec<_>>();
+            let mut lists = vec![(build(mirror.clone()), mirror)];
+
+            for _ in 0..40 {
+                apply_random_operation(&mut rng, &mut lists, source.pubkeys(), &oracle);
+            }
+
+            for (list, mirror) in &lists {
+                assert_matches(list, mirror, &oracle);
+            }
+        }
+    }
+
+    pub fn assert_concurrent_clones_match_oracle<L: SszValidatorList + Clone + Send + Sync>(
+        seed: u64,
+        build: impl Fn(Vec<Validator>) -> L,
+        oracle: impl Fn(&[Validator]) -> H256 + Sync,
+    ) {
+        const THREADS: u64 = 8;
+
+        let mut rng = Rng(seed);
+
+        for _ in 0..20 {
+            let validators = (0..512).map(|_| rng.validator()).collect::<Vec<_>>();
+            let base = build(validators.clone());
+            let barrier = Barrier::new(THREADS.try_into().expect("THREADS fits in usize"));
+
+            thread::scope(|scope| {
+                for thread_index in 1..=THREADS {
+                    let (base, validators, barrier, oracle) =
+                        (&base, &validators, &barrier, &oracle);
+                    let thread_seed = rng.value() | thread_index;
+
+                    scope.spawn(move || {
+                        let mut rng = Rng(thread_seed);
+                        let mut list = base.clone();
+                        let mut mirror = validators.clone();
+
+                        barrier.wait();
+
+                        for _ in 0..3 {
+                            if thread_index & 1 == 0 {
+                                let index = rng.below(mirror.len());
+                                let value = rng.value();
+                                let list_index = u64::try_from(index).expect("index fits in u64");
+
+                                *list
+                                    .effective_balance_mut(list_index)
+                                    .expect("index is in the list") = value;
+
+                                mirror[index].effective_balance = value;
+                            }
+
+                            assert_eq!(list.hash_tree_root(), oracle(&mirror));
+                        }
+                    });
+                }
+            });
+
+            assert_eq!(base.hash_tree_root(), oracle(&validators));
+        }
+    }
+
+    fn contiguous_list_root(validators: &[Validator]) -> H256 {
+        ContiguousList::<Validator, U256>::try_from_iter(validators.iter().cloned())
+            .expect("the validators fit")
+            .hash_tree_root()
+    }
+
+    fn large_list(validators: Vec<Validator>) -> LargeValidatorList {
+        LargeValidatorList::try_from_iter(validators).expect("the validators fit")
+    }
 
     const LENGTH: usize = 10;
 
@@ -579,6 +795,38 @@ mod tests {
         assert_eq!(list.hash_tree_root(), expected);
     }
 
+    #[test]
+    fn a_list_mutated_before_its_first_hash_matches_one_hashed_throughout() {
+        let mut cold = test_list((0..6).map(test_pubkey));
+        let mut warm = cold.clone();
+
+        warm.hash_tree_root();
+
+        for list in [&mut cold, &mut warm] {
+            for _ in 6..LENGTH {
+                list.push(Validator::default()).expect("the test list fits");
+            }
+
+            *list
+                .effective_balance_mut(2)
+                .expect("the list has a third validator") = 32;
+
+            list.restore_pubkeys_in(full_list().pubkeys(), 6..LENGTH)
+                .expect("the source covers the range");
+        }
+
+        let expected = TestValidatorList::try_from_iter((0..LENGTH).map(|index| Validator {
+            pubkey: test_pubkey(u64::try_from(index).expect("index fits")),
+            effective_balance: if index == 2 { 32 } else { 0 },
+            ..Validator::default()
+        }))
+        .expect("the test list fits")
+        .hash_tree_root();
+
+        assert_eq!(cold.hash_tree_root(), expected);
+        assert_eq!(warm.hash_tree_root(), expected);
+    }
+
     // `invalidate_range` walks the tree once instead of once per index, so it
     // has to drop every root that invalidating the indices one by one would.
     // Dropping too few leaves a stale root behind with nothing to report it,
@@ -607,10 +855,7 @@ mod tests {
 
         let length = list.len_usize();
 
-        list.cache
-            .as_mut()
-            .expect("the list is not empty")
-            .invalidate_range(range.clone(), length);
+        list.cache.invalidate_range(range.clone(), length);
 
         let expected = test_list((0..LENGTH).map(|index| {
             let index = u64::try_from(index).expect("index fits");
@@ -624,5 +869,134 @@ mod tests {
         .hash_tree_root();
 
         assert_eq!(list.hash_tree_root(), expected);
+    }
+
+    #[test]
+    fn random_operations_on_clones_match_an_independent_merkleization() {
+        assert_random_operations_match_oracle(
+            0x9E37_79B9_7F4A_7C15,
+            64,
+            large_list,
+            contiguous_list_root,
+        );
+    }
+
+    #[test]
+    fn clones_hashed_and_changed_concurrently_match_an_independent_merkleization() {
+        assert_concurrent_clones_match_oracle(
+            0xD1B5_4A32_D192_ED03,
+            |validators| {
+                ValidatorList::<typenum::U1024>::try_from_iter(validators)
+                    .expect("the validators fit")
+            },
+            |validators| {
+                ContiguousList::<Validator, typenum::U1024>::try_from_iter(
+                    validators.iter().cloned(),
+                )
+                .expect("the validators fit")
+                .hash_tree_root()
+            },
+        );
+    }
+
+    #[test]
+    fn a_clone_shares_the_subtrees_it_did_not_change() {
+        let original = test_list((0..8).map(test_pubkey));
+        let mut clone = original.clone();
+
+        assert!(Arc::ptr_eq(&original.cache, &clone.cache));
+
+        *clone
+            .effective_balance_mut(7)
+            .expect("the list has an eighth validator") = 32;
+
+        let (original_left, original_right) = original.cache.children();
+        let (clone_left, clone_right) = clone.cache.children();
+
+        assert!(!Arc::ptr_eq(&original.cache, &clone.cache));
+        assert!(Arc::ptr_eq(original_left, clone_left));
+        assert!(!Arc::ptr_eq(original_right, clone_right));
+        assert!(original_left.root.get().is_none());
+
+        clone.hash_tree_root();
+
+        assert!(original_left.root.get().is_some());
+        assert!(original.cache.root.get().is_none());
+        assert!(original_right.root.get().is_none());
+    }
+
+    #[test]
+    fn a_clone_shares_the_old_tree_after_pushing_past_a_power_of_two() {
+        let original = test_list((0..4).map(test_pubkey));
+        let mut clone = original.clone();
+
+        clone
+            .push(Validator::default())
+            .expect("the test list fits");
+        clone
+            .push(Validator::default())
+            .expect("the test list fits");
+
+        assert!(Arc::ptr_eq(&original.cache, &clone.cache.children().0));
+
+        clone.hash_tree_root();
+
+        assert!(original.cache.root.get().is_some());
+    }
+
+    #[test]
+    fn restoring_a_whole_unhashed_list_allocates_no_tree() {
+        let mut list = full_list();
+
+        list.clear_pubkeys(LENGTH);
+
+        list.restore_pubkeys(full_list().pubkeys())
+            .expect("the source covers the cleared prefix");
+
+        assert!(list.cache.children.get().is_none());
+        assert_eq!(list.hash_tree_root(), full_list().hash_tree_root());
+    }
+
+    #[test]
+    fn restoring_part_of_a_list_keeps_the_roots_outside_the_range() {
+        let list_source = full_list();
+        let mut list = full_list();
+
+        list.hash_tree_root();
+
+        list.restore_pubkeys_in(list_source.pubkeys(), 0..1)
+            .expect("the source covers the range");
+
+        assert!(list.cache.root.get().is_none());
+        assert!(list.cache.children().1.root.get().is_some());
+    }
+
+    #[test]
+    fn clones_of_an_empty_list_do_not_share_their_first_leaf() {
+        let empty = TestValidatorList::default();
+        let mut first = empty.clone();
+        let mut second = empty;
+
+        first
+            .push(Validator {
+                pubkey: test_pubkey(1),
+                ..Validator::default()
+            })
+            .expect("the test list fits");
+        second
+            .push(Validator {
+                pubkey: test_pubkey(2),
+                ..Validator::default()
+            })
+            .expect("the test list fits");
+
+        assert_eq!(
+            first.hash_tree_root(),
+            test_list([test_pubkey(1)]).hash_tree_root(),
+        );
+        assert_eq!(
+            second.hash_tree_root(),
+            test_list([test_pubkey(2)]).hash_tree_root(),
+        );
     }
 }
