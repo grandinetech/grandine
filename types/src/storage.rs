@@ -31,7 +31,7 @@ use crate::{
         BeaconStatePatch as CapellaBeaconStatePatch,
         BeaconStatePatchCursor as CapellaBeaconStatePatchCursor,
     },
-    collections::{ProposerLookahead, RandaoMixes},
+    collections::{ProposerLookahead, PtcWindow, RandaoMixes},
     combined::BeaconState,
     config::Config,
     deneb::storage::{
@@ -53,6 +53,7 @@ use crate::{
         BeaconStatePatch as FuluBeaconStatePatch,
         BeaconStatePatchCursor as FuluBeaconStatePatchCursor,
     },
+    gloas::ptc_patch::PtcPatch,
     gloas::storage::{
         BeaconStateFrame as GloasBeaconStateFrame,
         BeaconStateFrameCursor as GloasBeaconStateFrameCursor,
@@ -328,6 +329,21 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_) => return Ok(None),
             Self::Fulu(frame) => frame.get_proposer_lookahead()?.into_inner(),
             Self::Gloas(frame) => frame.get_proposer_lookahead()?.into_inner(),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn ptc_window(&self) -> Result<Option<PtcWindow<P>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(frame) => frame.get_ptc_window()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -880,6 +896,21 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_) => return Ok(None),
             Self::Fulu(patch) => patch.get_proposer_lookahead()?,
             Self::Gloas(patch) => patch.get_proposer_lookahead()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn ptc_window(&self) -> Result<Option<Compressed<PtcPatch<P>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(patch) => patch.get_ptc_window()?,
         };
 
         Ok(Some(value))

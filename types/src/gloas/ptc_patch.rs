@@ -1,11 +1,15 @@
 use core::cmp::Reverse;
 
 use diff::{Error, Patch, PatchConfig, PositionalEdit, PositionalPatch, Unlimited};
+use itertools::Either;
 use ssz::{ContiguousList, Ssz};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 
-use crate::{Ptc, PtcWindow, preset::Preset};
+use crate::{
+    Ptc, PtcWindow,
+    preset::{Preset, PtcWindowLength},
+};
 
 /// Patch kind for `ptc_window`.
 ///
@@ -18,6 +22,42 @@ pub struct PtcPatch<P: Preset> {
     shift: u32,
     edits: ContiguousList<PositionalEdit<Ptc<P>>, Unlimited>,
     tail: ContiguousList<Ptc<P>, Unlimited>,
+}
+
+impl<P: Preset> PtcPatch<P> {
+    pub fn committee(self, index: u64) -> Result<Either<Ptc<P>, u64>, Error> {
+        let Self { shift, edits, tail } = self;
+
+        let shift = u64::from(shift);
+
+        let carried = PtcWindowLength::<P>::U64
+            .checked_sub(shift)
+            .ok_or(Error::InvalidPatchEncoding)?;
+
+        let mut edited = None;
+
+        PositionalPatch::apply_edits(edits, |edited_index, committee| {
+            if edited_index == index {
+                edited = Some(committee);
+            }
+
+            Ok(())
+        })?;
+
+        if let Some(committee) = edited {
+            return Ok(Either::Left(committee));
+        }
+
+        let Some(tail_index) = index.checked_sub(carried) else {
+            return Ok(Either::Right(index.saturating_add(shift)));
+        };
+
+        usize::try_from(tail_index)
+            .ok()
+            .and_then(|tail_index| tail.into_iter().nth(tail_index))
+            .map(Either::Left)
+            .ok_or(Error::PatchIndexOutOfBounds)
+    }
 }
 
 impl<P: Preset> Patch<PtcWindow<P>> for PtcPatch<P> {
@@ -120,6 +160,37 @@ mod tests {
             patch.apply(&mut applied).expect("patch should apply");
 
             assert_eq!(applied, changed);
+        }
+    }
+
+    #[test]
+    fn committee_is_read_from_the_patch_or_located_in_the_base() {
+        let base = window(0..24);
+
+        for changed in [
+            window(8..32),
+            window(16..40),
+            window(0..24),
+            window(100..124),
+            window((8..31).chain([7])),
+            window((8..12).chain([500]).chain(13..32)),
+        ] {
+            for index in 0..24 {
+                let patch = PtcPatch::<Minimal>::diff(PatchConfig::default(), &base, &changed)
+                    .expect("ptc patch should represent the change");
+
+                let committee = match patch.committee(index).expect("index is within bounds") {
+                    Either::Left(committee) => committee,
+                    Either::Right(base_index) => {
+                        *base.get(base_index).expect("base index is within bounds")
+                    }
+                };
+
+                assert_eq!(
+                    &committee,
+                    changed.get(index).expect("index is within bounds"),
+                );
+            }
         }
     }
 

@@ -47,9 +47,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{
-    accessors,
-    error::Error as AccessorError,
-    misc, predicates,
+    accessors, misc, predicates,
     slot_report::{Delta, RealSlotReport, SlotReport as _},
 };
 use http_api_utils::{
@@ -1672,27 +1670,50 @@ pub async fn state_ptc<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<StatePtcQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<StatePtcResponse<P>, (), JsonOrSsz>, Error> {
-    let WithStatus {
-        value: state,
-        status,
-        finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    let chain_config = controller.chain_config();
 
-    if !state.is_post_gloas() {
+    let (state_slot, state) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            (state.value.slot(), Some(state))
+        }
+        StateId::Slot(slot) => (slot, None),
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            (slot, None)
+        }
+    };
+
+    if chain_config.phase_at_slot::<P>(state_slot) < Phase::Gloas {
         return Err(Error::StatePreGloas);
     }
 
-    let slot = query.slot.unwrap_or_else(|| state.slot());
+    let slot = query.slot.unwrap_or(state_slot);
 
-    let validators =
-        accessors::get_ptc(controller.chain_config(), &state, slot).map_err(|error| {
-            match error.downcast_ref::<AccessorError>() {
-                Some(AccessorError::PreGloasSlot { .. } | AccessorError::SlotOutOfRange) => {
-                    Error::InvalidSlot(error)
-                }
-                _ => Error::Internal(error),
-            }
-        })?;
+    accessors::ptc_window_index::<P>(
+        chain_config,
+        misc::compute_epoch_at_slot::<P>(state_slot),
+        slot,
+    )
+    .map_err(Error::InvalidSlot)?;
+
+    let WithStatus {
+        value: validators,
+        status,
+        finalized,
+    } = match state {
+        Some(state) => {
+            let validators = accessors::get_ptc(chain_config, &state.value, slot)?;
+
+            state.map(|_| validators)
+        }
+        None => tokio::task::block_in_place(|| controller.ptc_at_slot(state_slot, slot))?
+            .ok_or(Error::StateNotFound)?,
+    };
 
     Ok(
         EthResponse::json_or_ssz(StatePtcResponse::<P> { slot, validators }, &headers)?

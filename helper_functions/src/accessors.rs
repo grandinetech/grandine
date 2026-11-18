@@ -1291,13 +1291,8 @@ fn ptc_from_committee_members<P: Preset>(
     Ptc::<P>::try_from_iter(selection).map_err(Into::into)
 }
 
-pub fn get_ptc<P: Preset>(
-    config: &Config,
-    state: &impl BeaconState<P>,
-    slot: Slot,
-) -> Result<Ptc<P>> {
+pub fn ptc_window_index<P: Preset>(config: &Config, state_epoch: Epoch, slot: Slot) -> Result<u64> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
-    let state_epoch = get_current_epoch(state);
 
     ensure!(
         epoch >= config.gloas_fork_epoch,
@@ -1315,7 +1310,18 @@ pub fn get_ptc<P: Preset>(
         .try_add(1)?
         .saturating_sub(state_epoch)
         .try_mul(P::SlotsPerEpoch::U64)?;
-    let index = offset.try_add(slot % P::SlotsPerEpoch::non_zero())?;
+
+    offset
+        .try_add(slot % P::SlotsPerEpoch::non_zero())
+        .map_err(Into::into)
+}
+
+pub fn get_ptc<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<Ptc<P>> {
+    let index = ptc_window_index::<P>(config, get_current_epoch(state), slot)?;
 
     let state = state.post_gloas().ok_or(Error::InvalidPhase {
         error: anyhow!("get_ptc with pre-Gloas beacon state"),
