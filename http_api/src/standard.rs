@@ -480,7 +480,7 @@ pub struct StateBuilderResponse {
     builder: Builder,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 struct StateSyncCommitteeResponse<'indices> {
     #[serde(with = "As::<Vec<DisplayFromStr>>")]
     validators: Vec<ValidatorIndex>,
@@ -1072,12 +1072,8 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let Some(state) = state.post_altair() else {
-        return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .into_response());
-    };
+    // States before Altair have no sync committees.
+    let state = state.post_altair().ok_or(Error::StatePreAltair)?;
 
     let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
     let state_period = misc::sync_committee_period::<P>(state_epoch);
