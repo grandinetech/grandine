@@ -20,7 +20,7 @@ use fork_choice_store::{
 };
 use futures::{Future, StreamExt, channel::oneshot};
 use helper_functions::{accessors, misc};
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use ssz::{Hc, SszListMut};
@@ -31,7 +31,7 @@ use tracing::instrument;
 use transition_functions::altair::EpochRewardScalars;
 use typenum::Unsigned as _;
 use types::{
-    ProposerLookahead, RandaoMixes,
+    ProposerLookahead, Ptc, RandaoMixes,
     altair::containers::SyncCommittee,
     combined::{
         BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock, UnblindError,
@@ -478,6 +478,67 @@ where
             status: state.status,
             finalized: state.finalized,
         }))
+    }
+
+    pub fn ptc_at_slot(&self, slot: Slot, ptc_slot: Slot) -> Result<Option<WithStatus<Ptc<P>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let ptc = accessors::get_ptc(self.chain_config(), &state.value, ptc_slot)?;
+
+            return Ok(Some(state.map(|_| ptc)));
+        }
+
+        let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value) == requested_epoch
+        {
+            let mut index =
+                accessors::ptc_window_index::<P>(self.chain_config(), requested_epoch, ptc_slot)?;
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let ptc = match row? {
+                    StateRow::Delta(delta) => {
+                        let patch = delta
+                            .ptc_window()?
+                            .context(Error::FieldMissing)?
+                            .into_inner();
+
+                        match patch.committee(index)? {
+                            Either::Left(ptc) => ptc,
+                            Either::Right(base_index) => {
+                                index = base_index;
+                                continue;
+                            }
+                        }
+                    }
+                    StateRow::Frame(frame) => frame
+                        .ptc_window()?
+                        .context(Error::FieldMissing)?
+                        .get(index)?
+                        .clone(),
+                    StateRow::State(state) => state
+                        .post_gloas()
+                        .context(Error::FieldMissing)?
+                        .ptc_window()
+                        .get(index)?
+                        .clone(),
+                };
+
+                return Ok(Some(stored_slot.map(|_| ptc)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let ptc = accessors::get_ptc(self.chain_config(), &state.value, ptc_slot)?;
+
+        Ok(Some(state.map(|_| ptc)))
     }
 
     #[expect(clippy::type_complexity)]
