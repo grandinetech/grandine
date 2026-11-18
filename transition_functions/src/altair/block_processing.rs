@@ -569,21 +569,22 @@ pub fn process_sync_aggregate<P: Preset>(
         let participant_index = index_of_public_key(state, participant_pubkey)
             .expect("public keys in state.current_sync_committee are taken from state.validators");
 
-        if participation_bit {
+        let delta = if participation_bit {
             increase_balance(balance(state, participant_index)?, participant_reward)?;
             participation = participation.try_add(1)?;
+            Delta::Reward(participant_reward)
         } else {
-            decrease_balance(balance(state, participant_index)?, participant_reward);
-        }
+            let participant_balance = balance(state, participant_index)?;
 
-        slot_report.set_sync_committee_delta(
-            participant_index,
-            if participation_bit {
-                Delta::Reward(participant_reward)
-            } else {
-                Delta::Penalty(participant_reward)
-            },
-        )?;
+            // `decrease_balance` stops at 0, so a member with a lower balance loses less.
+            // Report the amount actually deducted.
+            let penalty = participant_reward.min(*participant_balance);
+
+            decrease_balance(participant_balance, participant_reward);
+            Delta::Penalty(penalty)
+        };
+
+        slot_report.set_sync_committee_delta(participant_index, delta)?;
     }
 
     increase_balance(
@@ -651,7 +652,11 @@ pub fn verify_sync_aggregate_signature<P: Preset, V: Verifier>(
 mod spec_tests {
     use core::fmt::Debug;
 
-    use helper_functions::verifier::{NullVerifier, SingleVerifier};
+    use helper_functions::{
+        slot_report::RealSlotReport,
+        verifier::{NullVerifier, SingleVerifier},
+    };
+    use itertools::Itertools as _;
     use spec_test_utils::{BlsSetting, Case};
     use ssz::SszReadDefault;
     use test_generator::test_resources;
@@ -862,6 +867,96 @@ mod spec_tests {
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/altair/operations/voluntary_exit/*/*",
         "consensus-spec-tests/tests/minimal/altair/operations/voluntary_exit/*/*",
+    }
+
+    // The spec tests check balances but not the reported deltas.
+    // A member whose balance is below the penalty can only lose what it has.
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/altair/operations/sync_aggregate/pyspec_tests/sync_committee_rewards_not_full_participants"
+    )]
+    fn sync_committee_deltas_match_balance_changes(case: Case) {
+        let config = Minimal::default_config();
+        let pubkey_cache = PubkeyCache::default();
+        let mut state: BeaconState<Minimal> = case.ssz_default("pre");
+        let sync_aggregate: SyncAggregate<Minimal> = case.ssz_default("sync_aggregate");
+
+        // A validator can hold several seats in the committee. Pick one that misses in all of them.
+        let seats = state
+            .current_sync_committee
+            .pubkeys
+            .iter()
+            .map(|pubkey| index_of_public_key(&state, pubkey).expect("member is in the registry"))
+            .zip(sync_aggregate.sync_committee_bits)
+            .collect_vec();
+
+        // The proposer also receives proposer rewards, so its balance would not end at 0.
+        let proposer_index =
+            get_beacon_proposer_index(&config, &state).expect("proposer index can be computed");
+
+        let low_balance_member = seats
+            .iter()
+            .map(|(validator_index, _)| *validator_index)
+            .filter(|candidate| *candidate != proposer_index)
+            .find(|candidate| {
+                seats
+                    .iter()
+                    .filter(|(validator_index, _)| validator_index == candidate)
+                    .all(|(_, participation_bit)| !participation_bit)
+            })
+            .expect("the case has a member other than the proposer that does not participate");
+
+        *balance(&mut state, low_balance_member).expect("member is in the registry") = 1;
+
+        let pre_state = state.clone();
+
+        let mut slot_report = RealSlotReport::default();
+
+        process_sync_aggregate(
+            &config,
+            &pubkey_cache,
+            &mut state,
+            sync_aggregate,
+            NullVerifier,
+            &mut slot_report,
+        )
+        .expect("sync aggregate processing should succeed");
+
+        let proposer_reward = slot_report
+            .sync_aggregate_rewards
+            .and_then(|rewards| rewards.singular_reward.checked_mul(rewards.participation))
+            .expect("sync aggregate rewards are reported");
+
+        let balance_of = |state: &BeaconState<Minimal>, validator_index| {
+            let balance = *state
+                .balances
+                .get(validator_index)
+                .expect("member is in the registry");
+
+            i64::try_from(balance).expect("balance fits in i64")
+        };
+
+        for (validator_index, delta) in slot_report.sync_committee_deltas {
+            let pre_balance = balance_of(&pre_state, validator_index);
+            let mut post_balance = balance_of(&state, validator_index);
+
+            if validator_index == proposer_index {
+                post_balance = post_balance
+                    .checked_sub(i64::try_from(proposer_reward).expect("reward fits"))
+                    .expect("balance includes the proposer reward");
+            }
+
+            let reported = i64::try_from(delta).expect("delta fits in i64");
+
+            assert_eq!(
+                reported,
+                post_balance
+                    .checked_sub(pre_balance)
+                    .expect("balance change fits in i64"),
+                "validator {validator_index}"
+            );
+        }
+
+        assert_eq!(balance_of(&state, low_balance_member), 0);
     }
 
     fn run_processing_case<P: Preset, O: SszReadDefault>(
