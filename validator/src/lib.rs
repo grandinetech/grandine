@@ -1,7 +1,7 @@
 pub use crate::{
     api::{ValidatorApiConfig, run_validator_api},
     local_beacon_node::{
-        attester_duties_at_slot, proposer_duties_at_epoch, proposer_lookahead_applies,
+        attester_duties_from_shuffling, proposer_duties_at_epoch, proposer_lookahead_applies,
         ptc_duties_at_epoch,
     },
     messages::ApiToValidator,

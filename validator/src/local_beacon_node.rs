@@ -47,6 +47,7 @@ use types::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
+    cache::PackedIndices,
     combined::{
         Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
         SignedBlindedBeaconBlock,
@@ -68,7 +69,7 @@ use types::{
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot, SubnetId, Uint256, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconBlock as _, BeaconState as _, PostAltairBeaconState},
+    traits::{BeaconBlock as _, BeaconState as _, PostAltairBeaconState, SszValidatorList},
 };
 
 use crate::{
@@ -1159,31 +1160,49 @@ pub fn attester_duties_at_slot<P: Preset>(
 ) -> Result<Vec<ValidatorAttesterDutyResponse>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = accessors::relative_epoch(state, epoch)?;
-    let committees_at_slot = accessors::get_committee_count_per_slot(state, relative_epoch)?;
+    let shuffled = accessors::active_validator_indices_shuffled(state, relative_epoch)?;
 
-    accessors::beacon_committees(state, slot)?
-        .zip(0..)
-        .flat_map(|(committee, committee_index)| {
+    attester_duties_from_shuffling::<P>(state.validators(), shuffled, slot, indices)
+}
+
+pub fn attester_duties_from_shuffling<P: Preset>(
+    validators: &dyn SszValidatorList,
+    shuffled: &PackedIndices,
+    slot: Slot,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorAttesterDutyResponse>> {
+    let committees_at_slot =
+        misc::committee_count_from_active_validator_count::<P>(shuffled.len().try_into()?);
+
+    (0..committees_at_slot)
+        .map(|committee_index| {
+            let committee = accessors::compute_beacon_committee::<P>(
+                shuffled,
+                committees_at_slot,
+                slot,
+                committee_index,
+            )?;
+
             let committee_length = committee.len();
 
             committee
                 .into_iter()
                 .enumerate()
                 .filter(|(_, validator_index)| indices.contains(validator_index))
-                .map(move |(validator_committee_index, validator_index)| {
-                    let pubkey = *accessors::public_key(state, validator_index)?;
-
+                .map(|(validator_committee_index, validator_index)| {
                     Ok(ValidatorAttesterDutyResponse {
                         committee_index,
                         committee_length,
                         committees_at_slot,
-                        pubkey,
+                        pubkey: *validators.pubkey(validator_index)?,
                         slot,
                         validator_committee_index,
                         validator_index,
                     })
                 })
+                .collect::<Result<Vec<_>>>()
         })
+        .flatten_ok()
         .collect()
 }
 

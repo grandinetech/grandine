@@ -1160,6 +1160,13 @@ where
         }
     }
 
+    pub fn block_root_before_or_at_slot(&self, slot: Slot) -> Result<Option<H256>> {
+        match self.store_snapshot().chain_link_before_or_at(slot) {
+            Some(chain_link) => Ok(Some(chain_link.block_root)),
+            None => self.storage().block_root_before_or_at_slot(slot),
+        }
+    }
+
     #[must_use]
     pub fn checkpoint_state_before_or_at(
         &self,
