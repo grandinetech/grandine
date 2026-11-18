@@ -1040,7 +1040,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
-    let (mut state_slot, response) = match state_id {
+    let (state_slot, response) = match state_id {
         StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
             let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
@@ -1081,8 +1081,27 @@ pub async fn state_committees<P: Preset, W: Wait>(
         finalized,
     } = response.ok_or(Error::StateNotFound)?;
 
-    let state_epoch = misc::compute_epoch_at_slot::<P>(state_slot);
+    let mut state_epoch = misc::compute_epoch_at_slot::<P>(state_slot);
     let epoch = query.epoch.unwrap_or(state_epoch);
+    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+
+    // The head state is not advanced to the current slot, so until the first
+    // block of an epoch is imported it is an epoch behind and cannot compute
+    // committees for the next epoch.
+    if matches!(state_id, StateId::Head)
+        && state_epoch < current_epoch
+        && epoch == current_epoch.saturating_add(1)
+    {
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
+
+        fields = tokio::task::block_in_place(|| {
+            controller.validators_and_randao_mixes_at_slot(start_slot)
+        })?
+        .ok_or(Error::StateNotFound)?
+        .value;
+
+        state_epoch = current_epoch;
+    }
 
     let slots = match query.slot {
         Some(slot) => {
@@ -1094,36 +1113,8 @@ pub async fn state_committees<P: Preset, W: Wait>(
         None => Either::Right(misc::slots_in_epoch::<P>(epoch).map_err(Error::InvalidEpoch)?),
     };
 
-    // TODO(Grandine Team): Optimize state lookup.
-    //                      The state is looked up twice, first in `state_id::field` above,
-    //                      then in `Controller::state_at_slot`.
-    //                      That means twice the amount of database lookups and state transitions.
-    if epoch == state_epoch.saturating_add(1)
-        || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()).saturating_add(1)
-    {
-        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-
-        let state = tokio::task::spawn_blocking(move || {
-            controller
-                .state_at_slot_blocking(start_slot)?
-                .ok_or(Error::StateNotFound)?
-                .value
-                .pipe(Ok::<_, AnyhowError>)
-        })
-        .await??;
-
-        state_slot = state.slot();
-        let (_, effective_balances, partial_validators) = state.validators().columns();
-
-        fields = (
-            (partial_validators.clone(), effective_balances.clone()),
-            state.randao_mixes().clone(),
-        );
-    }
-
     // Committees are only available for the previous, current and next epoch of the state.
-    accessors::compute_relative_epoch(misc::compute_epoch_at_slot::<P>(state_slot), epoch)
-        .map_err(Error::InvalidEpoch)?;
+    accessors::compute_relative_epoch(state_epoch, epoch).map_err(Error::InvalidEpoch)?;
 
     let ((partial_validators, _), randao_mixes) = fields;
 
