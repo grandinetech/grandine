@@ -154,7 +154,7 @@ silicon Mac.
 ### From a cross-compiled binary
 
 This is how the official images are made. Build the binary with cross first, then package it with
-`Dockerfile.cross`, which copies it into an Ubuntu 24.04 image:
+`Dockerfile.cross`, which copies it into an Ubuntu 26.04 image:
 
 ```bash
 make release TARGET=x86_64-unknown-linux-gnu

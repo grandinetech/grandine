@@ -79,7 +79,7 @@ this book use Linux paths; adjust them for your system.
 
 Images are published to Docker Hub as
 [`sifrai/grandine`](https://hub.docker.com/r/sifrai/grandine/tags). They support `linux/amd64` and
-`linux/arm64`. The image is based on Ubuntu 24.04, contains the binary at `/usr/local/bin/grandine` and
+`linux/arm64`. The image is based on Ubuntu 26.04, contains the binary at `/usr/local/bin/grandine` and
 uses it as its entry point, so the arguments after the image name are passed to `grandine`.
 
 ### Tags
