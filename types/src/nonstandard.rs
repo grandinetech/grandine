@@ -864,7 +864,10 @@ impl PubkeyList {
             .expect("validator count never exceeds ValidatorIndex range");
 
         self.keys.push_back(pubkey);
-        self.index_map.insert(pubkey, index);
+
+        if !pubkey.is_zero() {
+            self.index_map.insert(pubkey, index);
+        }
     }
 
     /// Number of leading keys that were zeroed out by [`Self::clear_prefix`].
@@ -909,18 +912,9 @@ impl PubkeyList {
         // Every key up to the end of `range` is the key `source` has at the same index, so the map
         // of `source` already indexes all of them. Only the keys after `range` - normally none -
         // need adding to it.
-        let (mut index_map, first_unindexed) = if range.start == 0 {
-            (source.index_map.clone(), range.end)
-        } else {
-            (self.index_map.clone(), range.start)
-        };
+        let mut index_map = source.index_map.clone();
 
-        let unindexed_keys = restored
-            .iter()
-            .skip(first_unindexed.saturating_sub(range.start))
-            .chain(tail.iter());
-
-        for (key, index) in unindexed_keys.zip(first_unindexed..) {
+        for (key, index) in tail.iter().zip(range.end..) {
             if key.is_zero() {
                 continue;
             }
@@ -981,20 +975,21 @@ impl Extend<PublicKeyBytes> for PubkeyList {
 
         for (pubkey, index) in iter.into_iter().zip(start..) {
             keys.push_back(pubkey);
-            index_map.insert(pubkey, index);
+
+            if !pubkey.is_zero() {
+                index_map.insert(pubkey, index);
+            }
         }
     }
 }
 
 impl FromIterator<PublicKeyBytes> for PubkeyList {
     fn from_iter<T: IntoIterator<Item = PublicKeyBytes>>(iter: T) -> Self {
-        let (keys, index_map) = iter
-            .into_iter()
-            .zip(0u64..)
-            .map(|(pubkey, index)| (pubkey, (pubkey, index)))
-            .unzip();
+        let mut list = Self::default();
 
-        Self { keys, index_map }
+        list.extend(iter);
+
+        list
     }
 }
 
@@ -1540,14 +1535,15 @@ mod tests {
     // was already restored with.
     #[test]
     fn restore_pubkeys_in_fills_only_the_given_range() {
-        let own_keys = (100..106)
+        let keys = (0..6)
             .map(test_pubkey)
             .chain(iter::repeat_n(PublicKeyBytes::zero(), 3))
+            .chain([test_pubkey(100)])
             .collect::<Vec<_>>();
 
-        let mut appended_to = test_validators_with(&own_keys);
+        let mut appended_to = test_validators_with(&keys);
 
-        let source = test_validators(9);
+        let source = test_validators(12);
 
         let restored = appended_to
             .restore_pubkeys_in(source.pubkeys(), 6..9)
@@ -1557,27 +1553,33 @@ mod tests {
 
         let pubkeys = appended_to.pubkeys();
 
-        for index in 0..6 {
-            let key = test_pubkey(u64::try_from(index).expect("index fits") + 100);
-
-            assert_eq!(pubkeys.get(index), Some(&key));
-        }
-
-        for index in 6..9 {
+        for index in 0..9 {
             let key = test_pubkey(u64::try_from(index).expect("index fits"));
 
             assert_eq!(pubkeys.get(index), Some(&key));
         }
 
+        assert_eq!(pubkeys.get(9), Some(&test_pubkey(100)));
+
         // The keys the source holds outside the range were never ours.
-        assert!(!pubkeys.contains(&test_pubkey(0)));
-        assert!(!pubkeys.contains(&test_pubkey(5)));
+        assert!(!pubkeys.contains(&test_pubkey(9)));
+        assert!(!pubkeys.contains(&test_pubkey(11)));
 
         for (index, key) in pubkeys.iter().enumerate() {
             let index = ValidatorIndex::try_from(index).expect("index fits");
 
             assert_eq!(pubkeys.index_of(key), Some(index));
         }
+    }
+
+    #[test]
+    fn a_zero_pubkey_is_never_indexed() {
+        let mut validators = test_validators(3);
+
+        validators.push(Validator::default());
+
+        assert_eq!(validators.pubkeys().get(3), Some(&PublicKeyBytes::zero()));
+        assert!(!validators.pubkeys().contains(&PublicKeyBytes::zero()));
     }
 
     #[test]

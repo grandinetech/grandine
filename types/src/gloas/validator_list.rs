@@ -1,7 +1,7 @@
 use core::{convert::Infallible, fmt, iter, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use derivative::Derivative;
 
@@ -43,76 +43,71 @@ pub struct ProgressiveValidatorList {
 
     /// Merkle root cache.
     #[derivative(PartialEq = "ignore")]
-    cache: Option<Arc<CacheNode>>,
+    cache: Arc<CacheNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct CacheNode {
     root: OnceBox<H256>,
-    left: Arc<MerkleTreeCacheNode>,
-    right: Option<Arc<Self>>,
+    children: OnceLock<(Arc<MerkleTreeCacheNode>, Arc<Self>)>,
     height: u8,
 }
 
 impl CacheNode {
-    fn empty_single(height: u8) -> Arc<Self> {
+    fn empty(height: u8) -> Arc<Self> {
         Arc::new(Self {
-            root: OnceBox::new(),
-            left: MerkleTreeCacheNode::empty_leaf(),
-            right: None,
             height,
+            ..Self::default()
         })
     }
 
-    fn build_empty(length: usize, height: u8) -> Arc<Self> {
-        let capacity = MinimumBundleSize::<Validator>::USIZE << height;
-        let left_length = length.min(capacity);
-        let right_length = length
-            .checked_sub(left_length)
-            .expect("left_length never exceeds length");
-
-        Arc::new(Self {
-            root: OnceBox::new(),
-            left: MerkleTreeCacheNode::build_empty(left_length),
-            right: (right_length > 0)
-                .then(|| Self::build_empty(right_length, height.saturating_add(2))),
-            height,
-        })
+    const fn capacity(&self) -> usize {
+        MinimumBundleSize::<Validator>::USIZE << self.height
     }
 
-    fn push_leaf(self: &mut Arc<Self>, old_length: usize) {
-        let capacity = MinimumBundleSize::<Validator>::USIZE << self.height;
+    fn children(&self) -> &(Arc<MerkleTreeCacheNode>, Arc<Self>) {
+        self.children
+            .get_or_init(|| (Arc::default(), Self::empty(self.height.saturating_add(2))))
+    }
+
+    fn unshare(self: &mut Arc<Self>) -> &mut (Arc<MerkleTreeCacheNode>, Arc<Self>) {
+        self.children();
+
         let node = Arc::make_mut(self);
-        let height = node.height;
 
         node.root = OnceBox::new();
 
-        if old_length < capacity {
-            node.left.push_leaf(old_length);
+        node.children
+            .get_mut()
+            .expect("children are created before the node is copied")
+    }
+
+    fn push_leaf(self: &mut Arc<Self>, old_length: usize) {
+        if old_length == 0 {
+            *self = Self::empty(self.height);
             return;
         }
 
-        let right_length = old_length
-            .checked_sub(capacity)
-            .expect("old_length >= capacity in this branch");
+        let capacity = self.capacity();
+        let (left, right) = self.unshare();
 
-        match node.right.as_mut() {
-            Some(right) => right.push_leaf(right_length),
-            None => {
-                assert_eq!(right_length, 0, "all subtrees before the last are full");
-                node.right = Some(Self::empty_single(height.saturating_add(2)));
-            }
+        if old_length < capacity {
+            left.push_leaf(old_length);
+        } else {
+            let right_length = old_length
+                .checked_sub(capacity)
+                .expect("old_length >= capacity in this branch");
+
+            right.push_leaf(right_length);
         }
     }
 
     fn invalidate(self: &mut Arc<Self>, index: usize, length: usize) {
-        let capacity = MinimumBundleSize::<Validator>::USIZE << self.height;
-        let node = Arc::make_mut(self);
-
-        node.root = OnceBox::new();
+        let capacity = self.capacity();
+        let (left, right) = self.unshare();
 
         if index < capacity {
-            node.left.invalidate(index, length.min(capacity));
+            left.invalidate(index, length.min(capacity));
         } else {
             let right_index = index
                 .checked_sub(capacity)
@@ -121,10 +116,7 @@ impl CacheNode {
                 .checked_sub(capacity)
                 .expect("capacity never exceeds length in this branch");
 
-            node.right
-                .as_mut()
-                .expect("index below length implies an existing subtree")
-                .invalidate(right_index, right_length);
+            right.invalidate(right_index, right_length);
         }
     }
 
@@ -134,36 +126,33 @@ impl CacheNode {
             return;
         }
 
-        let capacity = MinimumBundleSize::<Validator>::USIZE << self.height;
-        let node = Arc::make_mut(self);
+        if range == (0..length) {
+            *self = Self::empty(self.height);
+            return;
+        }
 
-        node.root = OnceBox::new();
-
+        let capacity = self.capacity();
         let left_length = length.min(capacity);
+        let right_length = length.saturating_sub(capacity);
 
-        node.left.invalidate_range(
+        let (left, right) = self.unshare();
+
+        left.invalidate_range(
             range.start.min(left_length)..range.end.min(left_length),
             left_length,
         );
 
-        let right_length = length.saturating_sub(capacity);
-
-        let right_range = range.start.saturating_sub(capacity)
-            ..range.end.saturating_sub(capacity).min(right_length);
-
-        if !right_range.is_empty() {
-            node.right
-                .as_mut()
-                .expect("a range reaching past the capacity implies an existing subtree")
-                .invalidate_range(right_range, right_length);
-        }
+        right.invalidate_range(
+            range.start.saturating_sub(capacity)
+                ..range.end.saturating_sub(capacity).min(right_length),
+            right_length,
+        );
     }
 
     fn hash(&self, buf: &RawValidatorList, len: usize, offset: usize) -> H256 {
         self.root
             .get_or_init(|| {
-                let capacity = MinimumBundleSize::<Validator>::USIZE << self.height;
-                let left_len = len.min(capacity);
+                let left_len = len.min(self.capacity());
                 let right_len = len
                     .checked_sub(left_len)
                     .expect("left_len never exceeds len");
@@ -177,13 +166,16 @@ impl CacheNode {
                     .checked_add(left_len)
                     .expect("offset + left_len never overflows usize");
 
+                let (left, right) = self.children();
+
                 let left_hash = (left_height..self.height)
                     .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)
-                    .fold(self.left.hash(buf, left_len, offset), hashing::hash_256_256);
+                    .fold(left.hash(buf, left_len, offset), hashing::hash_256_256);
 
-                let right_hash = match self.right.as_ref() {
-                    Some(node) => node.hash(buf, right_len, right_offset),
-                    None => H256::zero(),
+                let right_hash = if right_len > 0 {
+                    right.hash(buf, right_len, right_offset)
+                } else {
+                    H256::zero()
                 };
 
                 Box::new(hashing::hash_256_256(left_hash, right_hash))
@@ -195,8 +187,8 @@ impl CacheNode {
 impl ProgressiveValidatorList {
     pub(crate) fn from_raw(buf: RawValidatorList) -> Self {
         Self {
-            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize(), 0)),
             buf,
+            cache: Arc::default(),
         }
     }
 
@@ -212,18 +204,14 @@ impl ProgressiveValidatorList {
             return;
         }
 
-        if let Some(cache) = self.cache.as_mut() {
-            cache.invalidate(index, len);
-        }
+        self.cache.invalidate(index, len);
     }
 
     /// Invalidates the cached hashes of the validators in `range`.
     fn invalidate_pubkey_range(&mut self, range: Range<usize>) {
         let length = self.len_usize();
 
-        if let Some(cache) = self.cache.as_mut() {
-            cache.invalidate_range(range, length);
-        }
+        self.cache.invalidate_range(range, length);
     }
 }
 
@@ -286,8 +274,7 @@ impl SszValidatorList for ProgressiveValidatorList {
 
     fn clear_pubkeys(&mut self, count: usize) {
         self.buf.clear_pubkeys(count);
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
+        self.cache = Arc::default();
     }
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
@@ -307,9 +294,7 @@ impl SszValidatorList for ProgressiveValidatorList {
         updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
     ) -> Result<(), anyhow::Error> {
         self.buf.update_effective_balances(updater, |index, len| {
-            if let Some(cache) = self.cache.as_mut() {
-                cache.invalidate(index, len);
-            }
+            self.cache.invalidate(index, len);
         })
     }
 
@@ -318,10 +303,7 @@ impl SszValidatorList for ProgressiveValidatorList {
 
         self.buf.push(validator);
 
-        match &mut self.cache {
-            Some(cache) => cache.push_leaf(old_length),
-            None => self.cache = Some(CacheNode::empty_single(0)),
-        }
+        self.cache.push_leaf(old_length);
 
         Ok(())
     }
@@ -345,12 +327,9 @@ impl SszValidatorList for ProgressiveValidatorList {
 
 impl FromIterator<Validator> for ProgressiveValidatorList {
     fn from_iter<T: IntoIterator<Item = Validator>>(iter: T) -> Self {
-        let buf = iter.into_iter().collect::<RawValidatorList>();
-
         Self {
-            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize(), 0)),
-
-            buf,
+            buf: iter.into_iter().collect(),
+            cache: Arc::default(),
         }
     }
 }
@@ -411,9 +390,9 @@ impl SszHash for ProgressiveValidatorList {
     type PackingFactor = U1;
 
     fn hash_tree_root(&self) -> H256 {
-        let root = match self.cache.as_ref() {
-            Some(cache) => cache.hash(&self.buf, self.len_usize(), 0),
-            None => H256::zero(),
+        let root = match self.len_usize() {
+            0 => H256::zero(),
+            length => self.cache.hash(&self.buf, length, 0),
         };
 
         mix_in_length(root, self.len_usize())
@@ -438,21 +417,29 @@ impl<C> SszRead<C> for ProgressiveValidatorList {
 
 impl<N: Unsigned> From<ValidatorList<N>> for ProgressiveValidatorList {
     fn from(value: ValidatorList<N>) -> Self {
-        let buf = value.buf;
-
         Self {
-            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize(), 0)),
-
-            buf,
+            buf: value.buf,
+            cache: Arc::default(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use ssz::ProgressiveList;
     use test_case::test_case;
 
+    use crate::phase0::validator_list::tests::{
+        assert_concurrent_clones_match_oracle, assert_random_operations_match_oracle,
+    };
+
     use super::*;
+
+    fn progressive_list_root(validators: &[Validator]) -> H256 {
+        ProgressiveList::try_from_iter(validators.iter().cloned())
+            .expect("the validators fit")
+            .hash_tree_root()
+    }
 
     // The progressive layout splits the list into subtrees of capacity
     // `MinimumBundleSize << height`, with `height` going up by two each time, so
@@ -514,6 +501,40 @@ mod tests {
         assert_eq!(list.hash_tree_root(), expected);
     }
 
+    #[test]
+    fn a_list_mutated_before_its_first_hash_matches_one_hashed_throughout() {
+        let mut cold = test_list((0..21).map(test_pubkey));
+        let mut warm = cold.clone();
+
+        warm.hash_tree_root();
+
+        for list in [&mut cold, &mut warm] {
+            for _ in 21..LENGTH {
+                list.push(Validator::default())
+                    .expect("the list is unbounded");
+            }
+
+            *list
+                .effective_balance_mut(2)
+                .expect("the list has a third validator") = 32;
+
+            list.restore_pubkeys_in(full_list().pubkeys(), 21..LENGTH)
+                .expect("the source covers the range");
+        }
+
+        let expected = (0..LENGTH)
+            .map(|index| Validator {
+                pubkey: test_pubkey(u64::try_from(index).expect("index fits")),
+                effective_balance: if index == 2 { 32 } else { 0 },
+                ..Validator::default()
+            })
+            .collect::<ProgressiveValidatorList>()
+            .hash_tree_root();
+
+        assert_eq!(cold.hash_tree_root(), expected);
+        assert_eq!(warm.hash_tree_root(), expected);
+    }
+
     #[test_case(0..1)]
     #[test_case(0..LENGTH; "the whole list")]
     #[test_case(0..21)]
@@ -541,10 +562,7 @@ mod tests {
 
         let length = list.len_usize();
 
-        list.cache
-            .as_mut()
-            .expect("the list is not empty")
-            .invalidate_range(range.clone(), length);
+        list.cache.invalidate_range(range.clone(), length);
 
         let expected = test_list((0..LENGTH).map(|index| {
             let key = u64::try_from(index).expect("index fits");
@@ -558,5 +576,100 @@ mod tests {
         .hash_tree_root();
 
         assert_eq!(list.hash_tree_root(), expected);
+    }
+
+    #[test]
+    fn random_operations_on_clones_match_an_independent_merkleization() {
+        assert_random_operations_match_oracle(
+            0x9E37_79B9_7F4A_7C15,
+            85,
+            |validators| validators.into_iter().collect::<ProgressiveValidatorList>(),
+            progressive_list_root,
+        );
+    }
+
+    #[test]
+    fn clones_hashed_and_changed_concurrently_match_an_independent_merkleization() {
+        assert_concurrent_clones_match_oracle(
+            0xD1B5_4A32_D192_ED03,
+            |validators| validators.into_iter().collect::<ProgressiveValidatorList>(),
+            progressive_list_root,
+        );
+    }
+
+    #[test]
+    fn a_clone_shares_the_subtrees_it_did_not_change() {
+        let original = test_list((0..6).map(test_pubkey));
+        let mut clone = original.clone();
+
+        assert!(Arc::ptr_eq(&original.cache, &clone.cache));
+
+        *clone
+            .effective_balance_mut(0)
+            .expect("the list has a first validator") = 32;
+
+        let (original_left, original_right) = original.cache.children();
+        let (clone_left, clone_right) = clone.cache.children();
+
+        assert!(!Arc::ptr_eq(&original.cache, &clone.cache));
+        assert!(!Arc::ptr_eq(original_left, clone_left));
+        assert!(Arc::ptr_eq(original_right, clone_right));
+        assert!(original_right.root.get().is_none());
+
+        clone.hash_tree_root();
+
+        assert!(original_right.root.get().is_some());
+        assert!(original.cache.root.get().is_none());
+    }
+
+    #[test]
+    fn restoring_a_whole_unhashed_list_allocates_no_tree() {
+        let mut list = full_list();
+
+        list.clear_pubkeys(LENGTH);
+
+        list.restore_pubkeys(full_list().pubkeys())
+            .expect("the source covers the cleared prefix");
+
+        assert!(list.cache.children.get().is_none());
+        assert_eq!(list.hash_tree_root(), full_list().hash_tree_root());
+    }
+
+    #[test]
+    fn restoring_part_of_a_list_keeps_the_roots_outside_the_range() {
+        let list_source = full_list();
+        let mut list = full_list();
+
+        list.hash_tree_root();
+
+        list.restore_pubkeys_in(list_source.pubkeys(), 0..1)
+            .expect("the source covers the range");
+
+        assert!(list.cache.root.get().is_none());
+        assert!(list.cache.children().1.root.get().is_some());
+    }
+
+    #[test_case(0; "an empty list")]
+    #[test_case(1; "a full first subtree")]
+    #[test_case(5; "a full second subtree")]
+    #[test_case(21; "a full third subtree")]
+    fn clones_starting_a_new_subtree_do_not_share_its_first_leaf(length: u64) {
+        let original = test_list((0..length).map(test_pubkey));
+        let mut first = original.clone();
+        let mut second = original;
+
+        for (list, key) in [(&mut first, 100), (&mut second, 200)] {
+            list.push(Validator {
+                pubkey: test_pubkey(key),
+                ..Validator::default()
+            })
+            .expect("the list is unbounded");
+        }
+
+        for (list, key) in [(&first, 100), (&second, 200)] {
+            let expected = test_list((0..length).chain([key]).map(test_pubkey));
+
+            assert_eq!(list.hash_tree_root(), expected.hash_tree_root());
+        }
     }
 }
