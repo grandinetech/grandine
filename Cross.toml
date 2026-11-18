@@ -1,5 +1,7 @@
+# Images are pinned to builds of the cross revision installed in .github/workflows/release.yml.
+# Update them together.
 [target.x86_64-unknown-linux-gnu]
-image = 'ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main'
+image = 'ghcr.io/cross-rs/x86_64-unknown-linux-gnu@sha256:8859395961030cc16506872272a547dce07126daf69007d492cb28217d37cd28'
 pre-build = [
   'dpkg --add-architecture $CROSS_DEB_ARCH',
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get --assume-yes install clang cmake unzip protobuf-compiler libprotobuf-dev libz-dev',
@@ -7,7 +9,7 @@ pre-build = [
 ]
 
 [target.aarch64-unknown-linux-gnu]
-image = 'ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main'
+image = 'ghcr.io/cross-rs/aarch64-unknown-linux-gnu@sha256:036102224c8bbdb0c55b1f513e6436de5dcae5106130549b77815e16218383a1'
 pre-build = [
   'dpkg --add-architecture $CROSS_DEB_ARCH',
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get --assume-yes install clang cmake unzip protobuf-compiler libprotobuf-dev:$CROSS_DEB_ARCH libz-dev:$CROSS_DEB_ARCH',
