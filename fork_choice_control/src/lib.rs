@@ -14,6 +14,7 @@
 
 pub use crate::{
     controller::Controller,
+    derived_fields::ValidatorRecords,
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
     hierarchy::Hierarchy,
     messages::{

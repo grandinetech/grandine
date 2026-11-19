@@ -3246,6 +3246,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "bitvec",
  "bls",
  "bytesize",
  "cached",
@@ -9797,6 +9798,7 @@ dependencies = [
  "anyhow",
  "arithmetic",
  "bit_field",
+ "bitvec",
  "bls",
  "derivative",
  "derive_more 2.1.1",

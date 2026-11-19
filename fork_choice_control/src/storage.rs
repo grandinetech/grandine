@@ -3280,7 +3280,7 @@ mod tests {
     use bytesize::ByteSize;
     use database::DatabaseMode;
     use diff::QueuePatch;
-    use ssz::{PersistentList, PersistentVector, SszListMut};
+    use ssz::{ContiguousList, PersistentList, PersistentVector, SszListMut};
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
@@ -3303,7 +3303,9 @@ mod tests {
         preset::Mainnet,
     };
 
-    use crate::derived_fields::{DerivedFieldsV1, ElectraDerivedFields, ElectraSlotFields};
+    use crate::derived_fields::{
+        DerivedFieldsV1, ElectraDerivedFields, ElectraSlotFields, ValidatorSnapshot,
+    };
 
     use super::*;
 
@@ -4600,6 +4602,73 @@ mod tests {
     }
 
     #[test]
+    fn derived_fields_hold_a_validator_snapshot_and_the_active_changes_since_it() -> Result<()> {
+        let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
+
+        let derived_fields = |slot: Slot| {
+            let mut state = state_with_validators(slot, 6, 0);
+
+            DerivedFields::new(
+                &config,
+                &pubkey_cache,
+                &mut state,
+                None,
+                &[],
+                slot.saturating_add(1),
+            )
+        };
+
+        let snapshot_fields = derived_fields(0)?;
+        let snapshot = snapshot_fields
+            .validator_snapshot()
+            .expect("the first epoch of a fork holds a snapshot");
+
+        assert_eq!(
+            snapshot.active.iter().by_vals().collect::<Vec<_>>(),
+            [true, false, false, false, false, false],
+        );
+        assert_eq!(
+            snapshot.slashed.iter().by_vals().collect::<Vec<_>>(),
+            [false; 6],
+        );
+        assert_eq!(
+            snapshot.effective_balances.as_ref(),
+            (0..6)
+                .map(|index| 32_000_000_000_u64.saturating_add(index))
+                .collect::<Vec<_>>(),
+        );
+
+        let later_fields = derived_fields(96)?;
+
+        assert!(later_fields.validator_snapshot().is_none());
+
+        let mut active = snapshot.active.to_bitvec();
+
+        later_fields.apply_active_changes(&mut active)?;
+
+        assert_eq!(
+            active.iter().by_vals().collect::<Vec<_>>(),
+            [true, true, true, true, false, false],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn validator_snapshots_restart_at_every_fork() {
+        let config = Config {
+            altair_fork_epoch: 40,
+            ..Config::mainnet()
+        };
+
+        let snapshot_epochs =
+            [0, 31, 32, 39, 40, 71, 72].map(|epoch| ValidatorSnapshot::epoch(&config, epoch));
+
+        assert_eq!(snapshot_epochs, [0, 0, 32, 32, 40, 40, 72]);
+    }
+
+    #[test]
     fn derived_fields_are_not_stored_without_a_state_in_every_epoch() -> Result<()> {
         let directory = TempDir::new()?;
         let storage = storage_with_hierarchy(&directory, [9, 6])?;
@@ -4974,6 +5043,8 @@ mod tests {
                     block_rewards: None,
                     randao_mix: H256::zero(),
                     total_active_balance: 0,
+                    validator_snapshot: None,
+                    active_changes: ContiguousList::default(),
                     slots: slot_fields.try_into()?,
                 })),
                 DEFAULT_ZSTD_COMPRESSION_LEVEL,
