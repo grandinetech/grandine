@@ -69,6 +69,7 @@ members = [
     'validator',
     'validator_key_cache',
     'validator_statistics',
+    'xmss',
 ]
 
 # Feature resolver version 3 is the default starting with Rust 2024, but that does not apply in
@@ -366,6 +367,8 @@ itertools = '0.14'
 jwt-simple = { version = '0.15', default-features = false, features = ['pure-rust'] }
 keccak-hasher = '0.15'
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
+# All leanVM crates and the `leanvm-sidecar` binary every PQ node runs must be at one revision.
+lean_xmss = { git = 'https://github.com/leanEthereum/leanVM', rev = '283686575c4e81790591d2c6e3ed21c69c0e3bbe' }
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd6324d63e27ef6b7c49cdc9b1977c1b808234c7b' }
 libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
 libp2p-identity = { version = '0.3', features = ['peerid'] }
@@ -542,6 +545,7 @@ types = { path = 'types' }
 validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
 validator_statistics = { path = 'validator_statistics' }
+xmss = { path = 'xmss' }
 
 # Banned crates
 #
@@ -572,6 +576,13 @@ owning_ref = '<0.0.0'
 # - `hex`
 # - `hex_fmt`
 serde-hex = '<0.0.0'
+
+# leanXMSS is unusably slow unoptimized: key generation takes minutes instead of about a second.
+[profile.dev.package.lean_xmss]
+opt-level = 3
+
+[profile.dev.package.keccak256]
+opt-level = 3
 
 [profile.release]
 debug = 'full'

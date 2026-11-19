@@ -79,6 +79,7 @@ options=(
     --package validator
     --package validator_key_cache
     --package validator_statistics
+    --package xmss
 
     # The `--` lets callers pass `--deny warnings` to the script.
     # Lint settings must be specified after a `--`.
