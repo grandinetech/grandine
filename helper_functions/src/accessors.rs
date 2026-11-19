@@ -263,12 +263,16 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
 
         indices.extend(get_active_validator_indices(state, relative_epoch)?);
 
-        Ok(pack_indices(indices))
+        Ok(pack_indices(indices, state.validators().len_usize()))
     })
 }
 
-fn pack_indices(indices: Vec<ValidatorIndex>) -> PackedIndices {
-    fn pack<T>(indices: Vec<ValidatorIndex>) -> Arc<[T]>
+#[must_use]
+pub fn pack_indices(
+    indices: impl IntoIterator<Item = ValidatorIndex>,
+    validator_count: usize,
+) -> PackedIndices {
+    fn pack<T>(indices: impl IntoIterator<Item = ValidatorIndex>) -> Arc<[T]>
     where
         ValidatorIndex: TryInto<T, Error: Debug>,
     {
@@ -286,11 +290,14 @@ fn pack_indices(indices: Vec<ValidatorIndex>) -> PackedIndices {
             .collect()
     }
 
-    match indices.last().copied().unwrap_or_default() {
+    let last_index = ValidatorIndex::try_from(validator_count.saturating_sub(1))
+        .expect("the validator count fits in ValidatorIndex");
+
+    match last_index {
         0..0x100 => PackedIndices::U8(pack(indices)),
         0x100..0x1_0000 => PackedIndices::U16(pack(indices)),
         0x1_0000..0x1_0000_0000 => PackedIndices::U32(pack(indices)),
-        0x1_0000_0000..=u64::MAX => PackedIndices::U64(indices.into()),
+        0x1_0000_0000..=u64::MAX => PackedIndices::U64(pack(indices)),
     }
 }
 
@@ -329,7 +336,8 @@ where
     })
 }
 
-fn shuffle_indices<P: Preset>(ordered: &PackedIndices, seed: H256) -> PackedIndices
+#[must_use]
+pub fn shuffle_indices<P: Preset>(ordered: &PackedIndices, seed: H256) -> PackedIndices
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
@@ -410,18 +418,23 @@ fn compute_seed<P: Preset>(
     epoch: Epoch,
     domain_type: DomainType,
 ) -> Result<H256> {
-    let mix = *randao_mixes.mod_index(
+    let mix = compute_seed_mix::<P>(randao_mixes, epoch)?;
+
+    Ok(compute_seed_from_mix(mix, epoch, domain_type))
+}
+
+pub fn compute_seed_mix<P: Preset>(randao_mixes: &RandaoMixes<P>, epoch: Epoch) -> Result<H256> {
+    Ok(*randao_mixes.mod_index(
         epoch
             .try_add(P::EpochsPerHistoricalVector::U64)?
             .try_sub(P::MinSeedLookahead::U64)?
             .try_sub(1)?,
-    );
-
-    Ok(hashing::hash_32_64_256(
-        domain_type.to_fixed_bytes(),
-        epoch,
-        mix,
     ))
+}
+
+#[must_use]
+pub fn compute_seed_from_mix(mix: H256, epoch: Epoch, domain_type: DomainType) -> H256 {
+    hashing::hash_32_64_256(domain_type.to_fixed_bytes(), epoch, mix)
 }
 
 pub fn get_subnet_for_attestation<P: Preset>(
@@ -467,8 +480,8 @@ where
     P::ValidatorRegistryLimit: FitsInU64,
 {
     let ordered = pack_indices(
-        get_filtered_active_validator_indices_by_epoch(partial_validators.iter(), epoch, |_| true)
-            .collect(),
+        get_filtered_active_validator_indices_by_epoch(partial_validators.iter(), epoch, |_| true),
+        partial_validators.len(),
     );
     let seed = compute_seed::<P>(randao_mixes, epoch, DOMAIN_BEACON_ATTESTER)?;
 
@@ -1182,7 +1195,10 @@ pub fn ptc_for_epoch_processing<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<(Vec<Ptc<P>>, PackedIndices, PackedIndices)> {
-    let ordered = pack_indices(get_active_validator_indices_by_epoch(state, epoch).collect());
+    let ordered = pack_indices(
+        get_active_validator_indices_by_epoch(state, epoch),
+        state.validators().len_usize(),
+    );
     let attester_seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_ATTESTER)?;
     let shuffled = shuffle_indices::<P>(&ordered, attester_seed);
 

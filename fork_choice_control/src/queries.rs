@@ -1,4 +1,4 @@
-use core::{fmt::Debug, ops::Range, time::Duration};
+use core::{fmt::Debug, ops::Range, sync::atomic::Ordering, time::Duration};
 use std::{
     collections::HashSet,
     sync::Arc,
@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arc_swap::Guard;
+use bitvec::vec::BitVec;
 use diff::Patch as _;
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, MAX_PAYLOAD_BODIES_PER_REQUEST};
@@ -59,7 +60,7 @@ use types::{
 
 use crate::{
     controller::Controller,
-    derived_fields::DerivedFields,
+    derived_fields::{DerivedFields, ValidatorRecords, ValidatorSnapshot},
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     storage::{StateRow, Storage, StoredBlock, StoredEnvelope},
@@ -1023,6 +1024,166 @@ where
         Ok(self
             .state_at_slot_blocking(slot)?
             .map(|state| state.map(|state| accessors::total_active_balance(&*state))))
+    }
+
+    pub fn active_validators_and_seed_mix_at_epoch(
+        &self,
+        epoch: Epoch,
+    ) -> Result<Option<(BitVec<u8>, H256)>> {
+        let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
+        if !self.store_snapshot().is_slot_finalized(slot) {
+            return Ok(None);
+        }
+
+        let Some(mix_epoch) = epoch.checked_sub(P::MinSeedLookahead::U64.saturating_add(1)) else {
+            return Ok(None);
+        };
+
+        let mix_slot =
+            misc::compute_start_slot_at_epoch::<P>(mix_epoch.saturating_add(1)).saturating_sub(1);
+
+        let storage = self.storage();
+
+        let Some(mix_stored_slot) = storage.stored_slot_before_or_at(mix_slot)? else {
+            return Ok(None);
+        };
+
+        let Some(mix_fields) = storage.derived_fields(mix_stored_slot)? else {
+            return Ok(None);
+        };
+
+        let Some(seed_mix) =
+            mix_fields.randao_mix(usize::try_from(mix_slot.saturating_sub(mix_stored_slot))?)
+        else {
+            return Ok(None);
+        };
+
+        let snapshot_slot = misc::compute_start_slot_at_epoch::<P>(ValidatorSnapshot::epoch(
+            self.chain_config(),
+            epoch,
+        ));
+
+        let Some(snapshot_fields) = storage.derived_fields(snapshot_slot)? else {
+            return Ok(None);
+        };
+
+        let Some(snapshot) = snapshot_fields.validator_snapshot() else {
+            return Ok(None);
+        };
+
+        let mut active = snapshot.active.to_bitvec();
+
+        if slot != snapshot_slot {
+            let Some(fields) = storage.derived_fields(slot)? else {
+                return Ok(None);
+            };
+
+            fields.apply_active_changes(&mut active)?;
+        }
+
+        Ok(Some((active, seed_mix)))
+    }
+
+    pub fn validator_records_at_slot(&self, slot: Slot) -> Result<Option<ValidatorRecords>> {
+        if !self.store_snapshot().is_slot_finalized(slot) {
+            return Ok(None);
+        }
+
+        let config = self.chain_config();
+        let storage = self.storage();
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let epoch_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
+        let snapshot_slot =
+            misc::compute_start_slot_at_epoch::<P>(ValidatorSnapshot::epoch(config, epoch));
+
+        let anchor_slot = storage.anchor_slot.load(Ordering::SeqCst);
+
+        let Some(state_diffs) = core::iter::once(epoch_slot)
+            .chain(
+                storage
+                    .hierarchy
+                    .spine::<P>(config, anchor_slot, epoch_slot),
+            )
+            .position(|node| node == snapshot_slot)
+        else {
+            return Ok(None);
+        };
+
+        let Some(snapshot_fields) = storage.derived_fields(snapshot_slot)? else {
+            return Ok(None);
+        };
+
+        let Some(snapshot) = snapshot_fields.validator_snapshot() else {
+            return Ok(None);
+        };
+
+        let epoch_fields = if epoch_slot == snapshot_slot {
+            None
+        } else {
+            let Some(fields) = storage.derived_fields(epoch_slot)? else {
+                return Ok(None);
+            };
+
+            Some(fields)
+        };
+
+        let epoch_fields = epoch_fields.as_ref().unwrap_or(&snapshot_fields);
+
+        let Some(slot_patches) =
+            epoch_fields.validator_patches(usize::try_from(slot.saturating_sub(epoch_slot))?)
+        else {
+            return Ok(None);
+        };
+
+        let mut state_diff_patches = vec![];
+        let mut columns = None;
+
+        let walker = storage.walk(epoch_slot)?;
+
+        for row in (&walker).into_iter().take(state_diffs) {
+            match row? {
+                StateRow::Delta(delta) => state_diff_patches.push(delta.validators()?.into_inner()),
+                StateRow::Frame(_) => return Ok(None),
+                StateRow::State(state) => {
+                    let (_, effective_balances, validators) = state.validators().columns();
+
+                    columns = Some((
+                        effective_balances.iter().copied().collect(),
+                        validators
+                            .iter()
+                            .map(|validator| validator.slashed)
+                            .collect(),
+                    ));
+
+                    break;
+                }
+            }
+        }
+
+        let (mut effective_balances, mut slashed) = columns.unwrap_or_else(|| {
+            (
+                snapshot.effective_balances.iter().copied().collect(),
+                snapshot.slashed.to_bitvec(),
+            )
+        });
+
+        for patch in state_diff_patches.into_iter().rev().chain(slot_patches) {
+            patch.apply_to_effective_balances_and_slashed(&mut effective_balances, &mut slashed)?;
+        }
+
+        let mut active = snapshot.active.to_bitvec();
+
+        epoch_fields.apply_active_changes(&mut active)?;
+
+        active.resize(effective_balances.len(), false);
+
+        Ok(Some(ValidatorRecords {
+            effective_balances,
+            active,
+            slashed,
+        }))
     }
 
     pub fn block_rewards(

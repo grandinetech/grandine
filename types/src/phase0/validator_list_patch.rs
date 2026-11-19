@@ -1,3 +1,4 @@
+use bitvec::vec::BitVec;
 use bls::PublicKeyBytes;
 use diff::{Error, GweiDeltas, Patch, PatchConfig, PositionalEdit, PositionalPatch, Unlimited};
 use ssz::{ContiguousList, H256, Ssz};
@@ -172,6 +173,55 @@ impl ValidatorListPatch {
             ),
             appended,
         })
+    }
+
+    pub fn apply_to_effective_balances_and_slashed(
+        self,
+        effective_balances: &mut Vec<Gwei>,
+        slashed: &mut BitVec<u8>,
+    ) -> Result<(), Error> {
+        let Self {
+            base_len,
+            effective_balances: effective_balance_deltas,
+            other_edits,
+            appended,
+            ..
+        } = self;
+
+        let base_len = usize::try_from(base_len).map_err(|_| Error::InvalidPatchEncoding)?;
+
+        if effective_balances.len() != base_len || slashed.len() != base_len {
+            return Err(Error::PatchBaseLengthMismatch);
+        }
+
+        effective_balance_deltas.apply_by_index(|index, patch| {
+            let ptr = usize::try_from(index)
+                .ok()
+                .and_then(|index| effective_balances.get_mut(index))
+                .ok_or(Error::PatchIndexOutOfBounds)?;
+
+            *ptr = patch(*ptr)?;
+
+            Ok(())
+        })?;
+
+        PositionalPatch::apply_edits(other_edits, |index, edits| {
+            let index = usize::try_from(index)
+                .ok()
+                .filter(|index| *index < slashed.len())
+                .ok_or(Error::PatchIndexOutOfBounds)?;
+
+            slashed.set(index, edits.slashed);
+
+            Ok(())
+        })?;
+
+        for validator in appended {
+            effective_balances.push(validator.effective_balance);
+            slashed.push(validator.slashed);
+        }
+
+        Ok(())
     }
 }
 
@@ -455,6 +505,59 @@ mod tests {
             .expect("index is within bounds") = 7;
 
         round_trip(&base, &changed);
+    }
+
+    #[test]
+    fn effective_balances_and_slashed_follow_the_patch_alone() {
+        let base = validators(10);
+        let mut changed = base.clone();
+
+        *changed
+            .effective_balance_mut(2)
+            .expect("index is within bounds") = 16_000_000_000;
+
+        let partial = changed
+            .partial_validator_mut(4)
+            .expect("index is within bounds");
+
+        partial.slashed = true;
+        partial.exit_epoch = 99;
+
+        changed
+            .partial_validator_mut(5)
+            .expect("index is within bounds")
+            .withdrawal_credentials = H256::repeat_byte(0xff);
+
+        for index in 10..13 {
+            changed.push(validator(index)).expect("list is not full");
+        }
+
+        let patch = <ValidatorListPatch as Patch<Validators<Minimal>>>::diff(
+            PatchConfig::default(),
+            &base,
+            &changed,
+        )
+        .expect("patch should represent the change");
+
+        let columns = |list: &Validators<Minimal>| {
+            let (_, effective_balances, partial_validators) = list.columns();
+
+            (
+                effective_balances.iter().copied().collect::<Vec<_>>(),
+                partial_validators
+                    .iter()
+                    .map(|validator| validator.slashed)
+                    .collect::<BitVec<u8>>(),
+            )
+        };
+
+        let (mut effective_balances, mut slashed) = columns(&base);
+
+        patch
+            .apply_to_effective_balances_and_slashed(&mut effective_balances, &mut slashed)
+            .expect("patch should apply");
+
+        assert_eq!((effective_balances, slashed), columns(&changed));
     }
 
     #[test]

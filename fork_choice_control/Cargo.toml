@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
+bitvec = { workspace = true }
 bls = { workspace = true }
 bytesize = { workspace = true }
 cached = { workspace = true }

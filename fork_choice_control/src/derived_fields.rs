@@ -2,10 +2,11 @@ use core::{iter::Peekable, slice::Iter};
 use std::sync::Arc;
 
 use anyhow::Result;
+use bitvec::vec::BitVec;
 use diff::{Error, Patch, PatchConfig, QueuePatch, Unlimited};
-use helper_functions::accessors;
+use helper_functions::{accessors, predicates};
 use pubkey_cache::PubkeyCache;
-use ssz::{ContiguousList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
+use ssz::{BitList, ContiguousList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
@@ -15,7 +16,7 @@ use types::{
     nonstandard::{BlockRewards, Phase},
     phase0::{
         balances_patch::BalancesPatch,
-        primitives::{Gwei, H256, Slot},
+        primitives::{Epoch, Gwei, H256, Slot, ValidatorIndex},
         validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
@@ -65,6 +66,33 @@ impl DerivedFields {
         match self {
             Self::V1(fields) => fields.total_active_balance(),
         }
+    }
+
+    #[must_use]
+    pub const fn validator_snapshot(&self) -> Option<&ValidatorSnapshot> {
+        match self {
+            Self::V1(fields) => fields.validator_snapshot(),
+        }
+    }
+
+    pub fn apply_active_changes(&self, active: &mut BitVec<u8>) -> Result<()> {
+        let active_changes = match self {
+            Self::V1(fields) => fields.active_changes(),
+        };
+
+        for index in active_changes {
+            let index = usize::try_from(*index)?;
+
+            if index >= active.len() {
+                active.resize(index.saturating_add(1), false);
+            }
+
+            let flipped = !active[index];
+
+            active.set(index, flipped);
+        }
+
+        Ok(())
     }
 
     #[must_use]
@@ -270,6 +298,31 @@ impl DerivedFieldsV1 {
     }
 
     #[must_use]
+    pub const fn validator_snapshot(&self) -> Option<&ValidatorSnapshot> {
+        match self {
+            Self::Phase0(fields)
+            | Self::Altair(fields)
+            | Self::Bellatrix(fields)
+            | Self::Capella(fields)
+            | Self::Deneb(fields) => fields.validator_snapshot.as_ref(),
+            Self::Electra(fields) | Self::Fulu(fields) => fields.validator_snapshot.as_ref(),
+            Self::Gloas(fields) => fields.validator_snapshot.as_ref(),
+        }
+    }
+
+    fn active_changes(&self) -> &[ValidatorIndex] {
+        match self {
+            Self::Phase0(fields)
+            | Self::Altair(fields)
+            | Self::Bellatrix(fields)
+            | Self::Capella(fields)
+            | Self::Deneb(fields) => fields.active_changes.as_ref(),
+            Self::Electra(fields) | Self::Fulu(fields) => fields.active_changes.as_ref(),
+            Self::Gloas(fields) => fields.active_changes.as_ref(),
+        }
+    }
+
+    #[must_use]
     pub fn validator_patches(&self, count: usize) -> Option<Vec<ValidatorListPatch>> {
         match self {
             Self::Phase0(fields)
@@ -435,6 +488,8 @@ pub struct Phase0DerivedFields {
     pub block_rewards: Option<ProposerRewards>,
     pub randao_mix: H256,
     pub total_active_balance: Gwei,
+    pub validator_snapshot: Option<ValidatorSnapshot>,
+    pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
     pub slots: ContiguousList<Phase0SlotFields, Unlimited>,
 }
 
@@ -452,6 +507,9 @@ impl Phase0DerivedFields {
 
         let total_active_balance = accessors::total_active_balance(&**state);
 
+        let (validator_snapshot, active_changes) =
+            validator_snapshot_and_active_changes(config, &**state)?;
+
         let slots = (state.slot().saturating_add(1)..end)
             .map(|slot| {
                 let block = blocks.next_if(|block| block.message().slot() == slot);
@@ -464,6 +522,8 @@ impl Phase0DerivedFields {
             block_rewards,
             randao_mix,
             total_active_balance,
+            validator_snapshot,
+            active_changes,
             slots: slots.try_into()?,
         })
     }
@@ -529,6 +589,8 @@ pub struct ElectraDerivedFields {
     pub block_rewards: Option<ProposerRewards>,
     pub randao_mix: H256,
     pub total_active_balance: Gwei,
+    pub validator_snapshot: Option<ValidatorSnapshot>,
+    pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
     pub slots: ContiguousList<ElectraSlotFields, Unlimited>,
 }
 
@@ -546,6 +608,9 @@ impl ElectraDerivedFields {
 
         let total_active_balance = accessors::total_active_balance(&**state);
 
+        let (validator_snapshot, active_changes) =
+            validator_snapshot_and_active_changes(config, &**state)?;
+
         let slots = (state.slot().saturating_add(1)..end)
             .map(|slot| {
                 let block = blocks.next_if(|block| block.message().slot() == slot);
@@ -558,6 +623,8 @@ impl ElectraDerivedFields {
             block_rewards,
             randao_mix,
             total_active_balance,
+            validator_snapshot,
+            active_changes,
             slots: slots.try_into()?,
         })
     }
@@ -647,6 +714,8 @@ pub struct GloasDerivedFields {
     pub block_rewards: Option<ProposerRewards>,
     pub randao_mix: H256,
     pub total_active_balance: Gwei,
+    pub validator_snapshot: Option<ValidatorSnapshot>,
+    pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
     pub slots: ContiguousList<GloasSlotFields, Unlimited>,
 }
 
@@ -664,6 +733,9 @@ impl GloasDerivedFields {
 
         let total_active_balance = accessors::total_active_balance(&**state);
 
+        let (validator_snapshot, active_changes) =
+            validator_snapshot_and_active_changes(config, &**state)?;
+
         let slots = (state.slot().saturating_add(1)..end)
             .map(|slot| {
                 let block = blocks.next_if(|block| block.message().slot() == slot);
@@ -676,6 +748,8 @@ impl GloasDerivedFields {
             block_rewards,
             randao_mix,
             total_active_balance,
+            validator_snapshot,
+            active_changes,
             slots: slots.try_into()?,
         })
     }
@@ -778,6 +852,74 @@ pub fn block_rewards<P: Preset>(
     };
 
     Ok(rewards.into())
+}
+
+#[derive(Clone, Debug, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct ValidatorSnapshot {
+    pub active: BitList<Unlimited>,
+    pub slashed: BitList<Unlimited>,
+    pub effective_balances: ContiguousList<Gwei, Unlimited>,
+}
+
+impl ValidatorSnapshot {
+    #[must_use]
+    pub fn epoch(config: &Config, epoch: Epoch) -> Epoch {
+        let fork_epoch = config.fork_epoch(config.phase_at_epoch(epoch));
+        let epoch_in_fork = epoch.saturating_sub(fork_epoch);
+
+        epoch.saturating_sub(epoch_in_fork % 32)
+    }
+}
+
+fn validator_snapshot_and_active_changes<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+) -> Result<(
+    Option<ValidatorSnapshot>,
+    ContiguousList<ValidatorIndex, Unlimited>,
+)> {
+    let epoch = accessors::get_current_epoch(state);
+    let snapshot_epoch = ValidatorSnapshot::epoch(config, epoch);
+    let (_, effective_balances, validators) = state.validators().columns();
+
+    if epoch == snapshot_epoch {
+        let mut active = BitList::with_length(validators.len());
+        let mut slashed = BitList::with_length(validators.len());
+
+        for (index, validator) in validators.iter().enumerate() {
+            active.set(index, predicates::is_active_validator(validator, epoch));
+            slashed.set(index, validator.slashed);
+        }
+
+        let effective_balances = effective_balances.iter().copied().collect::<Vec<_>>();
+
+        let snapshot = ValidatorSnapshot {
+            active,
+            slashed,
+            effective_balances: effective_balances.try_into()?,
+        };
+
+        return Ok((Some(snapshot), ContiguousList::default()));
+    }
+
+    let active_changes = (0..)
+        .zip(validators.iter())
+        .filter(|(_, validator)| {
+            predicates::is_active_validator(validator, snapshot_epoch)
+                != predicates::is_active_validator(validator, epoch)
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+
+    Ok((None, active_changes.try_into()?))
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ValidatorRecords {
+    pub effective_balances: Vec<Gwei>,
+    pub active: BitVec<u8>,
+    pub slashed: BitVec<u8>,
 }
 
 #[derive(Clone, Copy, Default, Debug, Ssz)]

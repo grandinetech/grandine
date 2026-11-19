@@ -96,6 +96,7 @@ use types::{
         },
         primitives::{SubcommitteeIndex, SyncCommitteePeriod},
     },
+    cache::PackedIndices,
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
@@ -124,7 +125,7 @@ use types::{
         ValidationOutcome, ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
-        consts::GENESIS_SLOT,
+        consts::{DOMAIN_BEACON_ATTESTER, GENESIS_SLOT},
         containers::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
             ProposerSlashing, SignedVoluntaryExit, Validator,
@@ -1040,6 +1041,60 @@ pub async fn state_committees<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<StateCommitteesQuery>,
 ) -> Result<EthResponse<Vec<StateCommitteeResponse>>, Error> {
+    let stored_slot = match state_id {
+        StateId::Slot(slot) => Some(slot),
+        StateId::Root(state_root) => {
+            tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .map(|slot| slot.value)
+        }
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => None,
+    };
+
+    if let Some(state_slot) = stored_slot {
+        let state_epoch = misc::compute_epoch_at_slot::<P>(state_slot);
+        let epoch = query.epoch.unwrap_or(state_epoch);
+
+        if accessors::compute_relative_epoch(state_epoch, epoch).is_ok() {
+            let WithStatus {
+                value: (),
+                status,
+                finalized,
+            } = controller
+                .status_at_slot(state_slot)?
+                .ok_or(Error::StateNotFound)?;
+
+            if let Some(slot) = query.slot
+                && misc::compute_epoch_at_slot::<P>(slot) != epoch
+            {
+                return Err(Error::SlotNotInEpoch);
+            }
+
+            let registry = tokio::task::block_in_place(|| {
+                controller.active_validators_and_seed_mix_at_epoch(epoch)
+            })?;
+
+            if let Some((active, seed_mix)) = registry {
+                let seed =
+                    accessors::compute_seed_from_mix(seed_mix, epoch, DOMAIN_BEACON_ATTESTER);
+
+                let ordered = accessors::pack_indices(
+                    active.iter_ones().map(|index| {
+                        ValidatorIndex::try_from(index).expect("validator indices fit in u64")
+                    }),
+                    active.len(),
+                );
+
+                let indices = accessors::shuffle_indices::<P>(&ordered, seed);
+
+                return Ok(
+                    EthResponse::json(committees_in_epoch::<P>(&indices, epoch, &query)?)
+                        .execution_optimistic(status.is_optimistic())
+                        .finalized(finalized),
+                );
+            }
+        }
+    }
+
     let (state_slot, response) = match state_id {
         StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
             let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
@@ -1103,15 +1158,11 @@ pub async fn state_committees<P: Preset, W: Wait>(
         state_epoch = current_epoch;
     }
 
-    let slots = match query.slot {
-        Some(slot) => {
-            if misc::compute_epoch_at_slot::<P>(slot) != epoch {
-                return Err(Error::SlotNotInEpoch);
-            }
-            Either::Left(core::iter::once(slot))
-        }
-        None => Either::Right(misc::slots_in_epoch::<P>(epoch).map_err(Error::InvalidEpoch)?),
-    };
+    if let Some(slot) = query.slot
+        && misc::compute_epoch_at_slot::<P>(slot) != epoch
+    {
+        return Err(Error::SlotNotInEpoch);
+    }
 
     // Committees are only available for the previous, current and next epoch of the state.
     accessors::compute_relative_epoch(state_epoch, epoch).map_err(Error::InvalidEpoch)?;
@@ -1123,6 +1174,23 @@ pub async fn state_committees<P: Preset, W: Wait>(
         &randao_mixes,
         epoch,
     )?;
+
+    Ok(
+        EthResponse::json(committees_in_epoch::<P>(&indices, epoch, &query)?)
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized),
+    )
+}
+
+fn committees_in_epoch<P: Preset>(
+    indices: &PackedIndices,
+    epoch: Epoch,
+    query: &StateCommitteesQuery,
+) -> Result<Vec<StateCommitteeResponse>, Error> {
+    let slots = match query.slot {
+        Some(slot) => Either::Left(core::iter::once(slot)),
+        None => Either::Right(misc::slots_in_epoch::<P>(epoch).map_err(Error::InvalidEpoch)?),
+    };
 
     let committee_count_per_slot = misc::committee_count_from_active_validator_count::<P>(
         u64::try_from(indices.len()).map_err(AnyhowError::new)?,
@@ -1144,7 +1212,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
         .cartesian_product(committee_indices)
         .map(|(slot, index)| {
             let committee = accessors::compute_beacon_committee::<P>(
-                &indices,
+                indices,
                 committee_count_per_slot,
                 slot,
                 index,
@@ -1158,9 +1226,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
         })
         .collect::<Result<_>>()?;
 
-    Ok(EthResponse::json(responses)
-        .execution_optimistic(status.is_optimistic())
-        .finalized(finalized))
+    Ok(responses)
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/sync_committees`
