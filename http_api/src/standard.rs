@@ -3891,6 +3891,19 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
     } else {
         let shuffled = if let Some(relative_epoch) = relative_epoch {
             accessors::active_validator_indices_shuffled(&head_state.value, relative_epoch)?.clone()
+        } else if let Some((active, seed_mix)) = tokio::task::block_in_place(|| {
+            controller.active_validators_and_seed_mix_at_epoch(epoch)
+        })? {
+            let seed = accessors::compute_seed_from_mix(seed_mix, epoch, DOMAIN_BEACON_ATTESTER);
+
+            let ordered = accessors::pack_indices(
+                active.iter_ones().map(|index| {
+                    ValidatorIndex::try_from(index).expect("validator indices fit in u64")
+                }),
+                active.len(),
+            );
+
+            accessors::shuffle_indices::<P>(&ordered, seed)
         } else {
             let ((partial_validators, _), randao_mixes) = tokio::task::block_in_place(|| {
                 controller.validators_and_randao_mixes_at_slot(start_slot)
