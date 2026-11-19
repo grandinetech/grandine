@@ -52,6 +52,7 @@ use types::{
         },
         primitives::{DomainType, Epoch, H256, Slot},
     },
+    pq::containers::BeaconBlock as PqBeaconBlock,
     preset::Preset,
     traits::{self, BeaconBlock, BeaconState},
 };
@@ -368,6 +369,15 @@ impl<P: Preset> SignForSingleFork<P> for FuluBeaconBlock<P> {
 }
 
 impl<P: Preset> SignForSingleFork<P> for GloasBeaconBlock<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for PqBeaconBlock<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
 

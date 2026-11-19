@@ -239,9 +239,14 @@ pub mod gloas {
         process_withdrawals, validate_execution_payload_bid, verify_execution_requests_limits,
     };
 
-    pub(crate) use block_processing::{process_block, process_block_for_gossip};
-    pub(crate) use epoch_processing::process_epoch;
-    pub(crate) use slot_processing::process_slots;
+    pub(crate) use block_processing::{
+        process_block, process_block_for_gossip, settle_builder_payment,
+    };
+    pub(crate) use epoch_processing::{
+        process_builder_pending_payments, process_epoch, process_ptc_window,
+    };
+    pub(crate) use execution_payload_processing::process_builder_exit_request;
+    pub(crate) use slot_processing::{process_slot, process_slots};
     pub(crate) use state_transition::{state_transition, verify_signatures};
 
     mod block_processing;

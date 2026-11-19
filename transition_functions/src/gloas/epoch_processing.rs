@@ -188,7 +188,7 @@ fn process_pending_deposits<P: Preset>(
     Ok(())
 }
 
-fn process_ptc_window<P: Preset>(
+pub fn process_ptc_window<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
 ) -> Result<(PackedIndices, PackedIndices)> {
     let mut ptc_window = state.ptc_window().into_iter().collect::<Vec<_>>();
@@ -208,7 +208,7 @@ fn process_ptc_window<P: Preset>(
     Ok((ordered, shuffled))
 }
 
-fn process_builder_pending_payments<P: Preset>(
+pub fn process_builder_pending_payments<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
 ) -> Result<()> {
     let quorum = get_builder_payment_quorum_threshold(state)?;

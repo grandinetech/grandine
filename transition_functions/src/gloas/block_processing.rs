@@ -800,7 +800,7 @@ pub fn apply_parent_execution_payload<P: Preset>(
     Ok(())
 }
 
-fn settle_builder_payment<P: Preset>(
+pub fn settle_builder_payment<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     payment_index: u64,
 ) -> Result<()> {

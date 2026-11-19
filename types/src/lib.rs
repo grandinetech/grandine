@@ -141,6 +141,9 @@ pub mod pq {
     #[cfg(not(target_os = "zkvm"))]
     pub mod storage;
     pub mod validator_list;
+
+    #[cfg(test)]
+    mod spec_tests;
 }
 
 pub use collections::{

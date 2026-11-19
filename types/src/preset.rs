@@ -612,6 +612,10 @@ impl Preset for Minimal {
     const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 1462;
     const MAX_ATTESTER_SLASHING_SIZE: u64 = 131_536;
 
+    // PQ
+    const PREREGISTRATIONS_LIMIT: u64 = 64;
+    const PREREGISTRATION_EXPIRY_SLOTS: u64 = 64;
+
     // PQ type-specific SSZ bounds
     const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE_PQ: u64 = 1_052_158;
     const MAX_ATTESTER_SLASHING_SIZE_PQ: u64 = 2_228_504;

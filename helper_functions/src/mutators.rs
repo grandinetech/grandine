@@ -153,11 +153,18 @@ pub fn queue_excess_active_balance<P: Preset>(
             .partial_validator(index)?
             .withdrawal_credentials;
 
+        // > [Modified in PQ] Use an empty signature field as a placeholder
+        let signature = if state.is_post_pq() {
+            SignatureBytes::zero()
+        } else {
+            SignatureBytes::empty()
+        };
+
         state.pending_deposits_mut().push(PendingDeposit {
             pubkey,
             withdrawal_credentials,
             amount: excess_balance,
-            signature: SignatureBytes::empty(),
+            signature,
             slot: GENESIS_SLOT,
         })?;
     }

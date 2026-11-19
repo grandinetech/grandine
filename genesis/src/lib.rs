@@ -356,6 +356,13 @@ impl<'config, P: Preset> Incremental<'config, P> {
         // > If empty, will initialize a chain that has not yet gone through the Merge transition
         let beacon_state = beacon_state.with_execution_payload_header(execution_payload_header)?;
 
+        // > [New in PQ]
+        let mut beacon_state = beacon_state;
+
+        if let BeaconState::Pq(state) = &mut beacon_state {
+            transition_functions::pq::initialize_aggregation_committee_window(state.as_mut())?;
+        }
+
         Ok((beacon_state, deposit_tree))
     }
 }

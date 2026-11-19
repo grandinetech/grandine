@@ -205,6 +205,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     fn is_post_electra(&self) -> bool;
     fn is_post_fulu(&self) -> bool;
     fn is_post_gloas(&self) -> bool;
+    fn is_post_pq(&self) -> bool;
 }
 
 #[duplicate_item(
@@ -221,7 +222,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     is_post_deneb_body
     is_post_electra_body
     is_post_fulu_body
-    is_post_gloas_body;
+    is_post_gloas_body
+    is_post_pq_body;
 
     [P: Preset, S: BeaconState<P> + Clone]
     [Arc<S>]
@@ -236,7 +238,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [self.as_ref().is_post_deneb()]
     [self.as_ref().is_post_electra()]
     [self.as_ref().is_post_fulu()]
-    [self.as_ref().is_post_gloas()];
+    [self.as_ref().is_post_gloas()]
+    [self.as_ref().is_post_pq()];
 
     [P: Preset, S: BeaconState<P>]
     [Hc<S>]
@@ -251,7 +254,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [self.as_ref().is_post_deneb()]
     [self.as_ref().is_post_electra()]
     [self.as_ref().is_post_fulu()]
-    [self.as_ref().is_post_gloas()];
+    [self.as_ref().is_post_gloas()]
+    [self.as_ref().is_post_pq()];
 
     [P: Preset]
     [Phase0BeaconState<P>]
@@ -263,6 +267,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [None]
     [None]
     [None]
+    [false]
     [false]
     [false]
     [false]
@@ -281,6 +286,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [false]
     [false]
     [false]
+    [false]
     [false];
 
     [P: Preset]
@@ -293,6 +299,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [None]
     [None]
     [None]
+    [false]
     [false]
     [false]
     [false]
@@ -311,6 +318,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [false]
     [false]
     [false]
+    [false]
     [false];
 
     [P: Preset]
@@ -324,6 +332,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [None]
     [None]
     [true]
+    [false]
     [false]
     [false]
     [false];
@@ -341,6 +350,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [true]
     [true]
     [false]
+    [false]
     [false];
 
     [P: Preset]
@@ -356,6 +366,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [true]
     [true]
     [true]
+    [false]
     [false];
 
     [P: Preset]
@@ -371,7 +382,8 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [true]
     [true]
     [true]
-    [true];
+    [true]
+    [false];
 
     [P: Preset]
     [PqBeaconState<P>]
@@ -383,6 +395,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     [Some(self)]
     [Some(self)]
     [Some(self)]
+    [true]
     [true]
     [true]
     [true]
@@ -469,6 +482,9 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     ]
     [
         self.phase() >= Phase::Gloas
+    ]
+    [
+        self.phase() >= Phase::Pq
     ];
 )]
 impl<parameters> BeaconState<P> for implementor {
@@ -566,6 +582,10 @@ impl<parameters> BeaconState<P> for implementor {
 
     fn is_post_gloas(&self) -> bool {
         is_post_gloas_body
+    }
+
+    fn is_post_pq(&self) -> bool {
+        is_post_pq_body
     }
 }
 

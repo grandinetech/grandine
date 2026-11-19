@@ -3861,6 +3861,7 @@ dependencies = [
  "nonzero_ext",
  "num-integer",
  "parse-display",
+ "pq_prover",
  "prometheus_metrics",
  "pubkey_cache",
  "rayon",
@@ -3881,6 +3882,7 @@ dependencies = [
  "typenum",
  "types",
  "unwrap_none",
+ "xmss",
 ]
 
 [[package]]
@@ -9749,10 +9751,12 @@ dependencies = [
  "helper_functions",
  "itertools 0.14.0",
  "num-integer",
+ "pq_prover",
  "prometheus_metrics",
  "pubkey_cache",
  "rayon",
  "serde",
+ "sha2 0.10.9",
  "spec_test_utils",
  "ssz",
  "static_assertions",
@@ -9765,6 +9769,7 @@ dependencies = [
  "typenum",
  "types",
  "unwrap_none",
+ "xmss",
 ]
 
 [[package]]

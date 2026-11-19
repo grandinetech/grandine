@@ -18,9 +18,11 @@ hashing = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 num-integer = { workspace = true }
+pq_prover = { workspace = true }
 prometheus_metrics = { workspace = true, optional = true }
 pubkey_cache = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
 std_ext = { workspace = true }
@@ -31,6 +33,7 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
+xmss = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 rayon = { workspace = true }

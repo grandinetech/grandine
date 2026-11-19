@@ -531,7 +531,7 @@ pub fn verify_signatures<P: Preset>(
             gloas::verify_signatures(config, pubkey_cache, state, block, verifier)
         }
         (BeaconState::Pq(state), SignedBeaconBlock::Pq(block)) => {
-            pq::verify_signatures(config, pubkey_cache, state, block, verifier)
+            pq::verify_signatures(config, pubkey_cache, state, block, &verifier)
         }
         _ => {
             // This match arm will silently match any new phases.
@@ -1044,7 +1044,7 @@ fn process_block<P: Preset>(
             gloas::process_block(config, pubkey_cache, state, block, verifier, slot_report)
         }
         (BeaconState::Pq(state), BeaconBlock::Pq(block)) => {
-            pq::process_block(config, pubkey_cache, state, block, verifier, slot_report)
+            pq::process_block(config, state, block, &verifier, slot_report)
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -1094,7 +1094,7 @@ pub fn process_block_for_gossip<P: Preset>(
             gloas::process_block_for_gossip(config, pubkey_cache, state, block)
         }
         (BeaconState::Pq(state), SignedBeaconBlock::Pq(block)) => {
-            pq::process_block_for_gossip(config, pubkey_cache, state, block)
+            pq::process_block_for_gossip(config, state, block)
         }
         (state, _) => {
             // This match arm will silently match any new phases.
@@ -1344,6 +1344,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/fulu/sanity/slots/*/*"]      [fulu_minimal_slots]      [Minimal] [Fulu];
         ["consensus-spec-tests/tests/mainnet/gloas/sanity/slots/*/*"]     [gloas_mainnet_slots]     [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/sanity/slots/*/*"]     [gloas_minimal_slots]     [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/pq/sanity/slots/*/*"]        [pq_mainnet_slots]        [Mainnet] [Pq];
+        ["consensus-spec-tests/tests/minimal/pq/sanity/slots/*/*"]        [pq_minimal_slots]        [Minimal] [Pq];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -1428,6 +1430,59 @@ mod spec_tests {
     #[test_resources(glob)]
     fn function_name(case: Case) {
         run_transition_case::<preset>(case)
+    }
+
+    // Signatures and proofs in the PQ vectors are stubs, so they are not verified.
+    #[duplicate_item(
+        glob                                                          function_name         preset;
+        ["consensus-spec-tests/tests/mainnet/pq/finality/*/*/*"]      [pq_mainnet_finality] [Mainnet];
+        ["consensus-spec-tests/tests/mainnet/pq/random/*/*/*"]        [pq_mainnet_random]   [Mainnet];
+        ["consensus-spec-tests/tests/mainnet/pq/sanity/blocks/*/*"]   [pq_mainnet_sanity]   [Mainnet];
+        ["consensus-spec-tests/tests/minimal/pq/finality/*/*/*"]      [pq_minimal_finality] [Minimal];
+        ["consensus-spec-tests/tests/minimal/pq/random/*/*/*"]        [pq_minimal_random]   [Minimal];
+        ["consensus-spec-tests/tests/minimal/pq/sanity/blocks/*/*"]   [pq_minimal_sanity]   [Minimal];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        run_pq_blocks_case::<preset>(case);
+    }
+
+    fn run_pq_blocks_case<P: Preset>(case: Case) {
+        let config = P::default_config().start_and_stay_in(Phase::Pq);
+        let pubkey_cache = PubkeyCache::default();
+        let pre = case.ssz::<_, BeaconState<P>>(&config, "pre");
+        let blocks_count = case.meta().blocks_count;
+        let blocks = case.numbered::<_, SignedBeaconBlock<P>>(&config, "blocks", 0..blocks_count);
+        let post = case.try_ssz::<_, BeaconState<P>>(&config, "post");
+
+        let run = || -> Result<_> {
+            let mut state = pre.clone();
+
+            for block in blocks {
+                custom_state_transition(
+                    &config,
+                    &pubkey_cache,
+                    &mut state,
+                    &block,
+                    ProcessSlots::Always,
+                    StateRootPolicy::Verify,
+                    NullExecutionEngine,
+                    NullVerifier,
+                    NullSlotReport,
+                )?;
+            }
+
+            Ok(state)
+        };
+
+        if let Some(expected_post) = post {
+            assert_eq!(
+                run().expect("state transition should succeed"),
+                expected_post
+            );
+        } else {
+            run().expect_err("state transition should fail");
+        }
     }
 
     fn run_slots_case<P: Preset>(config: &Config, case: Case) -> Result<()> {

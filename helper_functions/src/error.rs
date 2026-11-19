@@ -6,6 +6,8 @@ use types::phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex};
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("aggregation committee for slot {slot} is outside the aggregation committee window")]
+    AggregationCommitteeOutOfRange { slot: Slot },
     #[error("attestation has no attesting indices")]
     AttestationHasNoAttestingIndices,
     #[error("attestation source does not match justified checkpoint")]

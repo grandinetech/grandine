@@ -25,6 +25,8 @@ pub enum Error<P: Preset> {
         state_slot: Slot,
         attestation_slot: Slot,
     },
+    #[error("attestation proof is invalid")]
+    AttestationProofInvalid,
     #[error(
         "attestation source does not match justified checkpoint \
          (in_state: {in_state:?}, in_block: {in_block:?})"
@@ -132,6 +134,10 @@ pub enum Error<P: Preset> {
         in_attestation: Slot,
         state_slot: Slot,
     },
+    #[error("PQ attestation data index must be 0 or 1 (index: {index})")]
+    PqAttestationWithInvalidPayloadStatus { index: u64 },
+    #[error("PQ attestation targets wrong epoch (slot: {slot}, target_epoch: {target_epoch})")]
+    PqAttestationTargetsWrongEpoch { slot: Slot, target_epoch: Epoch },
     #[error("deposit data cannot be processed after PQ")]
     PqDepositDataUnsupported,
     #[error("the PQ fork transition is not supported")]
@@ -160,6 +166,8 @@ pub enum Error<P: Preset> {
     },
     #[error("slots in proposer slashing do not match ({slot_1} != {slot_2})")]
     ProposerSlashingSlotMismatch { slot_1: Slot, slot_2: Slot },
+    #[error("RANDAO reveal is not a valid VRF proof for the proposer")]
+    RandaoRevealInvalid,
     #[error("block slot ({block_slot}) does not match state slot ({state_slot})")]
     SlotMismatch { state_slot: Slot, block_slot: Slot },
     #[error("target slot ({target}) is not later than current slot ({current})")]

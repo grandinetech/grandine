@@ -514,6 +514,15 @@ pub fn committee_count_from_active_validator_count<P: Preset>(active_validator_c
         .clamp(1, P::MaxCommitteesPerSlot::U64)
 }
 
+/// [Modified in PQ] `get_committee_count_per_slot` clamps to `MAX_COMMITTEES_PER_SLOT_PQ`.
+#[must_use]
+pub fn committee_count_from_active_validator_count_pq<P: Preset>(
+    active_validator_count: u64,
+) -> u64 {
+    (active_validator_count.div_typenum::<P::SlotsPerEpoch>() / P::TARGET_COMMITTEE_SIZE)
+        .clamp(1, P::MaxCommitteesPerSlotPq::U64)
+}
+
 // <https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/phase0/validator.md#bls_withdrawal_prefix>
 #[must_use]
 pub fn bls_withdrawal_credentials(public_key: PublicKeyBytes) -> H256 {

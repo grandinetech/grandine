@@ -1,4 +1,8 @@
-use core::{fmt::Debug, num::NonZeroU64, ops::Div as _};
+use core::{
+    fmt::Debug,
+    num::NonZeroU64,
+    ops::{Div as _, Range},
+};
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Result, anyhow, bail, ensure};
@@ -53,7 +57,7 @@ use types::{
     },
 };
 
-use crate::{error::Error, misc, par_utils, predicates};
+use crate::{error::Error, misc, par_utils, pq, predicates};
 
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
@@ -405,7 +409,7 @@ fn get_seed<P: Preset>(
     get_seed_by_epoch(state, epoch, domain_type)
 }
 
-fn get_seed_by_epoch<P: Preset>(
+pub fn get_seed_by_epoch<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     epoch: Epoch,
     domain_type: DomainType,
@@ -452,6 +456,12 @@ pub fn get_committee_count_per_slot<P: Preset>(
     relative_epoch: RelativeEpoch,
 ) -> Result<u64> {
     let active_validator_count = active_validator_count_u64(state, relative_epoch)?;
+
+    if state.is_post_pq() {
+        return Ok(misc::committee_count_from_active_validator_count_pq::<P>(
+            active_validator_count,
+        ));
+    }
 
     Ok(misc::committee_count_from_active_validator_count::<P>(
         active_validator_count,
@@ -958,10 +968,18 @@ pub fn get_attestation_participation_flags<P: Preset>(
             // > The availability bit of the attested block lives at the parent block's slot.
             let parent_slot = parent_slot.ok_or(Error::ParentSlotMissing)?;
 
+            // > [Modified in PQ] With an inclusion delay of two slots, the attested block may be
+            // > the grandparent of the block being processed.
+            let block_slot = if state.is_post_pq() {
+                pq::get_latest_block_slot(state, data.slot, parent_slot)?
+            } else {
+                parent_slot
+            };
+
             let payload_status = u64::from(
                 post_gloas
                     .execution_payload_availability()
-                    .get((parent_slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?)
+                    .get((block_slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?)
                     .ok_or(Error::PayloadAvailabilityOutOfRange)?,
             );
 
@@ -983,7 +1001,14 @@ pub fn get_attestation_participation_flags<P: Preset>(
         participation_flags.set_bit(TIMELY_TARGET_FLAG_INDEX, true);
     }
 
-    if is_matching_head && inclusion_delay <= P::MIN_ATTESTATION_INCLUSION_DELAY.get() {
+    // > [Modified in PQ] Only attestations included at the minimum delay are timely for the head.
+    let is_timely_head = if state.is_post_pq() {
+        inclusion_delay == P::MIN_ATTESTATION_INCLUSION_DELAY_PQ.get()
+    } else {
+        inclusion_delay <= P::MIN_ATTESTATION_INCLUSION_DELAY.get()
+    };
+
+    if is_matching_head && is_timely_head {
         participation_flags.set_bit(TIMELY_HEAD_FLAG_INDEX, true);
     }
 
@@ -1224,6 +1249,31 @@ pub fn ptc_for_epoch_processing<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<(Vec<Ptc<P>>, PackedIndices, PackedIndices)> {
+    let (ordered, shuffled, committees_per_slot) = epoch_shuffling(state, epoch)?;
+
+    let ptcs = misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            let ranges = (0..committees_per_slot)
+                .map(|committee_index| {
+                    committee_range::<P>(shuffled.len(), committees_per_slot, slot, committee_index)
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let members = ranges.into_iter().flat_map(|range| shuffled.slice(range));
+
+            ptc_from_committee_members(state, slot, members)
+        })
+        .collect::<Result<_>>()?;
+
+    Ok((ptcs, ordered, shuffled))
+}
+
+/// The active validator indices of any `epoch`, ordered and shuffled, with the committee count per
+/// slot. Unlike [`beacon_committee`], this is not limited to the epochs the shuffling cache covers.
+pub fn epoch_shuffling<P: Preset>(
+    state: &impl BeaconState<P>,
+    epoch: Epoch,
+) -> Result<(PackedIndices, PackedIndices, u64)> {
     let ordered = pack_indices(
         get_active_validator_indices_by_epoch(state, epoch),
         state.validators().len_usize(),
@@ -1232,43 +1282,37 @@ pub fn ptc_for_epoch_processing<P: Preset>(
     let shuffled = shuffle_indices::<P>(&ordered, attester_seed);
 
     let validator_count = ValidatorIndex::try_from(shuffled.len())?;
-    let committees_per_slot =
-        misc::committee_count_from_active_validator_count::<P>(validator_count);
+    let committees_per_slot = if state.is_post_pq() {
+        misc::committee_count_from_active_validator_count_pq::<P>(validator_count)
+    } else {
+        misc::committee_count_from_active_validator_count::<P>(validator_count)
+    };
+
+    Ok((ordered, shuffled, committees_per_slot))
+}
+
+/// The bounds of a beacon committee within the shuffled active validator indices of its epoch.
+pub fn committee_range<P: Preset>(
+    validator_count: usize,
+    committees_per_slot: u64,
+    slot: Slot,
+    committee_index: CommitteeIndex,
+) -> Result<Range<usize>> {
+    let validator_count = ValidatorIndex::try_from(validator_count)?;
 
     let committees_in_epoch = NonZeroU64::new(committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?)
         .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
 
-    let ptcs = misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| {
-            let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
+    let index_in_epoch = misc::slots_since_epoch_start::<P>(slot)
+        .try_mul(committees_per_slot)?
+        .try_add(committee_index)?;
 
-            let ranges = (0..committees_per_slot)
-                .map(|committee_index| -> Result<(usize, usize)> {
-                    let index_in_epoch = slots_since_epoch_start
-                        .try_mul(committees_per_slot)?
-                        .try_add(committee_index)?;
+    let start = usize::try_from(validator_count.try_mul(index_in_epoch)? / committees_in_epoch)?;
+    let end = usize::try_from(
+        validator_count.try_mul(index_in_epoch.try_add(1)?)? / committees_in_epoch,
+    )?;
 
-                    let start = usize::try_from(
-                        validator_count.try_mul(index_in_epoch)? / committees_in_epoch,
-                    )?;
-
-                    let end = usize::try_from(
-                        validator_count.try_mul(index_in_epoch.try_add(1)?)? / committees_in_epoch,
-                    )?;
-
-                    Ok((start, end))
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let members = ranges
-                .into_iter()
-                .flat_map(|(start, end)| shuffled.slice(start..end));
-
-            ptc_from_committee_members(state, slot, members)
-        })
-        .collect::<Result<_>>()?;
-
-    Ok((ptcs, ordered, shuffled))
+    Ok(start..end)
 }
 
 fn ptc_from_committee_members<P: Preset>(

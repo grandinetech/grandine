@@ -3,6 +3,8 @@
 //!
 //! Every method may block for seconds. Never call one on an async executor thread.
 
+use std::sync::OnceLock;
+
 use thiserror::Error;
 use xmss::{MESSAGE_SIZE, XmssPublicKey, XmssSignature};
 
@@ -52,6 +54,23 @@ pub trait ProverBackend: Send + Sync {
     /// `VerifyAggregates`. `Ok(false)` means the proof is invalid. `Err` means the backend could
     /// not decide.
     fn verify(&self, statements: &[Statement], proof: &[u8]) -> Result<bool, Error>;
+}
+
+static BLOCK_BACKEND: OnceLock<Box<dyn ProverBackend>> = OnceLock::new();
+
+/// The backend that verifies the `proof` of blocks during state transitions.
+///
+/// [`ReferenceBackend`] unless another one was installed with [`install_block_backend`].
+#[must_use]
+pub fn block_backend() -> &'static dyn ProverBackend {
+    BLOCK_BACKEND.get().map_or(&ReferenceBackend, AsRef::as_ref)
+}
+
+/// Sets the backend returned by [`block_backend`]. Fails if one was already installed.
+pub fn install_block_backend(
+    backend: Box<dyn ProverBackend>,
+) -> Result<(), Box<dyn ProverBackend>> {
+    BLOCK_BACKEND.set(backend)
 }
 
 fn check_shape(statements: &[Statement], signatures: &[Vec<XmssSignature>]) -> Result<(), Error> {

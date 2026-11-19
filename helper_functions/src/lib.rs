@@ -11,6 +11,7 @@ pub mod misc;
 pub mod mutators;
 pub mod par_utils;
 pub mod phase0;
+pub mod pq;
 pub mod predicates;
 pub mod signing;
 pub mod slot_report;
