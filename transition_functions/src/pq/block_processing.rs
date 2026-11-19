@@ -41,7 +41,7 @@ use types::{
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER, DOMAIN_RANDAO, GENESIS_SLOT},
         containers::AttestationData,
-        primitives::{Gwei, H256, Slot},
+        primitives::{Gwei, H256, Slot, ValidatorIndex},
     },
     pq::{
         beacon_state::BeaconState,
@@ -53,7 +53,7 @@ use types::{
         validator_list::unpadded_pubkey,
     },
     preset::{Preset, SlotsPerHistoricalRoot},
-    traits::SszValidatorList as _,
+    traits::{BeaconState as BeaconStateTrait, SszValidatorList as _},
 };
 
 use crate::{
@@ -664,6 +664,29 @@ pub(super) fn process_attester_slashing<P: Preset>(
     attester_slashing: &AttesterSlashing<P>,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
+    for index in validate_attester_slashing(config, state, attester_slashing, false)? {
+        slash_validator(
+            config,
+            state,
+            index,
+            None,
+            SlashingKind::Attester,
+            &mut slot_report,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// The validation in [`process_attester_slashing`]. Returns the indices it would slash.
+///
+/// The proofs of the indexed attestations are only checked if `verify_proofs` is set.
+pub fn validate_attester_slashing<P: Preset>(
+    config: &Config,
+    state: &impl BeaconStateTrait<P>,
+    attester_slashing: &AttesterSlashing<P>,
+    verify_proofs: bool,
+) -> Result<Vec<ValidatorIndex>> {
     let AttesterSlashing {
         attestation_1,
         attestation_2,
@@ -677,8 +700,13 @@ pub(super) fn process_attester_slashing<P: Preset>(
         },
     );
 
-    validate_indexed_attestation_indices(state, attestation_1)?;
-    validate_indexed_attestation_indices(state, attestation_2)?;
+    for attestation in [attestation_1, attestation_2] {
+        validate_indexed_attestation_indices(state, attestation)?;
+
+        if verify_proofs {
+            verify_indexed_attestation_proof(config, state, attestation)?;
+        }
+    }
 
     let current_epoch = get_current_epoch(state);
 
@@ -688,37 +716,35 @@ pub(super) fn process_attester_slashing<P: Preset>(
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
 
-    let mut slashed_any = false;
+    let slashable_indices = attestation_1
+        .attesting_indices
+        .iter()
+        .copied()
+        .filter(|index| indices_2.contains(index))
+        .map(|index| {
+            let validator = state.validators().partial_validator(index)?;
+            Ok((index, is_slashable_validator(validator, current_epoch)))
+        })
+        .filter_map(|result: Result<_>| match result {
+            Ok((index, true)) => Some(Ok(index)),
+            Ok((_, false)) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>>>()?;
 
-    for index in attestation_1.attesting_indices.iter().copied() {
-        if !indices_2.contains(&index) {
-            continue;
-        }
+    ensure!(
+        !slashable_indices.is_empty(),
+        Error::<P>::NoAttestersSlashed
+    );
 
-        if is_slashable_validator(state.validators.partial_validator(index)?, current_epoch) {
-            slash_validator(
-                config,
-                state,
-                index,
-                None,
-                SlashingKind::Attester,
-                &mut slot_report,
-            )?;
-
-            slashed_any = true;
-        }
-    }
-
-    ensure!(slashed_any, Error::<P>::NoAttestersSlashed);
-
-    Ok(())
+    Ok(slashable_indices)
 }
 
 /// The structural part of [`is_valid_indexed_attestation`].
 ///
 /// [`is_valid_indexed_attestation`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#modified-is_valid_indexed_attestation
 fn validate_indexed_attestation_indices<P: Preset>(
-    state: &BeaconState<P>,
+    state: &impl BeaconStateTrait<P>,
     indexed_attestation: &IndexedAttestation<P>,
 ) -> Result<()> {
     let indices = &indexed_attestation.attesting_indices;
@@ -735,7 +761,7 @@ fn validate_indexed_attestation_indices<P: Preset>(
         helper_functions::error::Error::AttestingIndicesNotSortedAndUnique,
     );
 
-    let validator_count = state.validators.len_u64();
+    let validator_count = state.validators().len_u64();
 
     for index in indices.iter().copied() {
         ensure!(
@@ -752,7 +778,7 @@ fn validate_indexed_attestation_indices<P: Preset>(
 
 fn verify_indexed_attestation_proof<P: Preset>(
     config: &Config,
-    state: &BeaconState<P>,
+    state: &impl BeaconStateTrait<P>,
     indexed_attestation: &IndexedAttestation<P>,
 ) -> Result<()> {
     validate_indexed_attestation_indices(state, indexed_attestation)?;
@@ -769,7 +795,7 @@ fn verify_indexed_attestation_proof<P: Preset>(
         pubkeys: indexed_attestation
             .attesting_indices
             .iter()
-            .map(|index| Ok(unpadded_pubkey(state.validators.pubkey(*index)?)))
+            .map(|index| Ok(unpadded_pubkey(state.validators().pubkey(*index)?)))
             .collect::<Result<_>>()?,
         leaf_index: helper_functions::pq::compute_xmss_attestation_leaf_index(target_epoch)?,
         message: helper_functions::misc::compute_signing_root(&indexed_attestation.data, domain)

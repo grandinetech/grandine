@@ -686,6 +686,9 @@ fn block_with_parent_payload<P: Preset>(
             Attestation::Single(_) => {
                 unreachable!("block should not contain SingleAttestation type attestations")
             }
+            Attestation::Pq(_) | Attestation::PqSingle(_) => {
+                bail!("the factory cannot build PQ blocks yet")
+            }
         }
     }
 

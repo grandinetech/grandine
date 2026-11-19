@@ -952,6 +952,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     subnet_id,
                     single_attestation,
                 ));
+            } // TODO(feature/pq): publish once the PQ gossip topics exist.
+            Attestation::Pq(_) | Attestation::PqSingle(_) => {
+                warn_with_peers!("cannot publish PQ attestations yet");
             }
         }
     }

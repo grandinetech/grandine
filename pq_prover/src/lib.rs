@@ -56,7 +56,22 @@ pub trait ProverBackend: Send + Sync {
     fn verify(&self, statements: &[Statement], proof: &[u8]) -> Result<bool, Error>;
 }
 
+static AGGREGATE_BACKEND: OnceLock<Box<dyn ProverBackend>> = OnceLock::new();
 static BLOCK_BACKEND: OnceLock<Box<dyn ProverBackend>> = OnceLock::new();
+
+/// The backend for gossip aggregates. [`ReferenceBackend`] until one is installed.
+pub fn aggregate_backend() -> &'static dyn ProverBackend {
+    AGGREGATE_BACKEND
+        .get()
+        .map_or(&ReferenceBackend, AsRef::as_ref)
+}
+
+/// Installs the backend for gossip aggregates. Fails if one is already installed.
+pub fn install_aggregate_backend(
+    backend: Box<dyn ProverBackend>,
+) -> Result<(), Box<dyn ProverBackend>> {
+    AGGREGATE_BACKEND.set(backend)
+}
 
 /// The backend that verifies the `proof` of blocks during state transitions.
 ///

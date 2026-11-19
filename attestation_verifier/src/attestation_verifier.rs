@@ -20,7 +20,7 @@ use futures::{
 use helper_functions::{
     accessors, electra,
     error::SignatureKind,
-    gloas, phase0, predicates,
+    gloas, phase0, pq, predicates,
     signing::SignForSingleFork,
     verifier::{MultiVerifier, Triple, Verifier},
 };
@@ -418,11 +418,22 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                 ..
             }) = result
             {
+                if let Some(pq_aggregate_and_proof) = aggregate_and_proof.pq() {
+                    pq::verify_aggregate_and_proof(
+                        config,
+                        state,
+                        pq_aggregate_and_proof,
+                        pq_prover::aggregate_backend(),
+                    )?;
+
+                    continue;
+                }
+
                 let message = aggregate_and_proof.message();
                 let signature = aggregate_and_proof.signature();
 
                 let aggregator_index = message.aggregator_index();
-                let selection_proof = message.selection_proof();
+                let selection_proof = message.selection_proof().unwrap_or_default();
 
                 let public_key = self
                     .controller
@@ -675,10 +686,18 @@ fn attestation_batch_triples<'a, P: Preset>(
 
                     triple
                 }
+                // XMSS signatures cannot be batched with BLS ones.
+                Attestation::PqSingle(attestation) => {
+                    pq::verify_single_attestation(config, state, attestation)?;
+                    return Ok(None);
+                }
+                // Aggregates are verified with their proofs in `verify_aggregate_batch_signatures`.
+                Attestation::Pq(_) => return Ok(None),
             };
 
-            Ok(triple)
+            Ok(Some(triple))
         })
+        .filter_map(Result::transpose)
         .collect()
 }
 

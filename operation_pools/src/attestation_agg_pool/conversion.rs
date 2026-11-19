@@ -95,6 +95,10 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
                 signature,
             }
         }
+        // TODO(feature/pq): pool PQ attestations with their proofs.
+        Attestation::Pq(_) | Attestation::PqSingle(_) => {
+            bail!(AttestationConversionError::Irrelevant);
+        }
         Attestation::Single(attestation) => {
             let committee_index = attestation.committee_index;
             let data = attestation.data;

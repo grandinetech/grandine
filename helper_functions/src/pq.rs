@@ -3,7 +3,7 @@
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bls::PublicKeyBytes;
-use pq_prover::Statement;
+use pq_prover::{ProverBackend, Statement};
 use sha2::{Digest as _, Sha256};
 use ssz::{H256, SszBitList as _};
 use try_from_iterator::TryFromIterator as _;
@@ -13,17 +13,17 @@ use types::{
     config::Config,
     electra::containers::PendingDeposit,
     phase0::{
-        consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_SELECTION_PROOF},
+        consts::{DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_SELECTION_PROOF},
         primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
     },
     pq::{
         beacon_state::BeaconState as PqBeaconState,
         consts::{
-            AGGREGATORS_PER_COMMITTEE, LEGACY_VRF_ROOT_DOMAIN, LEGACY_XMSS_PUBKEY_DOMAIN,
-            XMSS_ATTESTATION_LEAVES, XMSS_BUILDER_BID_LEAVES, XMSS_DEPOSIT_PREFIX,
-            XMSS_LEAVES_PER_SLOT, XMSS_RESERVED_LEAVES,
+            AGGREGATORS_PER_COMMITTEE, LEAF_OFFSET_AGGREGATE_AND_PROOF, LEGACY_VRF_ROOT_DOMAIN,
+            LEGACY_XMSS_PUBKEY_DOMAIN, XMSS_ATTESTATION_LEAVES, XMSS_BUILDER_BID_LEAVES,
+            XMSS_DEPOSIT_PREFIX, XMSS_LEAVES_PER_SLOT, XMSS_RESERVED_LEAVES,
         },
-        containers::Attestation,
+        containers::{Attestation, AttesterSlashing, SignedAggregateAndProof, SingleAttestation},
         primitives::{AggregationCommittee, AggregationCommittees, VrfProof},
         validator_list::unpadded_pubkey,
     },
@@ -32,7 +32,11 @@ use types::{
 };
 use xmss::{XmssPublicKey, XmssSignature};
 
-use crate::{accessors, error::Error, misc, predicates};
+use crate::{
+    accessors,
+    error::{Error, SignatureKind},
+    misc, predicates,
+};
 
 /// [`compute_xmss_attestation_leaf_index`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-compute_xmss_attestation_leaf_index)
 pub fn compute_xmss_attestation_leaf_index(epoch: Epoch) -> Result<u64> {
@@ -386,4 +390,87 @@ pub fn is_aggregator<P: Preset>(
     validator_index: ValidatorIndex,
 ) -> Result<bool> {
     Ok(get_aggregation_committee(state, slot, index)?.contains(&validator_index))
+}
+
+/// The XMSS signature check of [`validate_beacon_attestation_gossip`].
+///
+/// [`validate_beacon_attestation_gossip`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/p2p-interface.md#modified-beacon_attestation_subnet_id
+pub fn verify_single_attestation<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    attestation: &SingleAttestation,
+) -> Result<()> {
+    let target_epoch = attestation.data.target.epoch;
+    let domain = accessors::get_domain(config, state, DOMAIN_BEACON_ATTESTER, Some(target_epoch));
+    let signing_root = misc::compute_signing_root(&attestation.data, domain);
+
+    ensure!(
+        verify_validator_signature(
+            state,
+            attestation.attester_index,
+            compute_xmss_attestation_leaf_index(target_epoch)?,
+            signing_root,
+            &attestation.signature,
+        )?,
+        Error::SignatureInvalid(SignatureKind::Attestation),
+    );
+
+    Ok(())
+}
+
+/// The aggregator signature and STARK checks of [`validate_beacon_aggregate_and_proof_gossip`].
+///
+/// [`validate_beacon_aggregate_and_proof_gossip`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/p2p-interface.md#modified-beacon_aggregate_and_proof
+pub fn verify_aggregate_and_proof<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    signed_aggregate_and_proof: &SignedAggregateAndProof<P>,
+    backend: &dyn ProverBackend,
+) -> Result<()> {
+    let aggregate_and_proof = &signed_aggregate_and_proof.message;
+    let aggregate = &aggregate_and_proof.aggregate;
+    let target_epoch = aggregate.data.target.epoch;
+    let domain = accessors::get_domain(
+        config,
+        state,
+        DOMAIN_AGGREGATE_AND_PROOF,
+        Some(target_epoch),
+    );
+    let signing_root = misc::compute_signing_root(aggregate_and_proof, domain);
+    let leaf_index = compute_xmss_leaf_index(aggregate.data.slot, LEAF_OFFSET_AGGREGATE_AND_PROOF)?;
+
+    ensure!(
+        verify_validator_signature(
+            state,
+            aggregate_and_proof.aggregator_index,
+            leaf_index,
+            signing_root,
+            &signed_aggregate_and_proof.signature,
+        )?,
+        Error::SignatureInvalid(SignatureKind::AggregateAndProof),
+    );
+
+    let statements = get_attestation_statements(config, state, aggregate)?;
+
+    ensure!(
+        backend.verify(&statements, aggregate_and_proof.proof.as_bytes())?,
+        Error::AttestationProofInvalid,
+    );
+
+    Ok(())
+}
+
+/// The validators in both attestations of `attester_slashing`, without checking that they are
+/// slashable.
+pub fn slashable_indices<P: Preset>(
+    attester_slashing: &AttesterSlashing<P>,
+) -> impl Iterator<Item = ValidatorIndex> + '_ {
+    let indices_2 = &attester_slashing.attestation_2.attesting_indices;
+
+    attester_slashing
+        .attestation_1
+        .attesting_indices
+        .iter()
+        .copied()
+        .filter(move |index| indices_2.iter().any(|other| other == index))
 }

@@ -51,7 +51,7 @@ use types::{
     },
 };
 
-use crate::{accessors, error::Error, predicates};
+use crate::{accessors, error::Error, pq, predicates};
 
 pub const PREFIX_LEN: usize = H256::len_bytes() - ExecutionAddress::len_bytes();
 
@@ -860,6 +860,10 @@ pub fn committee_index<P: Preset>(attestation: &Attestation<P>) -> CommitteeInde
             .next()
             .unwrap_or_default(),
         Attestation::Single(attestation) => attestation.committee_index,
+        Attestation::Pq(attestation) => pq::get_committee_indices(attestation)
+            .next()
+            .unwrap_or_default(),
+        Attestation::PqSingle(attestation) => attestation.committee_index,
     }
 }
 

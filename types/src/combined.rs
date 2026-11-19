@@ -130,7 +130,12 @@ use crate::{
     },
     pq::{
         beacon_state::BeaconState as PqBeaconState,
-        containers::{BeaconBlock as PqBeaconBlock, SignedBeaconBlock as PqSignedBeaconBlock},
+        containers::{
+            AggregateAndProof as PqAggregateAndProof, Attestation as PqAttestation,
+            AttesterSlashing as PqAttesterSlashing, BeaconBlock as PqBeaconBlock,
+            SignedAggregateAndProof as PqSignedAggregateAndProof,
+            SignedBeaconBlock as PqSignedBeaconBlock, SingleAttestation as PqSingleAttestation,
+        },
     },
     preset::{Mainnet, Preset},
     traits::{
@@ -2226,6 +2231,7 @@ pub enum AggregateAndProof<P: Preset> {
     Phase0(Phase0AggregateAndProof<P>),
     Electra(ElectraAggregateAndProof<P>),
     Gloas(GloasAggregateAndProof<P>),
+    Pq(PqAggregateAndProof<P>),
 }
 
 impl<P: Preset> AggregateAndProof<P> {
@@ -2234,14 +2240,17 @@ impl<P: Preset> AggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
         }
     }
 
-    pub const fn selection_proof(&self) -> SignatureBytes {
+    /// `None` after PQ, where aggregators do not select themselves.
+    pub const fn selection_proof(&self) -> Option<SignatureBytes> {
         match self {
-            Self::Phase0(aggregate_and_proof) => aggregate_and_proof.selection_proof,
-            Self::Electra(aggregate_and_proof) => aggregate_and_proof.selection_proof,
-            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.selection_proof,
+            Self::Phase0(aggregate_and_proof) => Some(aggregate_and_proof.selection_proof),
+            Self::Electra(aggregate_and_proof) => Some(aggregate_and_proof.selection_proof),
+            Self::Gloas(aggregate_and_proof) => Some(aggregate_and_proof.selection_proof),
+            Self::Pq(_) => None,
         }
     }
 
@@ -2250,6 +2259,7 @@ impl<P: Preset> AggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
         }
     }
 
@@ -2259,6 +2269,7 @@ impl<P: Preset> AggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
         }
     }
 }
@@ -2271,6 +2282,7 @@ impl<P: Preset> SszHash for AggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
         }
     }
 }
@@ -2281,15 +2293,17 @@ pub enum SignedAggregateAndProof<P: Preset> {
     Phase0(Phase0SignedAggregateAndProof<P>),
     Electra(ElectraSignedAggregateAndProof<P>),
     Gloas(GloasSignedAggregateAndProof<P>),
+    Pq(PqSignedAggregateAndProof<P>),
 }
 
 impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0SignedAggregateAndProof::<P>::SIZE,
         ElectraSignedAggregateAndProof::<P>::SIZE,
         GloasSignedAggregateAndProof::<P>::SIZE,
+        PqSignedAggregateAndProof::<P>::SIZE,
     ]);
 }
 
@@ -2301,11 +2315,7 @@ impl<P: Preset> SszRead<Phase> for SignedAggregateAndProof<P> {
             }
             Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Pq => {
-                return Err(ReadError::Custom {
-                    message: "PQ aggregates are not supported yet",
-                });
-            }
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(signed_aggregate_and_proof)
@@ -2324,6 +2334,9 @@ impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
             Self::Gloas(signed_aggregate_and_proof) => {
                 signed_aggregate_and_proof.write_variable(bytes)
             }
+            Self::Pq(signed_aggregate_and_proof) => {
+                signed_aggregate_and_proof.write_variable(bytes)
+            }
         }
     }
 }
@@ -2334,14 +2347,26 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
         }
     }
 
+    /// PQ aggregates carry XMSS signatures, which never verify as BLS signatures.
+    /// See [`Self::pq`].
     pub const fn signature(&self) -> SignatureBytes {
         match self {
             Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
             Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
             Self::Gloas(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
+            Self::Pq(_) => SignatureBytes::zero(),
+        }
+    }
+
+    #[must_use]
+    pub const fn pq(&self) -> Option<&PqSignedAggregateAndProof<P>> {
+        match self {
+            Self::Pq(signed_aggregate_and_proof) => Some(signed_aggregate_and_proof),
+            _ => None,
         }
     }
 
@@ -2350,6 +2375,7 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
             Self::Gloas(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
+            Self::Pq(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
         }
     }
 
@@ -2362,6 +2388,9 @@ impl<P: Preset> SignedAggregateAndProof<P> {
                 Attestation::from(aggregate_and_proof.message.aggregate.clone())
             }
             Self::Gloas(aggregate_and_proof) => {
+                Attestation::from(aggregate_and_proof.message.aggregate.clone())
+            }
+            Self::Pq(aggregate_and_proof) => {
                 Attestation::from(aggregate_and_proof.message.aggregate.clone())
             }
         }
@@ -2379,6 +2408,9 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             Self::Gloas(signed_aggregate_and_proof) => {
                 AggregateAndProof::Gloas(signed_aggregate_and_proof.message.clone())
             }
+            Self::Pq(signed_aggregate_and_proof) => {
+                AggregateAndProof::Pq(signed_aggregate_and_proof.message.clone())
+            }
         }
     }
 }
@@ -2390,15 +2422,20 @@ pub enum Attestation<P: Preset> {
     Electra(ElectraAttestation<P>),
     Gloas(GloasAttestation<P>),
     Single(SingleAttestation),
+    // The PQ variants come last so that untagged deserialization tries the BLS variants first.
+    // A PQ attestation has no `signature` and a PQ single attestation has a 2404-byte one.
+    Pq(PqAttestation<P>),
+    PqSingle(PqSingleAttestation),
 }
 
 impl<P: Preset> SszSize for Attestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0Attestation::<P>::SIZE,
         ElectraAttestation::<P>::SIZE,
         GloasAttestation::<P>::SIZE,
+        PqAttestation::<P>::SIZE,
     ]);
 }
 
@@ -2418,11 +2455,7 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
             }
             Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Pq => {
-                return Err(ReadError::Custom {
-                    message: "PQ attestations are not supported yet",
-                });
-            }
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         assert_eq!(slot, attestation.data().slot);
@@ -2438,6 +2471,8 @@ impl<P: Preset> SszWrite for Attestation<P> {
             Self::Electra(attestation) => attestation.write_variable(bytes),
             Self::Gloas(attestation) => attestation.write_variable(bytes),
             Self::Single(attestation) => attestation.write_variable(bytes),
+            Self::Pq(attestation) => attestation.write_variable(bytes),
+            Self::PqSingle(attestation) => attestation.write_variable(bytes),
         }
     }
 }
@@ -2451,6 +2486,8 @@ impl<P: Preset> SszHash for Attestation<P> {
             Self::Electra(attestation) => attestation.hash_tree_root(),
             Self::Gloas(attestation) => attestation.hash_tree_root(),
             Self::Single(attestation) => attestation.hash_tree_root(),
+            Self::Pq(attestation) => attestation.hash_tree_root(),
+            Self::PqSingle(attestation) => attestation.hash_tree_root(),
         }
     }
 }
@@ -2462,12 +2499,15 @@ impl<P: Preset> Attestation<P> {
             Self::Electra(attestation) => attestation.data,
             Self::Gloas(attestation) => attestation.data,
             Self::Single(attestation) => attestation.data,
+            Self::Pq(attestation) => attestation.data,
+            Self::PqSingle(attestation) => attestation.data,
         }
     }
 
+    /// `None` before Electra and after PQ, where the bits have `MAX_COMMITTEES_PER_SLOT_PQ` bits.
     pub fn committee_bits(&self) -> Option<BitVector<P::MaxCommitteesPerSlot>> {
         match self {
-            Self::Phase0(_) => None,
+            Self::Phase0(_) | Self::Pq(_) | Self::PqSingle(_) => None,
             Self::Electra(attestation) => Some(attestation.committee_bits),
             Self::Gloas(attestation) => Some(attestation.committee_bits),
             Self::Single(attestation) => {
@@ -2487,7 +2527,8 @@ impl<P: Preset> Attestation<P> {
             Self::Phase0(attestation) => attestation.aggregation_bits.count_ones(),
             Self::Electra(attestation) => attestation.aggregation_bits.count_ones(),
             Self::Gloas(attestation) => attestation.aggregation_bits.count_ones(),
-            Self::Single(_) => 1,
+            Self::Pq(attestation) => attestation.aggregation_bits.count_ones(),
+            Self::Single(_) | Self::PqSingle(_) => 1,
         }
     }
 
@@ -2497,6 +2538,7 @@ impl<P: Preset> Attestation<P> {
             Self::Phase0(_) => Phase::Phase0,
             Self::Electra(_) | Self::Single(_) => Phase::Electra,
             Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) | Self::PqSingle(_) => Phase::Pq,
         }
     }
 }
@@ -2507,6 +2549,7 @@ pub enum AttesterSlashing<P: Preset> {
     Phase0(Phase0AttesterSlashing<P>),
     Electra(ElectraAttesterSlashing<P>),
     Gloas(GloasAttesterSlashing<P>),
+    Pq(PqAttesterSlashing<P>),
 }
 
 // It appears to be impossible to implement `SszRead` for the combined `AttesterSlashing`.
@@ -2517,10 +2560,11 @@ assert_not_impl_any!(AttesterSlashing<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for AttesterSlashing<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0AttesterSlashing::<P>::SIZE,
         ElectraAttesterSlashing::<P>::SIZE,
         GloasAttesterSlashing::<P>::SIZE,
+        PqAttesterSlashing::<P>::SIZE,
     ]);
 }
 
@@ -2530,6 +2574,7 @@ impl<P: Preset> SszWrite for AttesterSlashing<P> {
             Self::Phase0(attester_slashing) => attester_slashing.write_variable(bytes),
             Self::Electra(attester_slashing) => attester_slashing.write_variable(bytes),
             Self::Gloas(attester_slashing) => attester_slashing.write_variable(bytes),
+            Self::Pq(attester_slashing) => attester_slashing.write_variable(bytes),
         }
     }
 }
@@ -2539,14 +2584,14 @@ impl<P: Preset> AttesterSlashing<P> {
     pub fn pre_electra(self) -> Option<Phase0AttesterSlashing<P>> {
         match self {
             Self::Phase0(attester_slashing) => Some(attester_slashing),
-            Self::Electra(_) | Self::Gloas(_) => None,
+            Self::Electra(_) | Self::Gloas(_) | Self::Pq(_) => None,
         }
     }
 
     #[must_use]
     pub fn post_electra(self) -> Option<ElectraAttesterSlashing<P>> {
         match self {
-            Self::Phase0(_) | Self::Gloas(_) => None,
+            Self::Phase0(_) | Self::Gloas(_) | Self::Pq(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing),
         }
     }
@@ -2554,9 +2599,17 @@ impl<P: Preset> AttesterSlashing<P> {
     #[must_use]
     pub fn post_gloas(self) -> Option<GloasAttesterSlashing<P>> {
         match self {
-            Self::Phase0(_) => None,
+            Self::Phase0(_) | Self::Pq(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing.into()),
             Self::Gloas(attester_slashing) => Some(attester_slashing),
+        }
+    }
+
+    #[must_use]
+    pub fn pq(self) -> Option<PqAttesterSlashing<P>> {
+        match self {
+            Self::Pq(attester_slashing) => Some(attester_slashing),
+            _ => None,
         }
     }
 }

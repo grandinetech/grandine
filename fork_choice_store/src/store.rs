@@ -28,7 +28,7 @@ use hash_hasher::HashedMap;
 use helper_functions::{
     accessors, electra,
     error::SignatureKind,
-    gloas, misc, phase0, predicates,
+    gloas, misc, phase0, pq, predicates,
     signing::SignForSingleFork as _,
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier, VerifierOption},
@@ -3172,8 +3172,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > `aggregate_and_proof.selection_proof` selects the validator as an aggregator for the
         // > slot
+        let is_aggregator = match (selection_proof, target_state.as_ref()) {
+            (Some(selection_proof), _) => {
+                predicates::is_aggregator(&target_state, slot, index, selection_proof)?
+            }
+            (None, BeaconState::Pq(state)) => {
+                pq::is_aggregator(state, slot, index, aggregator_index)?
+            }
+            (None, _) => false,
+        };
+
         ensure!(
-            predicates::is_aggregator(&target_state, slot, index, selection_proof)?,
+            is_aggregator,
             Error::ValidatorNotAggregator {
                 aggregate_and_proof,
             },
@@ -3195,9 +3205,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let public_key = target_state.validators().pubkey(aggregator_index)?;
-
-        if !signature_validated && origin.verify_signatures() {
+        if let Some(pq_aggregate_and_proof) = aggregate_and_proof.pq() {
+            if !signature_validated
+                && origin.verify_signatures()
+                && let Err(error) = pq::verify_aggregate_and_proof(
+                    &self.chain_config,
+                    &target_state,
+                    pq_aggregate_and_proof,
+                    pq_prover::aggregate_backend(),
+                )
+            {
+                bail!(error.context(Error::InvalidAggregateAndProofSignature {
+                    aggregate_and_proof,
+                }));
+            }
+        } else if !signature_validated && origin.verify_signatures() {
+            let selection_proof = selection_proof.unwrap_or_default();
+            let public_key = target_state.validators().pubkey(aggregator_index)?;
             let chain_config = &self.chain_config;
             let pubkey = self.pubkey_cache.get_or_insert(*public_key)?;
 
@@ -3321,8 +3345,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // so the check can be done early before the expensive target state resolution.
             // For Phase0 the index requires committee resolution; the check is deferred and
             // done after `attesting_indices` is resolved below.
-            if let Attestation::Single(single) = attestation.item.as_ref()
-                && self.is_gossip_attester_known(single.attester_index, target.epoch)
+            let attester_index = match attestation.item.as_ref() {
+                Attestation::Single(single) => Some(single.attester_index),
+                Attestation::PqSingle(single) => Some(single.attester_index),
+                _ => None,
+            };
+
+            if let Some(attester_index) = attester_index
+                && self.is_gossip_attester_known(attester_index, target.epoch)
             {
                 return Ok(AttestationAction::Ignore(attestation));
             }
@@ -3511,6 +3541,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 ensure!(
                     index == 0,
                     Error::AttestationDataIndexNotZero {
+                        attestation: attestation.clone_arc()
+                    }
+                );
+            }
+
+            if let Attestation::Pq(pq_attestation) = attestation.as_ref() {
+                ensure!(
+                    pq::get_committee_indices(pq_attestation).count() == 1,
+                    Error::AttestationFromMultipleCommittees {
                         attestation: attestation.clone_arc()
                     }
                 );
@@ -3714,6 +3753,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 Ok(indexed_attestation.attesting_indices)
             }
+            // PQ block attestations are covered by the block's proof and gossip aggregates by
+            // theirs, so there is nothing to verify here.
+            Attestation::Pq(attestation) => {
+                Ok(pq::get_attesting_indices(target_state, attestation)?.try_into()?)
+            }
+            Attestation::PqSingle(attestation) => {
+                let committee = accessors::beacon_committee(
+                    target_state,
+                    attestation.data.slot,
+                    attestation.committee_index,
+                )?;
+
+                ensure!(
+                    committee.into_iter().contains(&attestation.attester_index),
+                    AttestationConversionError::AttesterNotInCommittee {
+                        attester_index: attestation.attester_index,
+                        committee_index: attestation.committee_index,
+                        attestation_data: attestation.data,
+                        committee: committee.into_iter().collect(),
+                    },
+                );
+
+                if validate_indexed {
+                    pq::verify_single_attestation(&self.chain_config, target_state, attestation)?;
+                }
+
+                Ok([attestation.attester_index].try_into()?)
+            }
             Attestation::Single(attestation) => {
                 let committee = accessors::beacon_committee(
                     target_state,
@@ -3793,6 +3860,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         NullVerifier,
                     )
                 }
+            }
+            AttesterSlashing::Pq(attester_slashing) => {
+                transition_functions::pq::validate_attester_slashing(
+                    &self.chain_config,
+                    self.justified_state(),
+                    attester_slashing,
+                    origin.verify_signatures(),
+                )
             }
             AttesterSlashing::Gloas(attester_slashing) => {
                 if origin.verify_signatures() {

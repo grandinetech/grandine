@@ -7,7 +7,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, select};
-use helper_functions::{electra, gloas, misc, phase0};
+use helper_functions::{electra, gloas, misc, phase0, pq};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
@@ -173,6 +173,14 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                     for validator_index in indexed_attestation.attesting_indices {
                         self.set(epoch, validator_index)?;
                     }
+                }
+                Attestation::Pq(attestation) => {
+                    for validator_index in pq::get_attesting_indices(state, attestation)? {
+                        self.set(epoch, validator_index)?;
+                    }
+                }
+                Attestation::PqSingle(attestation) => {
+                    self.set(epoch, attestation.attester_index)?;
                 }
             }
         }

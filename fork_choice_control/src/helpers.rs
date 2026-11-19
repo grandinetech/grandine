@@ -702,17 +702,25 @@ impl<P: Preset> Context<P> {
         block: &Arc<SignedBeaconBlock<P>>,
         bls_setting: BlsSetting,
     ) {
-        let result = self.on_test_block(block, bls_setting);
-
-        assert!(matches!(
-            result,
-            Some(
-                P2pMessage::Ignore(_)
-                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
-                    | P2pMessage::Reject(_, _)
-                    | P2pMessage::BlockNeeded(_, _)
-            ) | None,
-        ));
+        match self.on_test_block(block, bls_setting) {
+            Some(P2pMessage::PayloadEnvelopeNeeded(actual_root, _)) => {
+                assert_eq!(actual_root, block.message().parent_root());
+            }
+            result => {
+                assert!(matches!(
+                    result,
+                    Some(
+                        P2pMessage::Ignore(_)
+                            | P2pMessage::IgnoreWithReason(
+                                _,
+                                MutatorIgnoreReason::BlockIgnored { .. }
+                            )
+                            | P2pMessage::Reject(_, _)
+                            | P2pMessage::BlockNeeded(_, _)
+                    ) | None,
+                ));
+            }
+        }
 
         self.controller().wait_for_tasks();
     }

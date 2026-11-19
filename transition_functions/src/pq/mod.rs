@@ -23,7 +23,7 @@ use types::{
 };
 
 pub use block_processing::{
-    apply_parent_execution_payload, process_parent_execution_payload,
+    apply_parent_execution_payload, process_parent_execution_payload, validate_attester_slashing,
     verify_execution_payload_bid_signature, verify_execution_requests_limits,
 };
 pub use epoch_processing::initialize_aggregation_committee_window;

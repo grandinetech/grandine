@@ -127,7 +127,12 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
                 &attestation.data,
                 &attestation.aggregation_bits,
             ),
-            Attestation::Single(_) => {
+            Attestation::Pq(attestation) => self.electra_supersets.is_known_subset(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits.clone().into(),
+            ),
+            Attestation::Single(_) | Attestation::PqSingle(_) => {
                 unreachable!(
                     "single attestations should not be validated with methods meant for aggregate and proofs only"
                 )
@@ -154,7 +159,12 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
                 &attestation.data,
                 &attestation.aggregation_bits,
             ),
-            Attestation::Single(_) => {
+            Attestation::Pq(attestation) => self.electra_supersets.observe(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits.clone().into(),
+            ),
+            Attestation::Single(_) | Attestation::PqSingle(_) => {
                 unreachable!(
                     "single attestations should not be validated with methods meant for aggregate and proofs only"
                 )

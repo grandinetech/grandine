@@ -28,7 +28,7 @@ use futures::{
     lock::Mutex,
     stream::{FuturesOrdered, FuturesUnordered, StreamExt as _},
 };
-use helper_functions::{accessors, misc, predicates};
+use helper_functions::{accessors, misc, pq, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
@@ -379,6 +379,23 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                         predicates::is_slashable_validator(attester, current_epoch)
                     })
                 }
+                AttesterSlashing::Pq(attester_slashing) => pq::slashable_indices(attester_slashing)
+                    .any(|attester_index| {
+                        let attester = match finalized_state
+                            .validators()
+                            .partial_validator(attester_index)
+                        {
+                            Ok(attester) => attester,
+                            Err(error) => {
+                                log_with_feature(format_args!(
+                                    "attester slashing is too recent to discard: {error}"
+                                ));
+                                return true;
+                            }
+                        };
+
+                        predicates::is_slashable_validator(attester, current_epoch)
+                    }),
             });
 
         self.producer_context
@@ -453,6 +470,9 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 AttesterSlashing::Gloas(attester_slashing) => {
                     accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
                 }
+                AttesterSlashing::Pq(attester_slashing) => {
+                    pq::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
             })
             .collect::<HashSet<_>>();
 
@@ -468,6 +488,9 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             AttesterSlashing::Gloas(ref attester_slashing) => {
                 accessors::slashable_indices(attester_slashing)
                     .all(|index| seen_indices.contains(&index))
+            }
+            AttesterSlashing::Pq(ref attester_slashing) => {
+                pq::slashable_indices(attester_slashing).all(|index| seen_indices.contains(&index))
             }
         };
 
@@ -505,6 +528,14 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 &state,
                 attester_slashing,
             ),
+            AttesterSlashing::Pq(ref attester_slashing) => {
+                transition_functions::pq::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &state,
+                    attester_slashing,
+                    true,
+                )
+            }
         };
 
         let outcome = match result {
@@ -1755,6 +1786,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     &self.beacon_state,
                     attester_slashing,
                 ),
+                AttesterSlashing::Pq(attester_slashing) => {
+                    transition_functions::pq::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                        true,
+                    )
+                }
             }
             .is_ok()
         });
@@ -1811,6 +1850,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     &self.beacon_state,
                     attester_slashing,
                 ),
+                AttesterSlashing::Pq(attester_slashing) => {
+                    transition_functions::pq::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                        true,
+                    )
+                }
             }
             .is_ok()
         });
@@ -1865,6 +1912,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     &self.beacon_state,
                     attester_slashing,
                 ),
+                AttesterSlashing::Pq(attester_slashing) => {
+                    transition_functions::pq::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.beacon_state,
+                        attester_slashing,
+                        true,
+                    )
+                }
             }
             .is_ok()
         });

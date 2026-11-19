@@ -1899,7 +1899,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                         selection_proof,
                                     })
                                 }
-                                Attestation::Single(_) => return None,
+                                // TODO(feature/pq): aggregate with proofs from the signature pool.
+                                Attestation::Single(_)
+                                | Attestation::Pq(_)
+                                | Attestation::PqSingle(_) => return None,
                             };
 
                             let triple = SigningTriple {
@@ -1939,7 +1942,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let aggregates_and_proofs = signatures
             .zip(proofs)
-            .map(|(signature, message)| {
+            .filter_map(|(signature, message)| {
                 let aggregate_and_proof = match message {
                     AggregateAndProof::Phase0(message) => {
                         SignedAggregateAndProof::from(Phase0SignedAggregateAndProof {
@@ -1959,11 +1962,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             signature: signature.into(),
                         })
                     }
+                    // PQ aggregates are not constructed above.
+                    AggregateAndProof::Pq(_) => return None,
                 };
 
                 debug_with_peers!("constructed aggregate and proof: {aggregate_and_proof:?}");
 
-                aggregate_and_proof
+                Some(aggregate_and_proof)
             })
             .collect_vec();
 
@@ -4310,7 +4315,8 @@ fn aggregated_by<P: Preset>(
         Attestation::Phase0(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
         Attestation::Electra(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
         Attestation::Gloas(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
-        Attestation::Single(_) => None,
+        Attestation::Pq(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
+        Attestation::Single(_) | Attestation::PqSingle(_) => None,
     }
     .map(|bit| *bit)
 }

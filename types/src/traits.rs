@@ -1692,11 +1692,11 @@ impl<P: Preset> BeaconBlockBody<P> for PqBeaconBlockBody<P> {
     fn combined_attester_slashings(
         &self,
     ) -> Box<dyn Iterator<Item = CombinedAttesterSlashing<P>> + '_> {
-        Box::new(core::iter::empty())
+        Box::new(self.attester_slashings.iter().cloned().map(Into::into))
     }
 
     fn combined_attestations(&self) -> Box<dyn Iterator<Item = CombinedAtteststation<P>> + '_> {
-        Box::new(core::iter::empty())
+        Box::new(self.attestations.iter().cloned().map(Into::into))
     }
 }
 
