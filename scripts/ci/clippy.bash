@@ -58,6 +58,7 @@ options=(
     --package operation_pools
     --package p2p
     --package panics
+    --package pq_prover
     --package predefined_chains
     --package prometheus_metrics
     --package pubkey_cache

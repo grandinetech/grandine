@@ -6777,6 +6777,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pq_prover"
+version = "0.0.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "xmss",
+]
+
+[[package]]
 name = "predefined_chains"
 version = "0.0.0"
 dependencies = [
