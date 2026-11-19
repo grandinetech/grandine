@@ -488,6 +488,35 @@ where
     Ok(shuffle_indices::<P>(&ordered, seed))
 }
 
+pub fn compute_beacon_proposer_indices<P: Preset>(
+    config: &Config,
+    active: impl Iterator<Item = bool>,
+    effective_balances: &[Gwei],
+    seed_mix: H256,
+    epoch: Epoch,
+) -> Result<Vec<ValidatorIndex>> {
+    let indices = pack_indices(
+        (0..)
+            .zip(active)
+            .filter(|(_, active)| *active)
+            .map(|(index, _)| index),
+        effective_balances.len(),
+    );
+    let seed = compute_seed_from_mix(seed_mix, epoch, DOMAIN_BEACON_PROPOSER);
+
+    misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            misc::compute_proposer_index_from_balances::<P>(
+                config,
+                effective_balances,
+                &indices,
+                hashing::hash_256_64(seed, slot),
+                epoch,
+            )
+        })
+        .collect()
+}
+
 pub fn compute_beacon_committee<P: Preset>(
     indices: &PackedIndices,
     committees_per_slot: u64,

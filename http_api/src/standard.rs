@@ -48,7 +48,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{
     accessors,
     error::Error as AccessorError,
-    misc,
+    misc, predicates,
     slot_report::{Delta, RealSlotReport, SlotReport as _},
 };
 use http_api_utils::{
@@ -4036,38 +4036,115 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let head = controller.head();
 
-    let (state, status) = if start_slot >= head.value.slot() {
+    let dependent_epoch = if post_fulu_check && proposer_lookahead_applies(&chain_config, epoch) {
+        // Post-Fulu get dependent root for the previous epoch because proposer suffling is done at
+        // the last slot of epoch N - 2 with proposer lookahead. We should note that `dependent_root`
+        // itself will return block root of the last slot in epoch `epoch` - 1.
+        misc::previous_epoch(epoch)
+    } else {
+        // Pre-Fulu get dependent root for the epoch because proposer suffling is done at
+        // the last slot of epoch N - 1
+        epoch
+    };
+
+    if start_slot >= head.value.slot() {
         let block_root = controller.head().value.block_root;
         // `state_id::state_at_slot` allows only a limited range of empty slots to be processed
         let state = controller
             .preprocessed_state_for_block_production(block_root, start_slot)
             .await?;
 
-        (state, head.status)
-    } else {
+        let dependent_root = controller.dependent_root(&state, dependent_epoch)?;
+        let response =
+            proposer_duties_at_epoch(&chain_config, &state, epoch).map_err(Error::Internal)?;
+
+        return Ok(EthResponse::json(response)
+            .dependent_root(dependent_root)
+            .execution_optimistic(head.status.is_optimistic()));
+    }
+
+    let (proposers, status) = if chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
         let WithStatus {
-            value: state,
+            value: proposer_lookahead,
             status,
             // `duties` responses are not supposed to contain a `finalized` field.
             finalized: _,
-        } = state_id::state_at_slot(start_slot, &controller)?;
+        } = tokio::task::block_in_place(|| controller.proposer_lookahead_at_slot(start_slot))?
+            .ok_or(Error::StateNotFound)?;
 
-        (state, status)
-    };
+        let proposers = (&proposer_lookahead)
+            .into_iter()
+            .take(P::SlotsPerEpoch::USIZE)
+            .copied()
+            .collect_vec();
 
-    let dependent_root = if post_fulu_check && proposer_lookahead_applies(&chain_config, epoch) {
-        // Post-Fulu get dependent root for the previous epoch because proposer suffling is done at
-        // the last slot of epoch N - 2 with proposer lookahead. We should note that `dependent_root`
-        // itself will return block root of the last slot in epoch `epoch` - 1.
-        controller.dependent_root(&state, misc::previous_epoch(epoch))?
+        (proposers, status)
+    } else if let Some(((_, seed_mix), records)) = tokio::task::block_in_place(|| {
+        Ok::<_, AnyhowError>(
+            controller
+                .active_validators_and_seed_mix_at_epoch(epoch)?
+                .zip(controller.validator_records_at_slot(start_slot)?),
+        )
+    })? {
+        let WithStatus { status, .. } = controller
+            .status_at_slot(start_slot)?
+            .ok_or(Error::StateNotFound)?;
+
+        let proposers = accessors::compute_beacon_proposer_indices::<P>(
+            &chain_config,
+            records.active.iter().by_vals(),
+            &records.effective_balances,
+            seed_mix,
+            epoch,
+        )?;
+
+        (proposers, status)
     } else {
-        // Pre-Fulu get dependent root for the epoch because proposer suffling is done at
-        // the last slot of epoch N - 1
-        controller.dependent_root(&state, epoch)?
+        let WithStatus {
+            value: ((partial_validators, effective_balances), randao_mixes),
+            status,
+            finalized: _,
+        } = tokio::task::block_in_place(|| {
+            controller.validators_and_randao_mixes_at_slot(start_slot)
+        })?
+        .ok_or(Error::StateNotFound)?;
+
+        let proposers = accessors::compute_beacon_proposer_indices::<P>(
+            &chain_config,
+            partial_validators
+                .iter()
+                .map(|validator| predicates::is_active_validator(validator, epoch)),
+            &effective_balances.iter().copied().collect_vec(),
+            accessors::compute_seed_mix::<P>(&randao_mixes, epoch)?,
+            epoch,
+        )?;
+
+        (proposers, status)
     };
 
-    let response =
-        proposer_duties_at_epoch(&chain_config, &state, epoch).map_err(Error::Internal)?;
+    let dependent_slot = misc::compute_start_slot_at_epoch::<P>(dependent_epoch).saturating_sub(1);
+
+    let dependent_root = match controller.block_root_before_or_at_slot(dependent_slot)? {
+        Some(dependent_root) => dependent_root,
+        None => {
+            let state = state_id::state_at_slot(start_slot, &controller)?.value;
+
+            controller.dependent_root(&state, dependent_epoch)?
+        }
+    };
+
+    let head_state = controller.head_state().value;
+
+    let response = misc::slots_in_epoch::<P>(epoch)?
+        .zip(proposers)
+        .map(|(slot, validator_index)| {
+            Ok(ValidatorProposerDutyResponse {
+                pubkey: *accessors::public_key(&*head_state, validator_index)?,
+                validator_index,
+                slot,
+            })
+        })
+        .collect::<Result<_>>()?;
 
     Ok(EthResponse::json(response)
         .dependent_root(dependent_root)

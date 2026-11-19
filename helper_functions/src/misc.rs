@@ -237,7 +237,7 @@ pub(crate) fn compute_shuffled_index<P: Preset>(
 }
 
 fn compute_proposer_index_pre_electra<P: Preset>(
-    state: &impl BeaconState<P>,
+    effective_balance: impl Fn(ValidatorIndex) -> Gwei,
     indices: &PackedIndices,
     seed: H256,
 ) -> Result<ValidatorIndex> {
@@ -266,12 +266,7 @@ fn compute_proposer_index_pre_electra<P: Preset>(
             .get(shuffled_index_of_index)
             .expect("compute_shuffled_index returns a value less than indices.len()");
 
-        let effective_balance = state
-            .validators()
-            .effective_balance(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators");
-
-        if effective_balance.try_mul(max_random_byte)?
+        if effective_balance(candidate_index).try_mul(max_random_byte)?
             >= P::MAX_EFFECTIVE_BALANCE.try_mul(random_byte)?
         {
             return Ok(candidate_index);
@@ -282,7 +277,7 @@ fn compute_proposer_index_pre_electra<P: Preset>(
 }
 
 fn compute_proposer_index_post_electra<P: Preset>(
-    state: &impl BeaconState<P>,
+    effective_balance: impl Fn(ValidatorIndex) -> Gwei,
     indices: &PackedIndices,
     seed: H256,
 ) -> Result<ValidatorIndex> {
@@ -312,12 +307,7 @@ fn compute_proposer_index_post_electra<P: Preset>(
             .get(shuffled_index_of_index)
             .expect("compute_shuffled_index returns a value less than indices.len()");
 
-        let effective_balance = state
-            .validators()
-            .effective_balance(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators");
-
-        if effective_balance.try_mul(max_random_value)?
+        if effective_balance(candidate_index).try_mul(max_random_value)?
             >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
         {
             return Ok(candidate_index);
@@ -334,10 +324,40 @@ pub(crate) fn compute_proposer_index<P: Preset>(
     seed: H256,
     epoch: Epoch,
 ) -> Result<ValidatorIndex> {
+    let effective_balance = |candidate_index| {
+        state
+            .validators()
+            .effective_balance(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators")
+    };
+
     if state.is_post_electra() || epoch >= config.electra_fork_epoch {
-        compute_proposer_index_post_electra(state, indices, seed)
+        compute_proposer_index_post_electra::<P>(effective_balance, indices, seed)
     } else {
-        compute_proposer_index_pre_electra(state, indices, seed)
+        compute_proposer_index_pre_electra::<P>(effective_balance, indices, seed)
+    }
+}
+
+pub(crate) fn compute_proposer_index_from_balances<P: Preset>(
+    config: &Config,
+    effective_balances: &[Gwei],
+    indices: &PackedIndices,
+    seed: H256,
+    epoch: Epoch,
+) -> Result<ValidatorIndex> {
+    let effective_balance = |candidate_index: ValidatorIndex| {
+        candidate_index
+            .try_conv::<usize>()
+            .ok()
+            .and_then(|candidate_index| effective_balances.get(candidate_index))
+            .copied()
+            .expect("candidate_index was produced by enumerating active validators")
+    };
+
+    if epoch >= config.electra_fork_epoch {
+        compute_proposer_index_post_electra::<P>(effective_balance, indices, seed)
+    } else {
+        compute_proposer_index_pre_electra::<P>(effective_balance, indices, seed)
     }
 }
 
