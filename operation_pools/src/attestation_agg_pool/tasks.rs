@@ -21,7 +21,10 @@ use types::{
         containers::Checkpoint,
         primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     },
-    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
+    pq::{
+        containers::{Attestation as PqAttestation, SingleAttestation as PqSingleAttestation},
+        primitives::AttestationProof,
+    },
     preset::Preset,
     traits::BeaconState as _,
 };
@@ -30,7 +33,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     attestation_agg_pool::{
         attestation_packer::{AttestationPacker, PackOutcome},
-        conversion::{convert_attestation_for_pool, convert_pq_aggregate_for_pool},
+        conversion::{convert_attestation_for_pool, convert_pq_aggregate_for_pool, current_state},
         pool::Pool,
         types::{Aggregate, AttestationKey, PoolAttestation},
     },
@@ -340,6 +343,10 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             attester_index = Some(single_attestation.attester_index);
         }
 
+        if let CombinedAttestation::PqSingle(single_attestation) = attestation.as_ref() {
+            return insert_pq_signature(&controller, &pool, single_attestation).await;
+        }
+
         let attestation = match convert_attestation_for_pool(&controller, attestation) {
             Ok(attestation) => attestation,
             Err(error) => {
@@ -539,6 +546,43 @@ async fn pack_attestations_greedily<P: Preset, W: Wait>(
 ) -> Result<PackOutcome<PoolAttestation<P>>> {
     let candidates = candidates_for_packing(controller, pool, state).await?;
     Ok(attestation_packer.pack_proposable_attestations_greedily([], &candidates))
+}
+
+async fn insert_pq_signature<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    pool: &Pool<P>,
+    attestation: &PqSingleAttestation,
+) -> Result<()> {
+    let PqSingleAttestation {
+        committee_index,
+        attester_index,
+        data,
+        ..
+    } = *attestation;
+
+    if !pool.prove_in_committee(committee_index, data.slot).await {
+        return Ok(());
+    }
+
+    let state = current_state(controller, data.target);
+    let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
+
+    let Some(position) = committee
+        .into_iter()
+        .position(|validator_index| validator_index == attester_index)
+    else {
+        warn_with_peers!(
+            "PQ attester {attester_index} is not in committee {committee_index} \
+             at slot {}",
+            data.slot,
+        );
+        return Ok(());
+    };
+
+    pool.insert_pq_signature(controller.slot(), attestation, position, committee.len())
+        .await;
+
+    Ok(())
 }
 
 async fn candidates_for_packing<P: Preset, W: Wait>(

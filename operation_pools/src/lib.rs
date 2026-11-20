@@ -28,6 +28,7 @@ mod attestation_agg_pool {
     mod conversion;
     mod manager;
     mod pool;
+    mod pq_signature_pool;
     mod tasks;
     mod types;
 }

@@ -6277,6 +6277,7 @@ dependencies = [
  "helper_functions",
  "itertools 0.14.0",
  "logging",
+ "pq_prover",
  "prometheus_metrics",
  "pubkey_cache",
  "serde",
@@ -6293,6 +6294,7 @@ dependencies = [
  "typenum",
  "types",
  "validator_statistics",
+ "xmss",
 ]
 
 [[package]]

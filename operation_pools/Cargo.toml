@@ -22,6 +22,7 @@ futures = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 logging = { workspace = true }
+pq_prover = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 serde = { workspace = true }
@@ -38,6 +39,7 @@ tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 validator_statistics = { workspace = true }
+xmss = { workspace = true }
 
 [dev-dependencies]
 eth2_cache_utils = { workspace = true }

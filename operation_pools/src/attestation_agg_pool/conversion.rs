@@ -314,7 +314,7 @@ pub fn try_convert_to_single_attestation<P: Preset, W: Wait>(
     })
 }
 
-fn current_state<P: Preset, W: Wait>(
+pub fn current_state<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     target: Checkpoint,
 ) -> Arc<BeaconState<P>> {

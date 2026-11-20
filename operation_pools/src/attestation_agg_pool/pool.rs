@@ -15,13 +15,17 @@ use tokio::sync::{Mutex, RwLock};
 use types::{
     config::Config as ChainConfig,
     phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+    pq::containers::SingleAttestation as PqSingleAttestation,
     preset::Preset,
     traits::BeaconState,
 };
 
-use crate::attestation_agg_pool::types::{
-    Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet,
-    PackableAttestation as _, PoolAttestation, PqAggregateMap, PqPoolAttestation,
+use crate::attestation_agg_pool::{
+    pq_signature_pool::{CommitteeSignatures, PqSignaturePool},
+    types::{
+        Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet,
+        PackableAttestation as _, PoolAttestation, PqAggregateMap, PqPoolAttestation,
+    },
 };
 
 // Attestations packed for proposals in one slot, keyed by the parent of the block.
@@ -37,6 +41,7 @@ pub struct Pool<P: Preset> {
     // though that may change if the packers are redesigned again.
     singular_attestations: RwLock<BTreeMap<Epoch, AttestationMap<P>>>,
     pq_aggregates: RwLock<BTreeMap<Epoch, PqAggregateMap<P>>>,
+    pq_signatures: Mutex<PqSignaturePool>,
     best_proposable_attestations: Mutex<PreparedAttestations<P>>,
     committees_with_aggregators: RwLock<BTreeMap<Slot, BTreeSet<CommitteeIndex>>>,
     proposer_indices: RwLock<BTreeMap<Slot, ValidatorIndex>>,
@@ -51,6 +56,7 @@ impl<P: Preset> Pool<P> {
             data_root_to_key_map: RwLock::default(),
             singular_attestations: RwLock::default(),
             pq_aggregates: RwLock::default(),
+            pq_signatures: Mutex::default(),
             best_proposable_attestations: Mutex::default(),
             committees_with_aggregators: RwLock::default(),
             proposer_indices: RwLock::default(),
@@ -107,6 +113,43 @@ impl<P: Preset> Pool<P> {
 
         aggregates.retain(|pooled| !is_covered(&aggregate, pooled));
         aggregates.push(aggregate);
+    }
+
+    /// Whether to prove the signatures of PQ single attestations in a committee.
+    ///
+    /// Unlike [`Self::aggregate_in_committee`], an upcoming proposal is no reason to: proving every
+    /// committee of a slot takes longer than the slot.
+    pub async fn prove_in_committee(
+        &self,
+        committee_index: CommitteeIndex,
+        attestation_slot: Slot,
+    ) -> bool {
+        Feature::AggregateAllAttestations.is_enabled()
+            || self
+                .committees_with_aggregators
+                .read()
+                .await
+                .get(&attestation_slot)
+                .is_some_and(|indices| indices.contains(&committee_index))
+    }
+
+    pub async fn insert_pq_signature(
+        &self,
+        current_slot: Slot,
+        attestation: &PqSingleAttestation,
+        position: usize,
+        committee_length: usize,
+    ) {
+        self.pq_signatures.lock().await.insert::<P>(
+            current_slot,
+            attestation,
+            position,
+            committee_length,
+        );
+    }
+
+    pub async fn seal_pq_signatures(&self, slot: Slot) -> Vec<CommitteeSignatures> {
+        self.pq_signatures.lock().await.seal(slot)
     }
 
     pub async fn pq_aggregates_by_epoch(&self, epoch: Epoch) -> Vec<Arc<PqPoolAttestation<P>>> {

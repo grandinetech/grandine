@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Error, Result};
@@ -10,13 +11,16 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
+use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
+use tokio::sync::Semaphore;
 use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
     gloas::containers::Attestation as GloasAttestation,
+    nonstandard::Phase,
     phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
@@ -25,6 +29,7 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
+        conversion::current_state,
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask,
@@ -42,6 +47,8 @@ pub struct Manager<P: Preset, W: Wait> {
     dedicated_executor: Arc<DedicatedExecutor>,
     metrics: Option<Arc<Metrics>>,
     pool: Arc<Pool<P>>,
+    // One proof at a time. A slot whose proving would wait for the previous one is skipped.
+    pq_proving: Arc<Semaphore>,
     validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
@@ -60,6 +67,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             dedicated_executor,
             metrics,
             pool: Arc::new(Pool::new(chain_config)),
+            pq_proving: Arc::new(Semaphore::new(1)),
             validator_statistics,
         })
     }
@@ -78,6 +86,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             }
             TickKind::Attest => {
                 self.pool.clear_best_proposable_attestations().await;
+
+                if self.config().phase_at_slot::<P>(slot) == Phase::Pq {
+                    self.prove_pq_aggregates(slot);
+                }
             }
             TickKind::AggregateFourth => {
                 let next_slot = slot.saturating_add(1);
@@ -252,6 +264,85 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         epoch: Epoch,
     ) -> Vec<Arc<PoolAttestation<P>>> {
         self.pool.singular_attestations_by_epoch(epoch).await
+    }
+
+    /// Proves aggregates of the PQ signatures of `slot` collected until the aggregation cutoff of
+    /// the first aggregator, committee by committee, largest first, until the aggregate is due.
+    fn prove_pq_aggregates(&self, slot: Slot) {
+        let controller = self.controller.clone_arc();
+        let pool = self.pool.clone_arc();
+        let pq_proving = self.pq_proving.clone_arc();
+
+        tokio::spawn(async move {
+            let config = controller.chain_config().clone_arc();
+            let genesis_time = controller.genesis_time();
+
+            let until = |due_bps| {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+
+                clock::duration_until_due_bps(&config, genesis_time, slot, due_bps, now)
+            };
+
+            tokio::time::sleep(until(config.aggregation_cutoff_bps)).await;
+
+            let now = Instant::now();
+            let deadline = now
+                .checked_add(until(config.aggregate_due_bps_pq))
+                .unwrap_or(now);
+            let mut inputs = pool.seal_pq_signatures(slot).await;
+
+            if inputs.is_empty() {
+                return;
+            }
+
+            let Ok(_permit) = pq_proving.try_acquire_owned() else {
+                warn_with_peers!(
+                    "skipping PQ aggregates of slot {slot}: still proving earlier ones"
+                );
+                return;
+            };
+
+            inputs.sort_by_key(|input| core::cmp::Reverse(input.signature_count()));
+
+            for input in inputs {
+                if Instant::now() >= deadline {
+                    warn_with_peers!("ran out of time proving PQ aggregates of slot {slot}");
+                    break;
+                }
+
+                let controller = controller.clone_arc();
+
+                let result = tokio::task::spawn_blocking(move || {
+                    let state = current_state(&controller, input.target());
+
+                    input.prove(
+                        controller.chain_config(),
+                        state.as_ref(),
+                        pq_prover::aggregate_backend(),
+                    )
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(aggregate)) if Instant::now() < deadline => {
+                        pool.insert_pq_aggregate(Arc::new(aggregate)).await;
+                    }
+                    Ok(Ok(_)) => {
+                        warn_with_peers!("PQ aggregate of slot {slot} was proven too late");
+                        break;
+                    }
+                    Ok(Err(error)) => {
+                        debug_with_peers!("failed to prove PQ aggregate of slot {slot}: {error:?}");
+                    }
+                    Err(error) => {
+                        warn_with_peers!("PQ proving task of slot {slot} failed: {error:?}");
+                        break;
+                    }
+                }
+            }
+        });
     }
 
     async fn spawn_task<T: PoolTask>(&self, task: T) -> Result<T::Output> {
