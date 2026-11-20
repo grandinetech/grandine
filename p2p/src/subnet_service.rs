@@ -158,9 +158,11 @@ impl<P: Preset, W: Wait> SubnetService<P, W> {
         self.attestation_agg_pool
             .set_committees_with_aggregators(committees_with_aggregators);
 
-        let actions = self
-            .attestation_subnets
-            .update(current_slot, self.beacon_committee_subscriptions.all())?;
+        let actions = self.attestation_subnets.update(
+            self.attestation_agg_pool.config(),
+            current_slot,
+            self.beacon_committee_subscriptions.all(),
+        )?;
 
         if !actions.is_empty() {
             SubnetServiceToP2p::UpdateAttestationSubnets(actions).send(&self.p2p_tx);

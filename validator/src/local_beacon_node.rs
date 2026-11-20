@@ -393,8 +393,12 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
 
             let committee_index = misc::committee_index(attestation);
             let attestation = Arc::new(attestation.clone());
-            let subnet_id =
-                subnet_id::<P>(&self.beacon_state, attestation.data().slot, committee_index)?;
+            let subnet_id = subnet_id::<P>(
+                self.slot_head.config.as_ref(),
+                &self.beacon_state,
+                attestation.data().slot,
+                committee_index,
+            )?;
 
             self.context.chain.controller.on_singular_attestation(
                 self.wait_group.clone(),
@@ -1159,6 +1163,7 @@ fn sync_duties_at_epoch<P: Preset>(
 }
 
 fn subnet_id<P: Preset>(
+    config: &Config,
     beacon_state: &BeaconState<P>,
     slot: Slot,
     committee_index: CommitteeIndex,
@@ -1166,7 +1171,7 @@ fn subnet_id<P: Preset>(
     let committees_per_slot =
         accessors::get_committee_count_per_slot(beacon_state, RelativeEpoch::Current)?;
 
-    misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
+    misc::compute_subnet_for_attestation::<P>(config, committees_per_slot, slot, committee_index)
 }
 
 pub fn attester_duties_at_slot<P: Preset>(

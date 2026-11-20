@@ -1,7 +1,7 @@
 use core::{cmp::Ordering, num::NonZeroU64, time::Duration};
 use std::{borrow::Cow, collections::BTreeMap};
 
-use arithmetic::UsizeExt as _;
+use arithmetic::{NonZeroExt as _, UsizeExt as _};
 use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
@@ -1048,7 +1048,23 @@ impl Config {
 
     #[must_use]
     pub fn attestation_subnet_prefix_bits(&self) -> u8 {
-        AttestationSubnetCount::USIZE
+        self.attestation_subnet_prefix_bits_at(Phase::Phase0)
+    }
+
+    #[must_use]
+    pub fn attestation_subnet_count_at(&self, phase: Phase) -> NonZeroU64 {
+        if phase < Phase::Pq {
+            AttestationSubnetCount::non_zero()
+        } else {
+            self.attestation_subnet_count_pq
+        }
+    }
+
+    /// [`compute_attestation_subnet_prefix_bits`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/p2p-interface.md#modified-compute_attestation_subnet_prefix_bits)
+    #[must_use]
+    pub fn attestation_subnet_prefix_bits_at(&self, phase: Phase) -> u8 {
+        usize::try_from(self.attestation_subnet_count_at(phase).get())
+            .unwrap_or(usize::MAX)
             .ilog2_ceil()
             .saturating_add(self.attestation_subnet_extra_bits)
     }

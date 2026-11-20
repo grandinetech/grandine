@@ -6518,8 +6518,12 @@ fn build_attestation_item<P: Preset, W: Wait>(
 
     let committee_index = misc::committee_index(&attestation);
 
-    let subnet_id =
-        misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)?;
+    let subnet_id = misc::compute_subnet_for_attestation::<P>(
+        controller.chain_config(),
+        committees_per_slot,
+        slot,
+        committee_index,
+    )?;
 
     let (sender, receiver) = futures::channel::oneshot::channel();
 

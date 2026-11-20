@@ -65,7 +65,7 @@ impl<P: Preset> AttestationSubnets<P> {
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
         let old = *self;
 
-        if self.subscribe_to_all_if_needed(current_epoch) {
+        if self.subscribe_to_all_if_needed(config, current_epoch) {
             return Ok(self.actions(old, slot));
         }
 
@@ -104,24 +104,25 @@ impl<P: Preset> AttestationSubnets<P> {
             self.persistent_subscriptions_expiration = Some(expiration);
         }
 
-        self.update_states(slot, subscriptions)?;
+        self.update_states(config, slot, subscriptions)?;
 
         Ok(self.actions(old, slot))
     }
 
     pub fn update(
         &mut self,
+        config: &Config,
         current_slot: Slot,
         subscriptions: impl IntoIterator<Item = BeaconCommitteeSubscription>,
     ) -> Result<AttestationSubnetActions> {
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
         let old = *self;
 
-        if self.subscribe_to_all_if_needed(current_epoch) {
+        if self.subscribe_to_all_if_needed(config, current_epoch) {
             return Ok(self.actions(old, current_slot));
         }
 
-        self.update_states(current_slot, subscriptions)?;
+        self.update_states(config, current_slot, subscriptions)?;
 
         Ok(self.actions(old, current_slot))
     }
@@ -197,20 +198,28 @@ impl<P: Preset> AttestationSubnets<P> {
         }
     }
 
-    fn subscribe_to_all_if_needed(&mut self, current_epoch: Epoch) -> bool {
+    fn subscribe_to_all_if_needed(&mut self, config: &Config, current_epoch: Epoch) -> bool {
         if !Feature::SubscribeToAllAttestationSubnets.is_enabled() {
             return false;
         }
 
         let expiration = misc::compute_start_slot_at_epoch::<P>(current_epoch.saturating_add(1));
+        let subnet_count = config.attestation_subnet_count_at(config.phase_at_epoch(current_epoch));
 
-        self.states = [Persistent { expiration }; AttestationSubnetCount::USIZE];
+        for (state, subnet_id) in self.states.iter_mut().zip(0..) {
+            *state = if subnet_id < subnet_count.get() {
+                Persistent { expiration }
+            } else {
+                Irrelevant
+            };
+        }
 
         true
     }
 
     fn update_states(
         &mut self,
+        config: &Config,
         current_slot: Slot,
         subscriptions: impl IntoIterator<Item = BeaconCommitteeSubscription>,
     ) -> Result<()> {
@@ -224,6 +233,7 @@ impl<P: Preset> AttestationSubnets<P> {
             } = subscription;
 
             let subnet_id: usize = misc::compute_subnet_for_attestation::<P>(
+                config,
                 committees_at_slot,
                 slot,
                 committee_index,

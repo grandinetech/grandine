@@ -34,8 +34,7 @@ use types::{
     nonstandard::{PartialValidator, StorageMode},
     phase0::{
         consts::{
-            AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
-            GENESIS_EPOCH, GENESIS_SLOT,
+            BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX, GENESIS_EPOCH, GENESIS_SLOT,
         },
         containers::{ForkData, SignedBeaconBlockHeader, SigningData},
         primitives::{
@@ -362,7 +361,10 @@ pub(crate) fn compute_proposer_index_from_balances<P: Preset>(
 }
 
 /// [`compute_subnet_for_attestation`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/validator.md#broadcast-attestation)
+///
+/// [Modified in PQ] to use `ATTESTATION_SUBNET_COUNT_PQ`.
 pub fn compute_subnet_for_attestation<P: Preset>(
+    config: &Config,
     committees_per_slot: u64,
     slot: Slot,
     committee_index: CommitteeIndex,
@@ -375,8 +377,9 @@ pub fn compute_subnet_for_attestation<P: Preset>(
     let slots_since_epoch_start = slots_since_epoch_start::<P>(slot);
     let committees_since_epoch_start = committees_per_slot.try_mul(slots_since_epoch_start)?;
 
-    Ok((committees_since_epoch_start.try_add(committee_index)?)
-        .mod_typenum::<AttestationSubnetCount>())
+    let subnet_count = config.attestation_subnet_count_at(config.phase_at_slot::<P>(slot));
+
+    Ok(committees_since_epoch_start.try_add(committee_index)? % subnet_count)
 }
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
@@ -437,8 +440,12 @@ pub fn compute_subscribed_subnets<P: Preset>(
     config: &Config,
     epoch: Epoch,
 ) -> Result<impl Iterator<Item = SubnetId>> {
+    let phase = config.phase_at_epoch(epoch);
+    let prefix_bits = config.attestation_subnet_prefix_bits_at(phase);
+    let subnet_count = config.attestation_subnet_count_at(phase);
+
     let node_id_prefix = node_id
-        .shr(NodeId::BITS.try_sub(u16::from(config.attestation_subnet_prefix_bits()))?)
+        .shr(NodeId::BITS.try_sub(u16::from(prefix_bits))?)
         .try_into()?;
 
     let node_offset = node_id % config.epochs_per_subnet_subscription;
@@ -450,7 +457,7 @@ pub fn compute_subscribed_subnets<P: Preset>(
         .map(hashing::hash_64)?;
 
     let permutated_prefix_maximum = 1_u64
-        .checked_shl(config.attestation_subnet_prefix_bits().into())
+        .checked_shl(prefix_bits.into())
         .ok_or(Error::PermutatedPrefixMaximumOverflow)?
         .try_into()?;
 
@@ -461,7 +468,7 @@ pub fn compute_subscribed_subnets<P: Preset>(
         .checked_add(config.subnets_per_node)
         .ok_or(Error::SubnetIdOverflow)?;
 
-    Ok((permutated_prefix..cutoff).map(|index| index % AttestationSubnetCount::U64))
+    Ok((permutated_prefix..cutoff).map(move |index| index % subnet_count))
 }
 
 pub fn next_subnet_subscription_epoch<P: Preset>(
@@ -1051,10 +1058,12 @@ mod tests {
     use itertools::iproduct;
     use nonzero_ext::nonzero;
     use types::{
-        nonstandard::RelativeEpoch,
+        nonstandard::{Phase, RelativeEpoch},
         phase0::{
             beacon_state::BeaconState as Phase0BeaconState,
-            consts::{DOMAIN_BEACON_ATTESTER, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+            consts::{
+                AttestationSubnetCount, DOMAIN_BEACON_ATTESTER, FAR_FUTURE_EPOCH, GENESIS_EPOCH,
+            },
             containers::Validator,
         },
         preset::{Mainnet, Minimal},
@@ -1125,6 +1134,30 @@ mod tests {
         )?;
 
         assert!(proposer_index < 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn pq_attestation_subnets_are_below_the_pq_subnet_count() -> Result<()> {
+        let config = Config::minimal().start_and_stay_in(Phase::Pq);
+        let subnet_count = config.attestation_subnet_count_pq.get();
+
+        assert_eq!(config.attestation_subnet_prefix_bits_at(Phase::Pq), 4);
+
+        for slot in 0..<Minimal as Preset>::SlotsPerEpoch::U64 {
+            for committee_index in 0..4 {
+                let subnet =
+                    compute_subnet_for_attestation::<Minimal>(&config, 4, slot, committee_index)?;
+                assert!(subnet < subnet_count);
+            }
+        }
+
+        for node_id in [Uint256::ZERO, Uint256::MAX] {
+            for subnet in compute_subscribed_subnets::<Minimal>(node_id, &config, 0)? {
+                assert!(subnet < subnet_count);
+            }
+        }
 
         Ok(())
     }

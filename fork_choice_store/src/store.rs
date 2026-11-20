@@ -3487,16 +3487,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     }
                 };
 
-            let expected =
-                match misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, index) {
-                    Ok(subnet) => subnet,
-                    Err(source) => {
-                        return Err(AttestationValidationError::Other {
-                            attestation: Box::new(attestation),
-                            source,
-                        });
-                    }
-                };
+            let expected = match misc::compute_subnet_for_attestation::<P>(
+                &self.chain_config,
+                committees_per_slot,
+                slot,
+                index,
+            ) {
+                Ok(subnet) => subnet,
+                Err(source) => {
+                    return Err(AttestationValidationError::Other {
+                        attestation: Box::new(attestation),
+                        source,
+                    });
+                }
+            };
 
             // > The attestation is for the correct subnet
             if actual != expected {

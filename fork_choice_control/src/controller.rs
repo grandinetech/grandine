@@ -46,7 +46,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::CombinedPayloadAttestation,
     nonstandard::{ValidationOutcome, ValidationOutcomeWithReason},
     phase0::{
         containers::Checkpoint,
@@ -796,7 +796,7 @@ where
 
     pub fn on_gossip_payload_attestation(
         &self,
-        payload_attestation: Arc<PayloadAttestationMessage>,
+        payload_attestation: impl Into<CombinedPayloadAttestation<P>>,
         gossip_id: GossipId,
     ) {
         self.spawn(PayloadAttestationTask {

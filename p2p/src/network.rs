@@ -950,9 +950,16 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     subnet_id,
                     single_attestation,
                 ));
-            } // TODO(feature/pq): publish once the PQ gossip topics exist.
-            Attestation::Pq(_) | Attestation::PqSingle(_) => {
-                warn_with_peers!("cannot publish PQ attestations yet");
+            }
+            Attestation::PqSingle(single_attestation) => {
+                self.publish(PubsubMessage::Attestation(
+                    subnet_id,
+                    Arc::new(Attestation::PqSingle(single_attestation)),
+                ));
+            }
+            // PQ attestations are aggregated with a proof and published as aggregates.
+            Attestation::Pq(_) => {
+                warn_with_peers!("PQ aggregate attestation cannot be published as a single one");
             }
         }
     }
@@ -2760,6 +2767,21 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
                 trace_with_peers!(
                     "received payload attestation message as gossip: \
+                    {payload_attestation_message:?} from {source}",
+                );
+
+                let gossip_id = GossipId { source, message_id };
+
+                self.controller
+                    .on_gossip_payload_attestation(payload_attestation_message, gossip_id);
+            }
+            PubsubMessage::PqPayloadAttestationMessage(payload_attestation_message) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["payload_attestation_message"]);
+                }
+
+                trace_with_peers!(
+                    "received PQ payload attestation message as gossip: \
                     {payload_attestation_message:?} from {source}",
                 );
 

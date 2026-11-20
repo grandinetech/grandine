@@ -442,13 +442,14 @@ pub fn compute_seed_from_mix(mix: H256, epoch: Epoch, domain_type: DomainType) -
 }
 
 pub fn get_subnet_for_attestation<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     slot: Slot,
     committee_index: CommitteeIndex,
 ) -> Result<SubnetId> {
     let committees_per_slot = get_committee_count_per_slot(state, RelativeEpoch::Current)?;
 
-    misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
+    misc::compute_subnet_for_attestation::<P>(config, committees_per_slot, slot, committee_index)
 }
 
 pub fn get_committee_count_per_slot<P: Preset>(

@@ -468,6 +468,7 @@ pub fn singular_attestation<P: Preset>(
                 accessors::get_committee_count_per_slot(&state_in_epoch, RelativeEpoch::Current)?;
 
             let subnet_id = misc::compute_subnet_for_attestation::<P>(
+                config,
                 committees_per_slot,
                 slot,
                 committee_index,
