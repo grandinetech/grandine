@@ -561,9 +561,14 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
-        let results = self.database.iterator_descending_raw(
-            ..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string(),
-        )?;
+        // Nothing is older than slot 0. `saturating_sub` would make the range include it.
+        let Some(last_pruned_slot) = up_to_slot.checked_sub(1) else {
+            return Ok(());
+        };
+
+        let results = self
+            .database
+            .iterator_descending_raw(..=BlockRootBySlot(last_pruned_slot).to_string())?;
 
         let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
@@ -2163,6 +2168,51 @@ mod tests {
         storage.prune_old_state_roots(5)?;
 
         assert_eq!(storage.slot_by_state_root_count()?, 2);
+
+        Ok(())
+    }
+
+    // Pruning happens while the chain is younger than `MIN_EPOCHS_FOR_BLOCK_REQUESTS` too.
+    // The genesis block and state must survive it, or no archived state can be computed.
+    #[test]
+    fn test_prune_old_blocks_and_states_keeps_genesis_until_it_is_old() -> Result<()> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
+
+        database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), H256::repeat_byte(1))?,
+            serialize(FinalizedBlockByRoot::full(H256::repeat_byte(1)), &block)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(1)), 0_u64)?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            database,
+            nonzero!(64_u64),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        );
+
+        storage.prune_old_blocks_and_states(0)?;
+
+        assert_eq!(storage.finalized_block_count()?, 1);
+        assert_eq!(storage.block_root_by_slot_count()?, 1);
+        assert_eq!(storage.state_count()?, 1);
+
+        storage.prune_old_blocks_and_states(1)?;
+
+        assert_eq!(storage.finalized_block_count()?, 0);
+        assert_eq!(storage.block_root_by_slot_count()?, 0);
+        assert_eq!(storage.state_count()?, 0);
 
         Ok(())
     }
