@@ -129,6 +129,16 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub payload_due_bps: u64,
 
+    // PQ
+    #[serde(with = "serde_utils::string_or_native")]
+    pub unregistered_validator_withdrawability_delay: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregation_cutoff_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregate_due_bps_pq: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregator_delay_bps: u64,
+
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
     pub churn_limit_quotient: NonZeroU64,
@@ -308,6 +318,12 @@ impl Default for Config {
             contribution_due_bps_gloas: 5000,
             payload_attestation_due_bps: 7500,
             payload_due_bps: 5000,
+
+            // PQ
+            unregistered_validator_withdrawability_delay: 0x4000, // 16_384
+            aggregation_cutoff_bps: 4000,
+            aggregate_due_bps_pq: 6000,
+            aggregator_delay_bps: 500,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
@@ -975,7 +991,18 @@ impl Config {
             self.payload_attestation_due_bps,
         ];
 
-        for due_bps in [pre_gloas_due_bps.as_slice(), gloas_due_bps.as_slice()] {
+        let pq_due_bps = [
+            self.attestation_due_bps_gloas,
+            self.aggregation_cutoff_bps,
+            self.aggregate_due_bps_pq,
+            self.payload_attestation_due_bps,
+        ];
+
+        for due_bps in [
+            pre_gloas_due_bps.as_slice(),
+            gloas_due_bps.as_slice(),
+            pq_due_bps.as_slice(),
+        ] {
             let in_order = core::iter::once(&0)
                 .chain(due_bps)
                 .chain(core::iter::once(&BASIS_POINTS))
@@ -1072,9 +1099,31 @@ impl Config {
     pub fn aggregate_due_bps_at(&self, phase: Phase) -> u64 {
         if phase < Phase::Gloas {
             self.aggregate_due_bps
-        } else {
+        } else if phase < Phase::Pq {
             self.aggregate_due_bps_gloas
+        } else {
+            self.aggregate_due_bps_pq
         }
+    }
+
+    /// [`get_aggregate_due_ms`] for the aggregator at `position` in its aggregation committee.
+    ///
+    /// [`get_aggregate_due_ms`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/fork-choice.md#modified-get_aggregate_due_ms
+    #[must_use]
+    pub fn aggregate_due_pq(&self, position: u32) -> Duration {
+        self.slot_component_duration(self.aggregator_delay_bps)
+            .saturating_mul(position)
+            .saturating_add(self.slot_component_duration(self.aggregate_due_bps_pq))
+    }
+
+    /// [`get_aggregation_cutoff_ms`] for the aggregator at `position` in its aggregation committee.
+    ///
+    /// [`get_aggregation_cutoff_ms`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/fork-choice.md#new-get_aggregation_cutoff_ms
+    #[must_use]
+    pub fn aggregation_cutoff(&self, position: u32) -> Duration {
+        self.slot_component_duration(self.aggregator_delay_bps)
+            .saturating_mul(position)
+            .saturating_add(self.slot_component_duration(self.aggregation_cutoff_bps))
     }
 
     #[must_use]
