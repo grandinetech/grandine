@@ -728,7 +728,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             builder_url,
         )) = block_build_context
             .build_blinded_beacon_block(
-                randao_reveal,
+                randao_reveal.into(),
                 execution_payload_header_handle,
                 local_execution_payload_handle,
                 builder_api_bids_handle,

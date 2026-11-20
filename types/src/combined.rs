@@ -1,10 +1,12 @@
-use std::sync::Arc;
+use core::str::FromStr;
+use std::{borrow::Cow, sync::Arc};
 
-use bls::SignatureBytes;
+use anyhow::Error as AnyhowError;
+use bls::{SignatureBytes, traits::SignatureBytes as _};
 use derive_more::From;
 use duplicate::duplicate_item;
 use enum_iterator::Sequence as _;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use ssz::{
     BitVector, ContiguousList, H256, Hc, Offset, ProgressiveList, ReadError, Size, SszHash,
     SszList, SszRead, SszReadDefault, SszSize, SszWrite, WriteError,
@@ -149,6 +151,7 @@ use crate::{
             SignedProposerPreferences as PqSignedProposerPreferences,
             SingleAttestation as PqSingleAttestation,
         },
+        primitives::VrfProof,
     },
     preset::{Mainnet, Preset},
     traits::{
@@ -2996,6 +2999,47 @@ impl ProposerSlashing {
     }
 }
 
+/// The RANDAO reveal of a proposal: a BLS signature before PQ, a VRF proof from PQ.
+#[derive(Clone, PartialEq, Eq, Debug, From)]
+pub enum RandaoReveal {
+    Bls(SignatureBytes),
+    Vrf(Box<VrfProof>),
+}
+
+impl FromStr for RandaoReveal {
+    type Err = AnyhowError;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        let digits = string.strip_prefix("0x").unwrap_or(string);
+        let bytes = hex::decode(digits)?;
+
+        if bytes.len() == SignatureBytes::SIZE.get() {
+            return Ok(Self::Bls(SignatureBytes::from_ssz_default(bytes)?));
+        }
+
+        Ok(Self::Vrf(Box::new(VrfProof::from_ssz_default(bytes)?)))
+    }
+}
+
+impl<'de> Deserialize<'de> for RandaoReveal {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let string = <Cow<str>>::deserialize(deserializer)?;
+        string.parse().map_err(D::Error::custom)
+    }
+}
+
+impl RandaoReveal {
+    /// Whether this is the empty BLS signature, which a request sends when it asks to skip RANDAO
+    /// verification. PQ verifies every VRF proof.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Bls(signature) => (*signature).is_empty(),
+            Self::Vrf(_) => false,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum SignedExecutionPayloadBid<P: Preset> {
@@ -3528,6 +3572,28 @@ mod extra_tests {
     use crate::preset::Mainnet;
 
     use super::*;
+
+    #[test]
+    fn randao_reveal_is_parsed_by_length() -> anyhow::Result<()> {
+        let signature = format!("0x{}", "11".repeat(SignatureBytes::SIZE.get()));
+        let vrf_proof = format!("0x{}", "22".repeat(VrfProof::SIZE.get()));
+
+        assert!(matches!(signature.parse()?, RandaoReveal::Bls(_)));
+
+        let RandaoReveal::Vrf(proof) = vrf_proof.parse()? else {
+            panic!("a 1 KiB reveal is a VRF proof");
+        };
+
+        assert_eq!(proof[0], H256::repeat_byte(0x22));
+
+        assert!(RandaoReveal::Bls(SignatureBytes::empty()).is_empty());
+        assert!(!RandaoReveal::Vrf(proof).is_empty());
+        "0x1234"
+            .parse::<RandaoReveal>()
+            .expect_err("a reveal is 96 bytes or a VRF proof");
+
+        Ok(())
+    }
 
     #[test_case(
         json!({

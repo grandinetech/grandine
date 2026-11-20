@@ -66,8 +66,9 @@ use types::{
         ExecutionPayload as CapellaExecutionPayload, SignedBlsToExecutionChange,
     },
     combined::{
-        AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload,
-        ExecutionPayloadHeader, ExecutionRequests, ProposerSlashing, SignedBlindedBeaconBlock,
+        AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, EnvelopeExecutionRequests,
+        ExecutionPayload, ExecutionPayloadHeader, ExecutionRequests, ProposerSlashing,
+        RandaoReveal, SignedBlindedBeaconBlock,
         SignedExecutionPayloadBid as CombinedSignedExecutionPayloadBid,
     },
     config::Config as ChainConfig,
@@ -107,9 +108,20 @@ use types::{
             Gwei, H256, Slot, Uint256, ValidatorIndex,
         },
     },
+    pq::{
+        beacon_state::BeaconState as PqBeaconState,
+        containers::{
+            Attestation as PqAttestation, AttesterSlashing as PqAttesterSlashing,
+            BeaconBlock as PqBeaconBlock, BeaconBlockBody as PqBeaconBlockBody,
+            ExecutionRequests as PqExecutionRequests, ProposerSlashing as PqProposerSlashing,
+            SignedExecutionPayloadBid as PqSignedExecutionPayloadBid,
+        },
+        primitives::{AttestationProof, VrfProof},
+    },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{BeaconState as _, PostBellatrixBeaconState, PostGloasBeaconState},
 };
+use xmss::XmssSignature;
 
 use crate::misc::{
     BlindedBlockPublication, PayloadIdEntry, ProposerData, ValidatorBlindedBlock, build_graffiti,
@@ -853,6 +865,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             ..
         } = local_payload.result;
 
+        // TODO(PQ): Build PQ envelopes once the validator signs them with XMSS.
         let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Gloas(execution_requests))) =
             (execution_payload, execution_requests)
         else {
@@ -983,7 +996,7 @@ pub struct BlockBuildContext<P: Preset, W: Wait> {
 impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     pub async fn build_beacon_block(
         &self,
-        randao_reveal: SignatureBytes,
+        randao_reveal: RandaoReveal,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
         builder_api_bids_handle: Option<BuilderApiBidsJoinHandle<P>>,
     ) -> Result<
@@ -1026,7 +1039,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     pub async fn build_blinded_beacon_block(
         &self,
-        randao_reveal: SignatureBytes,
+        randao_reveal: RandaoReveal,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
         builder_api_bids_handle: Option<BuilderApiBidsJoinHandle<P>>,
@@ -1136,9 +1149,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     #[expect(clippy::too_many_lines)]
     async fn build_beacon_block_without_state_root(
         &self,
-        randao_reveal: SignatureBytes,
+        randao_reveal: RandaoReveal,
     ) -> Result<BeaconBlock<P>> {
         info_with_peers!("block producer starting build beacon block without state root task");
+
+        let randao_reveal = match randao_reveal {
+            RandaoReveal::Bls(signature) => signature,
+            RandaoReveal::Vrf(proof) => {
+                return self.build_pq_beacon_block_without_state_root(*proof).await;
+            }
+        };
 
         let eth1_data = self.beacon_state.eth1_data();
         let deposits = ContiguousList::default();
@@ -1273,8 +1293,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             })),
-            // TODO(PQ): Build PQ blocks.
-            Phase::Pq => return Err(anyhow!("building PQ blocks is not implemented yet")),
+            Phase::Pq => return Err(anyhow!("a PQ block needs a VRF proof as its RANDAO reveal")),
             Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
@@ -1591,7 +1610,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload = if let Some(state) =
             self.beacon_state.post_gloas()
+            && self.beacon_state.phase() == Phase::Pq
         {
+            // TODO(PQ): Select builder bids for PQ blocks.
+            let Some(self_build_bid) = self
+                .cache_and_build_self_payload_bid(state, execution_payload, commitments)
+                .await?
+            else {
+                return Ok(None);
+            };
+
+            // > For self-builds, the signature MUST be the empty `XMSSSignature()`.
+            let signed_payload_bid = PqSignedExecutionPayloadBid {
+                message: self_build_bid.message,
+                signature: XmssSignature::empty(),
+            };
+
+            block_without_state_root
+                .with_signed_execution_payload_bid(Some(signed_payload_bid.into()))
+        } else if let Some(state) = self.beacon_state.post_gloas() {
             let builder_bid = self.select_best_builder_bid(
                 state,
                 &block_without_state_root,
@@ -1625,6 +1662,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 .with_blob_kzg_commitments(commitments)
                 .with_execution_requests(execution_requests)
         };
+
+        if let (BeaconState::Pq(state), BeaconBlock::Pq(block)) =
+            (&*self.beacon_state, &mut without_state_root_with_payload)
+        {
+            self.add_pq_attestations(state, block).await?;
+        }
 
         if let (BeaconState::Gloas(state), BeaconBlock::Gloas(block)) =
             (&*self.beacon_state, &mut without_state_root_with_payload)
@@ -1964,6 +2007,189 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         ));
 
         slashings
+    }
+
+    /// Adds the parent execution requests, then the attestations and the merged proof of their
+    /// signatures. Attestations are optional: a block without them has an empty proof.
+    async fn add_pq_attestations(
+        &self,
+        state: &Hc<PqBeaconState<P>>,
+        block: &mut PqBeaconBlock<P>,
+    ) -> Result<()> {
+        let started_at = std::time::Instant::now();
+        let config = self.producer_context.chain_config.clone_arc();
+        let parent_bid = &state.latest_execution_payload_bid;
+
+        block.body.parent_execution_requests = if block
+            .body
+            .signed_execution_payload_bid
+            .message
+            .parent_block_hash
+            == parent_bid.block_hash
+        {
+            self.producer_context
+                .controller
+                .snapshot()
+                .stored_envelope_by_root(block.parent_root)?
+                .and_then(|envelope| match envelope.execution_requests() {
+                    EnvelopeExecutionRequests::Pq(requests) => Some(requests.clone()),
+                    EnvelopeExecutionRequests::Gloas(_) => None,
+                })
+                .ok_or_else(|| anyhow!("missing FULL parent payload envelope"))?
+        } else {
+            PqExecutionRequests::default()
+        };
+
+        let mut scoring_state = state.clone();
+
+        transition_functions::pq::process_parent_execution_payload(
+            &config,
+            &mut scoring_state,
+            block
+                .body
+                .signed_execution_payload_bid
+                .message
+                .parent_block_hash,
+            &block.body.parent_execution_requests,
+        )?;
+
+        let attestations = match self
+            .producer_context
+            .attestation_agg_pool
+            .pq_proposable_attestations(Arc::new(BeaconState::Pq(scoring_state.clone())))
+            .await
+        {
+            Ok(attestations) => attestations,
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to prepare PQ attestations for slot {}; \
+                     proposing without attestations: {error:?}",
+                    block.slot,
+                );
+                return Ok(());
+            }
+        };
+
+        if attestations.is_empty() {
+            return Ok(());
+        }
+
+        let merged = tokio::task::spawn_blocking(move || {
+            merge_pq_proofs(&config, &scoring_state, attestations)
+        })
+        .await
+        .map_err(AnyhowError::new)
+        .and_then(core::convert::identity);
+
+        match merged {
+            Ok((attestations, proof)) => {
+                block.body.attestations = attestations;
+                block.body.proof = proof;
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to merge PQ attestation proofs for slot {}; \
+                     proposing without attestations: {error:?}",
+                    block.slot,
+                );
+            }
+        }
+
+        info_with_peers!(
+            "PQ proposal parent processing, packing and merging elapsed {} us",
+            started_at.elapsed().as_micros()
+        );
+
+        Ok(())
+    }
+
+    /// The bid, the parent execution requests, the attestations and their proof are added once the
+    /// payload is known.
+    async fn build_pq_beacon_block_without_state_root(
+        &self,
+        randao_reveal: VrfProof,
+    ) -> Result<BeaconBlock<P>> {
+        ensure!(
+            self.beacon_state.phase() == Phase::Pq,
+            "a VRF proof as the RANDAO reveal of a block before PQ",
+        );
+
+        let body = PqBeaconBlockBody {
+            randao_reveal: Arc::new(randao_reveal),
+            eth1_data: self.beacon_state.eth1_data(),
+            graffiti: self.options.graffiti.unwrap_or_default(),
+            proposer_slashings: self.prepare_proposer_slashings_pq().await,
+            attester_slashings: self.prepare_attester_slashings_pq().await,
+            attestations: ProgressiveList::default(),
+            deposits: ProgressiveList::default(),
+            signed_execution_payload_bid: PqSignedExecutionPayloadBid::default(),
+            parent_execution_requests: PqExecutionRequests::default(),
+            proof: AttestationProof::<P>::default(),
+        };
+
+        info_with_peers!("block producer prepared PQ block body");
+
+        Ok(BeaconBlock::from(Hc::new(PqBeaconBlock {
+            slot: self.beacon_state.slot(),
+            proposer_index: self.proposer_index,
+            parent_root: self.head_block_root,
+            // This is a placeholder that is overwritten later using `with_state_root`.
+            state_root: H256::zero(),
+            body,
+        })))
+    }
+
+    async fn prepare_proposer_slashings_pq(&self) -> ProgressiveList<PqProposerSlashing> {
+        let mut slashings = self.producer_context.proposer_slashings.lock().await;
+
+        let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
+            slashing.pq().is_some_and(|slashing| {
+                transition_functions::pq::validate_proposer_slashing(
+                    &self.producer_context.chain_config,
+                    &self.beacon_state,
+                    slashing,
+                )
+                .is_ok()
+            })
+        });
+
+        ProgressiveList::try_from_iter(
+            slashings
+                .drain(0..split_index.min(P::MaxProposerSlashings::USIZE))
+                .filter_map(|slashing| slashing.pq().cloned()),
+        )
+        .expect(
+            "the call to Vec::drain above limits the \
+             iterator to P::MaxProposerSlashings::USIZE elements",
+        )
+    }
+
+    async fn prepare_attester_slashings_pq(&self) -> ProgressiveList<PqAttesterSlashing<P>> {
+        let mut slashings = self.producer_context.attester_slashings.lock().await;
+
+        let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
+            let AttesterSlashing::Pq(attester_slashing) = slashing else {
+                return false;
+            };
+
+            transition_functions::pq::validate_attester_slashing(
+                &self.producer_context.chain_config,
+                &self.beacon_state,
+                attester_slashing,
+                true,
+            )
+            .is_ok()
+        });
+
+        ProgressiveList::try_from_iter(
+            slashings
+                .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
+                .filter_map(AttesterSlashing::pq),
+        )
+        .expect(
+            "the call to Vec::drain above limits the \
+             iterator to P::MaxAttesterSlashingsElectra::USIZE elements",
+        )
     }
 
     async fn prepare_attestations(&self) -> Result<Vec<PoolAttestation<P>>> {
@@ -3165,6 +3391,45 @@ fn prepare_gloas_scoring_state<P: Preset>(
     Ok(scoring_state)
 }
 
+/// [`stark.MergeProofs`] of the proofs of `attestations`, in the order of the statements that
+/// `process_stark` checks: by attestation, and within each by committee.
+///
+/// [`stark.MergeProofs`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/validator.md#proof
+fn merge_pq_proofs<P: Preset>(
+    config: &ChainConfig,
+    state: &PqBeaconState<P>,
+    attestations: Vec<(PqAttestation<P>, Vec<AttestationProof<P>>)>,
+) -> Result<(ProgressiveList<PqAttestation<P>>, AttestationProof<P>)> {
+    let mut statements = vec![];
+
+    for (attestation, proofs) in &attestations {
+        let attestation_statements = pq::get_attestation_statements(config, state, attestation)?;
+
+        ensure!(
+            attestation_statements.len() == proofs.len(),
+            "{} statements for {} proofs",
+            attestation_statements.len(),
+            proofs.len(),
+        );
+
+        statements.extend(attestation_statements);
+    }
+
+    let children = statements
+        .iter()
+        .zip(attestations.iter().flat_map(|(_, proofs)| proofs))
+        .map(|(statement, proof)| (core::slice::from_ref(statement), proof.as_bytes()))
+        .collect::<Vec<_>>();
+
+    let proof = pq_prover::block_backend().merge(&children)?;
+
+    let attestations = ProgressiveList::try_from_iter(
+        attestations.into_iter().map(|(attestation, _)| attestation),
+    )?;
+
+    Ok((attestations, AttestationProof::<P>::try_from(proof)?))
+}
+
 fn post_merge_state<P: Preset>(state: &BeaconState<P>) -> Option<&dyn PostBellatrixBeaconState<P>> {
     state
         .post_bellatrix()
@@ -3684,6 +3949,7 @@ mod gloas_scoring_tests {
             );
         let randao = helper_functions::signing::RandaoEpoch::from(2)
             .sign(&config, &proposal_state, &keys[0])
+            .pipe(SignatureBytes::from)
             .into();
         if scenario == ProposalScenario::PackingFailure {
             assert!(
@@ -4008,6 +4274,7 @@ mod gloas_scoring_tests {
         );
         let randao = helper_functions::signing::RandaoEpoch::from(3)
             .sign(&config, &proposal_state, &keys[usize::try_from(proposer)?])
+            .pipe(SignatureBytes::from)
             .into();
         let result = context
             .build_blinded_beacon_block(randao, None, None, None)

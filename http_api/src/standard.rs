@@ -100,7 +100,7 @@ use types::{
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
-        ProposerSlashing, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        ProposerSlashing, RandaoReveal, SignedBeaconBlock, SignedBlindedBeaconBlock,
         SignedExecutionPayloadBid as CombinedSignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope,
         SignedProposerPreferences as CombinedSignedProposerPreferences,
@@ -291,7 +291,7 @@ pub struct ValidatorBlockQueryV3 {
 // This is required for Lodestar interoperability.
 // #[serde(deny_unknown_fields)]
 pub struct ValidatorBlockQueryV4 {
-    randao_reveal: SignatureBytes,
+    randao_reveal: RandaoReveal,
     graffiti: Option<H256>,
     #[serde(default, with = "serde_utils::bool_as_empty_string")]
     skip_randao_verification: bool,
@@ -4637,7 +4637,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
 
     let blinded_block = block_build_context
         .build_blinded_beacon_block(
-            randao_reveal,
+            randao_reveal.into(),
             execution_payload_header_handle,
             local_execution_payload_handle,
             None,
@@ -4782,7 +4782,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
     let (beacon_block, _, _) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle, None)
+        .build_beacon_block(randao_reveal.into(), local_execution_payload_handle, None)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -4862,7 +4862,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     let (validator_block, block_rewards, _) = block_build_context
         .build_blinded_beacon_block(
-            randao_reveal,
+            randao_reveal.into(),
             execution_payload_header_handle,
             local_execution_payload_handle,
             None,

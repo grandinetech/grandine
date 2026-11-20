@@ -951,6 +951,33 @@ impl<P: Preset> From<EngineGetPayloadV6Response<P>> for WithBlobsAndMev<Executio
     }
 }
 
+impl<P: Preset> EngineGetPayloadV6Response<P> {
+    /// The response to `engine_getPayloadV6` for a PQ payload, whose execution requests include
+    /// the request types added in PQ.
+    #[must_use]
+    pub fn into_pq(self) -> WithBlobsAndMev<ExecutionPayload<P>, P> {
+        let execution_requests = PqExecutionRequests::from(self.execution_requests.clone());
+
+        let WithBlobsAndMev {
+            value,
+            commitments,
+            proofs,
+            blobs,
+            mev,
+            ..
+        } = self.into();
+
+        WithBlobsAndMev::new(
+            value,
+            commitments,
+            proofs,
+            blobs,
+            mev,
+            Some(ExecutionRequests::Pq(execution_requests)),
+        )
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(untagged, bound = "")]
 pub enum PayloadAttributes<P: Preset> {
@@ -1078,6 +1105,8 @@ pub enum PayloadId {
     Electra(H64),
     Fulu(H64),
     Gloas(H64),
+    // PQ uses the Gloas engine methods. Only the execution requests differ.
+    Pq(H64),
 }
 
 #[derive(Deserialize, Debug)]

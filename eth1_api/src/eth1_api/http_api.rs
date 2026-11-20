@@ -461,7 +461,8 @@ impl Eth1Api {
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
             Phase::Electra => payload_id.map(PayloadId::Electra),
             Phase::Fulu => payload_id.map(PayloadId::Fulu),
-            Phase::Gloas | Phase::Pq => payload_id.map(PayloadId::Gloas),
+            Phase::Gloas => payload_id.map(PayloadId::Gloas),
+            Phase::Pq => payload_id.map(PayloadId::Pq),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
@@ -564,6 +565,18 @@ impl Eth1Api {
                 )
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
+            }
+            PayloadId::Pq(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV6Response<P>>(
+                    ENGINE_GET_PAYLOAD_V6,
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(|with_client_info| with_client_info.map(EngineGetPayloadV6Response::into_pq))
             }
         }
     }

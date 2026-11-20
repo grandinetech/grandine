@@ -26,6 +26,7 @@ itertools = { workspace = true }
 keymanager = { workspace = true }
 logging ={ workspace = true }
 operation_pools = { workspace = true }
+pq_prover = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
@@ -42,6 +43,7 @@ try_from_iterator = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+xmss = { workspace = true }
 
 [dev-dependencies]
 clock = { workspace = true }

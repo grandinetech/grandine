@@ -947,6 +947,7 @@ dependencies = [
  "keymanager",
  "logging",
  "operation_pools",
+ "pq_prover",
  "prometheus_metrics",
  "pubkey_cache",
  "reqwest 0.13.5",
@@ -963,6 +964,7 @@ dependencies = [
  "tynm",
  "typenum",
  "types",
+ "xmss",
 ]
 
 [[package]]
