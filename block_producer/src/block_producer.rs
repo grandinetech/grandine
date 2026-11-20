@@ -4468,6 +4468,7 @@ mod test_chain {
                 config.clone_arc(),
                 pubkey_cache.clone_arc(),
                 database::Database::in_memory(),
+                database::Database::in_memory(),
                 fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
                 StorageMode::default(),
                 true,
