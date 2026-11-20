@@ -22,15 +22,13 @@ use transition_functions::unphased::StateRootPolicy;
 use types::{
     combined::{
         Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
-        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     gloas::{
         consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
-        containers::{
-            CombinedPayloadAttestation, PayloadAttestationData, SignedExecutionPayloadBid,
-        },
+        containers::{CombinedPayloadAttestation, PayloadAttestationData},
         primitives::PayloadStatus as RawPayloadPresence,
     },
     nonstandard::{

@@ -21,17 +21,15 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{
         Attestation, AttesterSlashing, DataColumnSidecar, ProposerSlashing,
-        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{
-        PayloadAttestationMessage, PayloadEnvelopeIdentifier, SignedExecutionPayloadBid,
-    },
+    gloas::containers::{PayloadAttestationMessage, PayloadEnvelopeIdentifier},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, SignedVoluntaryExit},

@@ -22,7 +22,7 @@ use types::{
     capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
     combined::{
         Attestation, AttesterSlashing, DataColumnSidecar, ProposerSlashing,
-        SignedProposerPreferences,
+        SignedExecutionPayloadBid, SignedProposerPreferences,
     },
     deneb::{
         containers::BlobSidecar,
@@ -31,7 +31,7 @@ use types::{
     electra::containers::SingleAttestation,
     fulu::primitives::ColumnIndex,
     gloas::{
-        containers::{ExecutionPayloadBid, PayloadAttestationMessage, SignedExecutionPayloadBid},
+        containers::{ExecutionPayloadBid, PayloadAttestationMessage},
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
     nonstandard::{PayloadStatus, Phase},

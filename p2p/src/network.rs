@@ -56,8 +56,8 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{
         Attestation, AttesterSlashing, DataColumnSidecar, ProposerSlashing,
-        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -65,7 +65,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
+    gloas::containers::PayloadAttestationMessage,
     nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -830,9 +830,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
     fn publish_execution_payload_bid(&self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
         debug_with_peers!(
             "publishing signed execution payload bid (slot: {}, parent_block_root: {:?}, parent block hash: {:?})",
-            payload_bid.message.slot,
-            payload_bid.message.parent_block_root,
-            payload_bid.message.parent_block_hash
+            payload_bid.message().slot,
+            payload_bid.message().parent_block_root,
+            payload_bid.message().parent_block_hash
         );
 
         self.publish(PubsubMessage::ExecutionPayloadBid(payload_bid));

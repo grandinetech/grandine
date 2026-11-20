@@ -53,8 +53,8 @@ use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, EnvelopeExecutionRequests,
-        SignatureRef, SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+        SignatureRef, SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -73,7 +73,6 @@ use types::{
         },
         containers::{
             Builder, BuilderExitRequest, CombinedPayloadAttestation, ExecutionPayloadBid,
-            SignedExecutionPayloadBid,
         },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -536,8 +535,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .into_iter()
             .flat_map(HashMap::values)
             .filter(move |bid| {
-                bid.message.parent_block_hash == parent_block_hash
-                    && bid.message.parent_block_root == parent_block_root
+                bid.message().parent_block_hash == parent_block_hash
+                    && bid.message().parent_block_root == parent_block_root
             })
     }
 
@@ -562,7 +561,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 parent_execution_requests.is_none_or(|execution_requests| {
                     state
                         .builders()
-                        .get(bid.message.builder_index)
+                        .get(bid.message().builder_index)
                         .is_ok_and(|builder| !is_builder_exiting(builder, execution_requests))
                 })
             })
@@ -2719,7 +2718,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: &ExecutionPayloadBidOrigin,
     ) -> Result<ExecutionPayloadBidAction<P>> {
-        let bid = &payload_bid.message;
+        let bid = payload_bid.message();
         let builder_index = bid.builder_index;
 
         // Deviation from the spec: a self-build bid is included in a block by the proposer that
@@ -2780,8 +2779,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     bid.parent_block_hash,
                     bid.parent_block_root,
                 )
-                .max_by_key(|b| b.message.value)
-                && bid.value <= highest_bid.message.value
+                .max_by_key(|b| b.message().value)
+                && bid.value <= highest_bid.message().value
             {
                 return Ok(ExecutionPayloadBidAction::Ignore(
                     "this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
@@ -2951,13 +2950,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        if origin.verify_signatures() {
-            let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+        // BLS verification would decompress the padded XMSS keys of a PQ state as BLS keys.
+        ensure!(
+            (payload_bid.phase() == Phase::Pq) == (state.phase() == Phase::Pq),
+            Error::<P>::InvalidExecutionPayloadBidSignature { payload_bid },
+        );
 
+        if origin.verify_signatures() {
             // > `signed_execution_payload_bid.signature` is valid builder's signature
-            if let Err(error) =
-                bid.verify(&self.chain_config, &state, payload_bid.signature, pubkey)
-            {
+            let result = match payload_bid.signature() {
+                SignatureRef::Bls(signature) => {
+                    let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+
+                    bid.verify(&self.chain_config, &state, signature, pubkey)
+                }
+                SignatureRef::Xmss(signature) => {
+                    let leaf_index = u64::from(signature.leaf_index());
+                    let signing_root =
+                        SignForSingleFork::<P>::signing_root(bid, &self.chain_config, &state);
+
+                    let valid = pq::is_builder_bid_leaf_index(leaf_index)
+                        && xmss::verify_u64(
+                            &unpadded_pubkey(&builder.pubkey),
+                            leaf_index,
+                            signing_root.as_fixed_bytes(),
+                            signature,
+                        );
+
+                    if valid {
+                        Ok(())
+                    } else {
+                        Err(helper_functions::error::Error::SignatureInvalid(
+                            SignatureKind::ExecutionPayloadBid,
+                        )
+                        .into())
+                    }
+                }
+            };
+
+            if let Err(error) = result {
                 bail!(
                     error.context(Error::<P>::InvalidExecutionPayloadBidSignature { payload_bid })
                 );
@@ -5592,13 +5623,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
         let accepted_bids = self
             .accepted_payload_bids
-            .entry(payload_bid.message.slot)
+            .entry(payload_bid.message().slot)
             .or_default();
 
         let key = (
-            payload_bid.message.builder_index,
-            payload_bid.message.parent_block_hash,
-            payload_bid.message.parent_block_root,
+            payload_bid.message().builder_index,
+            payload_bid.message().parent_block_hash,
+            payload_bid.message().parent_block_root,
         );
 
         accepted_bids.insert(key, Arc::unwrap_or_clone(payload_bid));

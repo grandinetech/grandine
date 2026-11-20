@@ -845,7 +845,7 @@ fn block_with_parent_payload<P: Preset>(
                 ..GloasBeaconBlockBody::default()
             },
         }))
-        .with_signed_execution_payload_bid(signed_execution_payload_bid),
+        .with_signed_execution_payload_bid(signed_execution_payload_bid.map(Into::into)),
         // TODO(PQ): Build PQ blocks. They need XMSS signatures and VRF proofs.
         Phase::Pq => bail!("the factory cannot build PQ blocks yet"),
     }

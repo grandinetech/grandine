@@ -68,6 +68,7 @@ use types::{
     combined::{
         AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload,
         ExecutionPayloadHeader, ExecutionRequests, ProposerSlashing, SignedBlindedBeaconBlock,
+        SignedExecutionPayloadBid as CombinedSignedExecutionPayloadBid,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -1616,7 +1617,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 return Ok(None);
             };
 
-            block_without_state_root.with_signed_execution_payload_bid(Some(signed_payload_bid))
+            block_without_state_root
+                .with_signed_execution_payload_bid(Some(signed_payload_bid.into()))
         } else {
             block_without_state_root
                 .with_execution_payload(execution_payload)?
@@ -2761,6 +2763,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let candidates = snapshot
             .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
+            // TODO(PQ): Select PQ bids for PQ blocks.
+            .filter_map(CombinedSignedExecutionPayloadBid::gloas)
             .map(|bid| (bid, p2p_weighting, None))
             .chain(builder_api_bids);
 
@@ -3919,10 +3923,13 @@ mod gloas_scoring_tests {
         };
         let (tx, rx) = futures::channel::oneshot::channel();
         controller.on_api_execution_payload_bid(
-            Arc::new(SignedExecutionPayloadBid {
-                signature: bid.sign(&config, &proposal_state, &keys[63]).into(),
-                message: bid,
-            }),
+            Arc::new(
+                SignedExecutionPayloadBid {
+                    signature: bid.sign(&config, &proposal_state, &keys[63]).into(),
+                    message: bid,
+                }
+                .into(),
+            ),
             tx,
         );
         assert_eq!(
@@ -3938,7 +3945,7 @@ mod gloas_scoring_tests {
                 .snapshot()
                 .accepted_payload_bids_at_slot(26)
                 .iter()
-                .any(|bid| bid.message.builder_index == 0)
+                .any(|bid| bid.message().builder_index == 0)
         );
         let data = AttestationData {
             slot: 25,

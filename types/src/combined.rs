@@ -113,7 +113,7 @@ use crate::{
             ProposerPreferences, SignedAggregateAndProof as GloasSignedAggregateAndProof,
             SignedBeaconBlock as GloasSignedBeaconBlock,
             SignedBlindedExecutionPayloadEnvelope as GloasSignedBlindedExecutionPayloadEnvelope,
-            SignedExecutionPayloadBid,
+            SignedExecutionPayloadBid as GloasSignedExecutionPayloadBid,
             SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
             SignedProposerPreferences as GloasSignedProposerPreferences,
         },
@@ -144,6 +144,7 @@ use crate::{
             SignedAggregateAndProof as PqSignedAggregateAndProof,
             SignedBeaconBlock as PqSignedBeaconBlock,
             SignedBlindedExecutionPayloadEnvelope as PqSignedBlindedExecutionPayloadEnvelope,
+            SignedExecutionPayloadBid as PqSignedExecutionPayloadBid,
             SignedExecutionPayloadEnvelope as PqSignedExecutionPayloadEnvelope,
             SignedProposerPreferences as PqSignedProposerPreferences,
             SingleAttestation as PqSingleAttestation,
@@ -1119,8 +1120,13 @@ impl<P: Preset> BeaconBlock<P> {
             return self;
         };
 
-        match &mut self {
-            Self::Gloas(block) => block.body.signed_execution_payload_bid = payload_bid,
+        match (&mut self, payload_bid) {
+            (Self::Gloas(block), SignedExecutionPayloadBid::Gloas(payload_bid)) => {
+                block.body.signed_execution_payload_bid = payload_bid;
+            }
+            (Self::Pq(block), SignedExecutionPayloadBid::Pq(payload_bid)) => {
+                block.body.signed_execution_payload_bid = payload_bid;
+            }
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
@@ -2986,6 +2992,70 @@ impl ProposerSlashing {
         match self {
             Self::Phase0(_) => None,
             Self::Pq(proposer_slashing) => Some(proposer_slashing),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum SignedExecutionPayloadBid<P: Preset> {
+    Gloas(GloasSignedExecutionPayloadBid<P>),
+    Pq(PqSignedExecutionPayloadBid<P>),
+}
+
+impl<P: Preset> SszSize for SignedExecutionPayloadBid<P> {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
+        GloasSignedExecutionPayloadBid::<P>::SIZE,
+        PqSignedExecutionPayloadBid::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszWrite for SignedExecutionPayloadBid<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Gloas(bid) => bid.write_variable(bytes),
+            Self::Pq(bid) => bid.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> SignedExecutionPayloadBid<P> {
+    pub fn from_ssz_at_phase(phase: Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        match phase {
+            Phase::Pq => PqSignedExecutionPayloadBid::from_ssz_default(bytes).map(Self::Pq),
+            _ => GloasSignedExecutionPayloadBid::from_ssz_default(bytes).map(Self::Gloas),
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
+        }
+    }
+
+    #[must_use]
+    pub const fn message(&self) -> &ExecutionPayloadBid<P> {
+        match self {
+            Self::Gloas(bid) => &bid.message,
+            Self::Pq(bid) => &bid.message,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature(&self) -> SignatureRef<'_> {
+        match self {
+            Self::Gloas(bid) => SignatureRef::Bls(bid.signature),
+            Self::Pq(bid) => SignatureRef::Xmss(&bid.signature),
+        }
+    }
+
+    #[must_use]
+    pub const fn gloas(&self) -> Option<&GloasSignedExecutionPayloadBid<P>> {
+        match self {
+            Self::Gloas(bid) => Some(bid),
+            Self::Pq(_) => None,
         }
     }
 }

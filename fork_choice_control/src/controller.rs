@@ -40,12 +40,13 @@ use tracing::{Span, instrument};
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        SignedBeaconBlock, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
+    gloas::containers::PayloadAttestationMessage,
     nonstandard::{ValidationOutcome, ValidationOutcomeWithReason},
     phase0::{
         containers::Checkpoint,

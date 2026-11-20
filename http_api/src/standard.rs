@@ -101,6 +101,7 @@ use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
         ProposerSlashing, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        SignedExecutionPayloadBid as CombinedSignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope,
         SignedProposerPreferences as CombinedSignedProposerPreferences,
     },
@@ -2691,6 +2692,10 @@ pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
         SignedExecutionPayloadBidPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
+    // TODO(PQ): Accept PQ bids.
+    let signed_payload_bid = Arc::new(CombinedSignedExecutionPayloadBid::from(
+        Arc::unwrap_or_clone(signed_payload_bid),
+    ));
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     controller.on_api_execution_payload_bid(signed_payload_bid.clone_arc(), sender);

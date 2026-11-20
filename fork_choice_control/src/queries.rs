@@ -36,15 +36,13 @@ use types::{
     altair::containers::SyncCommittee,
     combined::{
         BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
-        SignedExecutionPayloadEnvelope, SignedProposerPreferences, UnblindError,
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        UnblindError,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::{
-        consts::PAYLOAD_STATUS_FULL, containers::SignedExecutionPayloadBid,
-        primitives::PayloadStatus as ExecutionPayloadStatus,
-    },
+    gloas::{consts::PAYLOAD_STATUS_FULL, primitives::PayloadStatus as ExecutionPayloadStatus},
     nonstandard::{
         BlockRewards, EffectiveBalanceList, ExecutionPayloadBody, PartialValidatorList,
         PayloadStatus, Phase, PubkeyList, RawValidatorList, RelativeEpoch, WithStatus,
