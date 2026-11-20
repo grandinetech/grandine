@@ -344,8 +344,10 @@ impl<P: Preset> Storage<P> {
 
         let finalized_validators = store.finalized_validators();
 
+        let mut finalized = finalized.rev().peekable();
+        let newest_finalized_in_batch = finalized.peek().copied();
         let unfinalized = unfinalized.zip(core::iter::repeat(false));
-        let finalized = finalized.rev().zip(core::iter::repeat(true));
+        let finalized = finalized.zip(core::iter::repeat(true));
 
         let mut chain = unfinalized
             .chain(finalized)
@@ -365,6 +367,8 @@ impl<P: Preset> Storage<P> {
         debug_with_peers!("saving store head slot: {store_head_slot}");
 
         let mut update_finalized_validators = false;
+        let mut newer_finalized = None::<&ChainLink<P>>;
+        let mut empty_slot_state = None::<Arc<BeaconState<P>>>;
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -394,6 +398,41 @@ impl<P: Preset> Storage<P> {
                         SlotByStateRoot(block.message().state_root()),
                         state_slot,
                     )?);
+
+                    // Roots of states in empty slots are taken from `state.state_roots` of a later
+                    // finalized state, filling the gap between this block and the newer one.
+                    // Batches overlap by one block, so gaps outside the batch are covered by others.
+                    if let Some(newer) = newer_finalized.replace(chain_link)
+                        && let Some(newest_finalized_in_batch) = newest_finalized_in_batch
+                    {
+                        for slot in state_slot.saturating_add(1)..newer.slot() {
+                            let state = empty_slot_state
+                                .get_or_insert_with(|| newest_finalized_in_batch.state(store));
+
+                            // Fall back to the next block's state if the batch is too long.
+                            // Gaps longer than `SLOTS_PER_HISTORICAL_ROOT` are partly skipped.
+                            let state_root = accessors::get_state_root_at_slot(&**state, slot)
+                                .or_else(|error| {
+                                    if state.slot() == newer.slot() {
+                                        return Err(error);
+                                    }
+
+                                    *state = newer.state(store);
+                                    accessors::get_state_root_at_slot(&**state, slot)
+                                });
+
+                            match state_root {
+                                Ok(state_root) => {
+                                    batch.push(serialize(SlotByStateRoot(state_root), slot)?);
+                                }
+                                Err(error) => debug_with_peers!(
+                                    "failed to get state root in empty slot {slot} from \
+                                     state in slot {}: {error}",
+                                    state.slot(),
+                                ),
+                            }
+                        }
+                    }
                 }
 
                 let state = OnceCell::new();
@@ -561,9 +600,14 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
-        let results = self.database.iterator_descending_raw(
-            ..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string(),
-        )?;
+        // Nothing is older than slot 0. `saturating_sub` would make the range include it.
+        let Some(last_pruned_slot) = up_to_slot.checked_sub(1) else {
+            return Ok(());
+        };
+
+        let results = self
+            .database
+            .iterator_descending_raw(..=BlockRootBySlot(last_pruned_slot).to_string())?;
 
         let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
@@ -2163,6 +2207,51 @@ mod tests {
         storage.prune_old_state_roots(5)?;
 
         assert_eq!(storage.slot_by_state_root_count()?, 2);
+
+        Ok(())
+    }
+
+    // Pruning happens while the chain is younger than `MIN_EPOCHS_FOR_BLOCK_REQUESTS` too.
+    // The genesis block and state must survive it, or no archived state can be computed.
+    #[test]
+    fn test_prune_old_blocks_and_states_keeps_genesis_until_it_is_old() -> Result<()> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
+
+        database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), H256::repeat_byte(1))?,
+            serialize(FinalizedBlockByRoot::full(H256::repeat_byte(1)), &block)?,
+            serialize(StateByBlockRoot(H256::repeat_byte(1)), 0_u64)?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            database,
+            nonzero!(64_u64),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        );
+
+        storage.prune_old_blocks_and_states(0)?;
+
+        assert_eq!(storage.finalized_block_count()?, 1);
+        assert_eq!(storage.block_root_by_slot_count()?, 1);
+        assert_eq!(storage.state_count()?, 1);
+
+        storage.prune_old_blocks_and_states(1)?;
+
+        assert_eq!(storage.finalized_block_count()?, 0);
+        assert_eq!(storage.block_root_by_slot_count()?, 0);
+        assert_eq!(storage.state_count()?, 0);
 
         Ok(())
     }

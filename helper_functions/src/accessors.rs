@@ -140,6 +140,17 @@ pub fn get_block_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot
     Ok(state.block_roots().mod_index(slot).copy())
 }
 
+pub fn get_state_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<H256> {
+    ensure!(slot < state.slot(), Error::SlotOutOfRange);
+
+    ensure!(
+        state.slot() <= slot.try_add(SlotsPerHistoricalRoot::<P>::U64)?,
+        Error::SlotOutOfRange,
+    );
+
+    Ok(state.state_roots().mod_index(slot).copy())
+}
+
 /// <https://github.com/ethereum/consensus-specs/blob/2ef55744df782eb153fc0a3b1c7875b8c2e11730/specs/phase0/validator.md#ffg-vote>
 ///
 /// This returns the root of the block that started the epoch (i.e., the block satisfying `slot` =
@@ -1361,6 +1372,34 @@ mod tests {
         };
 
         assert_eq!(get_current_epoch(&state), 4);
+    }
+
+    // `SLOTS_PER_HISTORICAL_ROOT` is 64 in the minimal preset.
+    #[test]
+    fn test_get_state_root_at_slot() {
+        let mut state = Phase0BeaconState::<Minimal> {
+            slot: 100,
+            ..Phase0BeaconState::default()
+        };
+
+        *state.state_roots.mod_index_mut(36) = H256::repeat_byte(36);
+        *state.state_roots.mod_index_mut(99) = H256::repeat_byte(99);
+
+        assert_eq!(
+            get_state_root_at_slot(&state, 36).ok(),
+            Some(H256::repeat_byte(36)),
+        );
+        assert_eq!(
+            get_state_root_at_slot(&state, 99).ok(),
+            Some(H256::repeat_byte(99)),
+        );
+
+        // Slots older than `SLOTS_PER_HISTORICAL_ROOT` have been overwritten.
+        assert_eq!(get_state_root_at_slot(&state, 35).ok(), None);
+
+        // The root of the state itself is not in `state.state_roots` yet.
+        assert_eq!(get_state_root_at_slot(&state, 100).ok(), None);
+        assert_eq!(get_state_root_at_slot(&state, 101).ok(), None);
     }
 
     // The version switches at the fork epoch, and a state and its fork info give the same domain.

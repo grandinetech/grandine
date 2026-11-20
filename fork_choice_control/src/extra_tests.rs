@@ -650,6 +650,119 @@ fn finalizes_and_prunes_many_segments_correctly() {
     });
 }
 
+// States in empty slots are not produced by any block, so no block records their state roots.
+// They should still be found by state root after they are archived.
+//
+// ```text
+// | epoch 0| epoch 1| epoch 2| epoch 3| epoch 4|   ...  |epoch 11|
+// |--□--□--|--------|□------▣|-------▣|□-------|--------|□-------|
+// |  1  2  |        |3      4|       5|6       |        |7       |
+// ```
+//
+// Block 6 finalizes block 3 and causes everything before it to be archived.
+// Block 7 moves the head far enough that its state no longer holds the roots of archived slots,
+// so they have to be found in storage.
+#[test]
+fn finds_archived_states_in_empty_slots_by_state_root() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 2, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, 5, H256::default());
+    let (block_3, state_3) = context.empty_block(&state_2, start_of_epoch(2), H256::default());
+    let (block_4, state_4) = context.block_justifying_current_epoch(&state_3, 2, H256::default());
+    let (block_5, state_5) = context.block_justifying_current_epoch(&state_4, 3, H256::default());
+    let (block_6, state_6) = context.empty_block(&state_5, start_of_epoch(4), H256::default());
+    let (block_7, _) = context.empty_block(&state_6, start_of_epoch(11), H256::default());
+
+    context.on_slot(start_of_epoch(11));
+
+    for block in [
+        &block_1, &block_2, &block_3, &block_4, &block_5, &block_6, &block_7,
+    ] {
+        context.on_acceptable_block(block);
+    }
+
+    context.assert_finalized_epoch(2);
+
+    assert_eq!(
+        context.anchor_block().message().hash_tree_root(),
+        block_3.message().hash_tree_root(),
+    );
+
+    for slot in GENESIS_SLOT..start_of_epoch(2) {
+        context.assert_state_found_by_state_root(slot);
+    }
+}
+
+// Unfinalized states in empty slots are not in storage.
+// They should be found by state root in the state of the head.
+//
+// ```text
+// | epoch 0|
+// |--□--□--|
+// |  1  2  |
+// ```
+#[test]
+fn finds_unfinalized_states_in_empty_slots_by_state_root() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 2, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 5, H256::default());
+
+    context.on_slot(5);
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    context.assert_finalized_epoch(GENESIS_EPOCH);
+
+    for slot in GENESIS_SLOT..=5 {
+        context.assert_state_found_by_state_root(slot);
+    }
+}
+
+// The archived batch spans more than `SLOTS_PER_HISTORICAL_ROOT` (64 in the minimal preset) slots.
+// The state of block 3 no longer holds the state roots of the earliest empty slots,
+// so they have to be taken from the state of block 2.
+//
+// ```text
+// | epoch 0| epoch 1|   ...  | epoch 5|   ...  |epoch 10|epoch 11|epoch 12|
+// |-□------|--------|--------|□-------|--------|□------▣|-------▣|□-------|
+// | 1      |        |        |2       |        |3      4|       5|6       |
+// ```
+//
+// Block 6 finalizes block 3 and causes everything before it to be archived.
+#[test]
+fn finds_archived_states_in_empty_slots_by_state_root_across_long_batches() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, start_of_epoch(5), H256::default());
+    let (block_3, state_3) = context.empty_block(&state_2, start_of_epoch(10), H256::default());
+    let (block_4, state_4) = context.block_justifying_current_epoch(&state_3, 10, H256::default());
+    let (block_5, state_5) = context.block_justifying_current_epoch(&state_4, 11, H256::default());
+    let (block_6, _) = context.empty_block(&state_5, start_of_epoch(12), H256::default());
+
+    context.on_slot(start_of_epoch(12));
+
+    for block in [&block_1, &block_2, &block_3, &block_4, &block_5, &block_6] {
+        context.on_acceptable_block(block);
+    }
+
+    context.assert_finalized_epoch(10);
+
+    assert_eq!(
+        context.anchor_block().message().hash_tree_root(),
+        block_3.message().hash_tree_root(),
+    );
+
+    for slot in GENESIS_SLOT..start_of_epoch(10) {
+        context.assert_state_found_by_state_root(slot);
+    }
+}
+
 // This covers a bug we found in `Store::unload_old_states` while implementing in-memory mode.
 // The bug would cause blocks to become anchors while having unloaded post-states, making it
 // impossible to access their post-states or compute the post-states of their descendants.

@@ -27,7 +27,9 @@ pub fn state<P: Preset, W: Wait>(
         StateId::Slot(slot) => {
             tokio::task::block_in_place(|| controller.state_at_slot_cached_blocking(*slot))?
         }
-        StateId::Root(root) => controller.state_by_state_root(*root)?,
+        StateId::Root(root) => {
+            tokio::task::block_in_place(|| controller.state_by_state_root_blocking(*root))?
+        }
     }
     .ok_or(Error::StateNotFound)
 }
