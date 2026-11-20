@@ -628,6 +628,11 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         ValidatorToP2p::PublishPayloadAttestation(payload_attestation_message) => {
                             self.publish_payload_attestation_message(payload_attestation_message);
                         }
+                        ValidatorToP2p::PublishPqPayloadAttestation(payload_attestation_message) => {
+                            self.publish(PubsubMessage::PqPayloadAttestationMessage(
+                                payload_attestation_message,
+                            ));
+                        }
                         ValidatorToP2p::PublishProposerPreferences(signed_preferences) => {
                             self.publish_proposer_preferences(signed_preferences);
                         }

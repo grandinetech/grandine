@@ -49,8 +49,8 @@ use types::{
     },
     cache::PackedIndices,
     combined::{
-        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
-        SignedBlindedBeaconBlock,
+        Attestation, BeaconState, DataColumnSidecar, RandaoReveal, SignedAggregateAndProof,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
         SignedExecutionPayloadEnvelope as CombinedSignedExecutionPayloadEnvelope,
         SignedProposerPreferences as CombinedSignedProposerPreferences,
     },
@@ -70,6 +70,7 @@ use types::{
         containers::{AttestationData, Checkpoint},
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot, SubnetId, Uint256, ValidatorIndex},
     },
+    pq::containers::PayloadAttestationMessage as PqPayloadAttestationMessage,
     preset::Preset,
     traits::{BeaconBlock as _, BeaconState as _, PostAltairBeaconState, SszValidatorList},
 };
@@ -282,6 +283,222 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
             .chain
             .controller
             .dependent_root(&self.beacon_state, misc::previous_epoch(epoch))
+    }
+
+    #[expect(clippy::too_many_lines)]
+    /// Also produces PQ blocks, whose RANDAO reveal is a VRF proof.
+    pub async fn produce_block_with_reveal(
+        &self,
+        slot: Slot,
+        randao_reveal: RandaoReveal,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+        min_bid: Gwei,
+        builders: &ContiguousList<BuilderEntry, MaxBuilderEntries>,
+    ) -> Result<ProducedBlock<P>> {
+        ensure!(
+            slot == self.slot_head.slot(),
+            "the built-in beacon node produces blocks for slot {} only, not slot {slot}",
+            self.slot_head.slot(),
+        );
+
+        let proposer_index =
+            tokio::task::block_in_place(|| self.slot_head.proposer_index(&self.beacon_state))?;
+
+        let (parent_root, beacon_state) = self.proposal_parent(slot, proposer_index).await;
+        let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
+
+        let block_build_context = self.context.chain.block_producer.new_build_context(
+            beacon_state,
+            parent_root,
+            proposer_index,
+            BlockBuildOptions {
+                graffiti,
+                disable_blockprint_graffiti: self
+                    .context
+                    .validator_config
+                    .disable_blockprint_graffiti,
+                builder_boost_factor,
+                min_bid,
+                ..BlockBuildOptions::default()
+            },
+        );
+
+        let execution_payload_header_handle =
+            block_build_context.get_execution_payload_header(public_key);
+
+        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
+        let builder_api_bids_handle = if self.slot_head.phase() >= Phase::Gloas {
+            block_build_context.get_builder_api_bids(builders.clone())
+        } else {
+            None
+        };
+
+        let Some((
+            WithBlobsAndMev {
+                value: block,
+                proofs,
+                blobs,
+                ..
+            },
+            _block_rewards,
+            builder_url,
+        )) = block_build_context
+            .build_blinded_beacon_block(
+                randao_reveal,
+                execution_payload_header_handle,
+                local_execution_payload_handle,
+                builder_api_bids_handle,
+            )
+            .await?
+        else {
+            bail!("no block could be built for slot {slot}");
+        };
+
+        // The wait checked the payload the proposal was going to extend.
+        // Production picks the parent's node again, so it can extend a different payload.
+        // Its envelope may have arrived in between, or the PTC vote may have flipped the node.
+        // Never sign a block that extends a payload the execution engine has not validated.
+        let controller = &self.context.chain.controller;
+
+        let extended_payload_status = match &block {
+            ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
+                controller.wait_for_valid_extended_payload(block).await
+            }
+            ValidatorBlindedBlock::BeaconBlock(block) => {
+                controller.wait_for_valid_extended_payload(block).await
+            }
+        };
+
+        ensure!(
+            extended_payload_status.is_some_and(PayloadStatus::is_valid),
+            "the block extends a payload that is not fully validated \
+             (status: {extended_payload_status:?})",
+        );
+
+        let envelope_contents = match &block {
+            // The proposer builds and signs the envelope of a PQ block itself.
+            ValidatorBlindedBlock::BeaconBlock(block)
+                if block.phase() < Phase::Pq
+                    && block
+                        .payload_bid()
+                        .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD) =>
+            {
+                match self
+                    .context
+                    .chain
+                    .block_producer
+                    .build_local_execution_payload_envelope_contents(
+                        block.hash_tree_root(),
+                        block.parent_root(),
+                    )
+                    .await
+                {
+                    Some((envelope, blobs, kzg_proofs)) => Some(EnvelopeContents {
+                        envelope,
+                        kzg_proofs: ContiguousList::try_from_iter(kzg_proofs)?,
+                        blobs,
+                    }),
+                    None => {
+                        warn_with_peers!(
+                            "the payload of the self-built block for slot {slot} is missing, \
+                             so the block is published without it",
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // The blobs of a self-built payload travel with its envelope rather than the block.
+        Ok(match envelope_contents {
+            Some(_) => ProducedBlock {
+                block,
+                kzg_proofs: None,
+                blobs: None,
+                envelope_contents,
+                builder_url,
+            },
+            // From Gloas on a block without its own payload commits to a builder's blobs.
+            None if self.slot_head.phase() >= Phase::Gloas => ProducedBlock {
+                builder_url,
+                ..ProducedBlock::without_blobs(block)
+            },
+            None => ProducedBlock {
+                block,
+                kzg_proofs: proofs,
+                blobs,
+                envelope_contents: None,
+                builder_url,
+            },
+        })
+    }
+
+    pub fn publish_combined_proposer_preferences(
+        &self,
+        preferences: &[Arc<CombinedSignedProposerPreferences>],
+    ) {
+        for signed_preferences in preferences {
+            // Pass into own fork-choice store so bids for this slot pass the
+            // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
+            self.context
+                .chain
+                .controller
+                .on_own_proposer_preferences(signed_preferences.clone_arc());
+
+            ValidatorToP2p::PublishProposerPreferences(signed_preferences.clone_arc())
+                .send(&self.context.p2p_tx);
+        }
+    }
+
+    /// PQ blocks carry no payload attestations, so the messages are not aggregated.
+    pub fn publish_pq_payload_attestations(&self, messages: &[Arc<PqPayloadAttestationMessage>]) {
+        for message in messages {
+            self.context.chain.controller.on_payload_attestation(
+                self.wait_group.clone(),
+                PayloadAttestationItem::unverified(
+                    Arc::new(message.clone_arc().into()),
+                    PayloadAttestationOrigin::Own,
+                ),
+            );
+
+            ValidatorToP2p::PublishPqPayloadAttestation(message.clone_arc())
+                .send(&self.context.p2p_tx);
+        }
+    }
+
+    /// Also publishes PQ envelopes.
+    pub async fn publish_combined_execution_payload_envelope(
+        &self,
+        signed_envelope: Arc<CombinedSignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        if !blobs.is_empty() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                (signed_envelope.block_root(), signed_envelope.slot()).into(),
+                blobs.clone().into_iter(),
+                kzg_proofs.iter().copied().collect_vec(),
+                self.context.chain.controller.store_config().kzg_backend,
+                self.context.metrics.clone(),
+                self.context.dedicated_executor.clone_arc(),
+            )
+            .await?;
+
+            self.publish_data_column_sidecars(data_column_sidecars)
+                .await;
+        }
+
+        self.context
+            .chain
+            .controller
+            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
+
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.context.p2p_tx);
+
+        Ok(())
     }
 }
 
@@ -672,7 +889,6 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         Ok(())
     }
 
-    #[expect(clippy::too_many_lines)]
     async fn produce_block(
         &self,
         slot: Slot,
@@ -682,142 +898,15 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         min_bid: Gwei,
         builders: &ContiguousList<BuilderEntry, MaxBuilderEntries>,
     ) -> Result<ProducedBlock<P>> {
-        ensure!(
-            slot == self.slot_head.slot(),
-            "the built-in beacon node produces blocks for slot {} only, not slot {slot}",
-            self.slot_head.slot(),
-        );
-
-        let proposer_index =
-            tokio::task::block_in_place(|| self.slot_head.proposer_index(&self.beacon_state))?;
-
-        let (parent_root, beacon_state) = self.proposal_parent(slot, proposer_index).await;
-        let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
-
-        let block_build_context = self.context.chain.block_producer.new_build_context(
-            beacon_state,
-            parent_root,
-            proposer_index,
-            BlockBuildOptions {
-                graffiti,
-                disable_blockprint_graffiti: self
-                    .context
-                    .validator_config
-                    .disable_blockprint_graffiti,
-                builder_boost_factor,
-                min_bid,
-                ..BlockBuildOptions::default()
-            },
-        );
-
-        let execution_payload_header_handle =
-            block_build_context.get_execution_payload_header(public_key);
-
-        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
-
-        let builder_api_bids_handle = if self.slot_head.phase() >= Phase::Gloas {
-            block_build_context.get_builder_api_bids(builders.clone())
-        } else {
-            None
-        };
-
-        let Some((
-            WithBlobsAndMev {
-                value: block,
-                proofs,
-                blobs,
-                ..
-            },
-            _block_rewards,
-            builder_url,
-        )) = block_build_context
-            .build_blinded_beacon_block(
-                randao_reveal.into(),
-                execution_payload_header_handle,
-                local_execution_payload_handle,
-                builder_api_bids_handle,
-            )
-            .await?
-        else {
-            bail!("no block could be built for slot {slot}");
-        };
-
-        // The wait checked the payload the proposal was going to extend.
-        // Production picks the parent's node again, so it can extend a different payload.
-        // Its envelope may have arrived in between, or the PTC vote may have flipped the node.
-        // Never sign a block that extends a payload the execution engine has not validated.
-        let controller = &self.context.chain.controller;
-
-        let extended_payload_status = match &block {
-            ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
-                controller.wait_for_valid_extended_payload(block).await
-            }
-            ValidatorBlindedBlock::BeaconBlock(block) => {
-                controller.wait_for_valid_extended_payload(block).await
-            }
-        };
-
-        ensure!(
-            extended_payload_status.is_some_and(PayloadStatus::is_valid),
-            "the block extends a payload that is not fully validated \
-             (status: {extended_payload_status:?})",
-        );
-
-        let envelope_contents = match &block {
-            ValidatorBlindedBlock::BeaconBlock(block)
-                if block
-                    .payload_bid()
-                    .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD) =>
-            {
-                match self
-                    .context
-                    .chain
-                    .block_producer
-                    .build_local_execution_payload_envelope_contents(
-                        block.hash_tree_root(),
-                        block.parent_root(),
-                    )
-                    .await
-                {
-                    Some((envelope, blobs, kzg_proofs)) => Some(EnvelopeContents {
-                        envelope,
-                        kzg_proofs: ContiguousList::try_from_iter(kzg_proofs)?,
-                        blobs,
-                    }),
-                    None => {
-                        warn_with_peers!(
-                            "the payload of the self-built block for slot {slot} is missing, \
-                             so the block is published without it",
-                        );
-                        None
-                    }
-                }
-            }
-            _ => None,
-        };
-
-        // The blobs of a self-built payload travel with its envelope rather than the block.
-        Ok(match envelope_contents {
-            Some(_) => ProducedBlock {
-                block,
-                kzg_proofs: None,
-                blobs: None,
-                envelope_contents,
-                builder_url,
-            },
-            // From Gloas on a block without its own payload commits to a builder's blobs.
-            None if self.slot_head.phase() >= Phase::Gloas => ProducedBlock {
-                builder_url,
-                ..ProducedBlock::without_blobs(block)
-            },
-            None => ProducedBlock {
-                block,
-                kzg_proofs: proofs,
-                blobs,
-                envelope_contents: None,
-                builder_url,
-            },
-        })
+        self.produce_block_with_reveal(
+            slot,
+            randao_reveal.into(),
+            graffiti,
+            builder_boost_factor,
+            min_bid,
+            builders,
+        )
+        .await
     }
 
     async fn publish_block(
@@ -916,35 +1005,12 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
         blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
     ) -> Result<()> {
-        let envelope = &signed_envelope.message;
-
-        if !blobs.is_empty() {
-            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
-                (envelope.beacon_block_root, envelope.payload.slot_number).into(),
-                blobs.clone().into_iter(),
-                kzg_proofs.iter().copied().collect_vec(),
-                self.context.chain.controller.store_config().kzg_backend,
-                self.context.metrics.clone(),
-                self.context.dedicated_executor.clone_arc(),
-            )
-            .await?;
-
-            self.publish_data_column_sidecars(data_column_sidecars)
-                .await;
-        }
-
         let signed_envelope = Arc::new(CombinedSignedExecutionPayloadEnvelope::from(
             signed_envelope.as_ref().clone(),
         ));
 
-        self.context
-            .chain
-            .controller
-            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
-
-        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.context.p2p_tx);
-
-        Ok(())
+        self.publish_combined_execution_payload_envelope(signed_envelope, kzg_proofs, blobs)
+            .await
     }
 
     async fn prepare_beacon_proposer(
@@ -966,21 +1032,16 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         &self,
         preferences: &[Arc<SignedProposerPreferences>],
     ) -> Result<()> {
-        for signed_preferences in preferences {
-            let signed_preferences = Arc::new(CombinedSignedProposerPreferences::from(
-                *signed_preferences.as_ref(),
-            ));
+        let preferences = preferences
+            .iter()
+            .map(|signed_preferences| {
+                Arc::new(CombinedSignedProposerPreferences::from(
+                    *signed_preferences.as_ref(),
+                ))
+            })
+            .collect::<Vec<_>>();
 
-            // Pass into own fork-choice store so bids for this slot pass the
-            // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
-            self.context
-                .chain
-                .controller
-                .on_own_proposer_preferences(signed_preferences.clone_arc());
-
-            ValidatorToP2p::PublishProposerPreferences(signed_preferences)
-                .send(&self.context.p2p_tx);
-        }
+        self.publish_combined_proposer_preferences(&preferences);
 
         Ok(())
     }

@@ -93,7 +93,10 @@ use tracing::{error, info, warn};
 use types::{
     config::Config as ChainConfig,
     nonstandard::PublishedDuty,
-    phase0::{consts::GENESIS_SLOT, primitives::H256},
+    phase0::{
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+        primitives::H256,
+    },
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -1012,6 +1015,33 @@ async fn run_services<P: Preset>(
         let current_slot = Tick::current::<P>(&chain_config, genesis.genesis_time)?.slot;
 
         signer.update_doppelganger_protection_pubkeys(current_slot);
+    }
+
+    if chain_config.pq_fork_epoch != FAR_FUTURE_EPOCH {
+        // In memory, the trees are rebuilt on every start.
+        let vrf_tree_directory = (!in_memory)
+            .then(|| directories.validator_dir.as_ref())
+            .flatten()
+            .map(|validator_dir| validator_dir.join("pq_vrf_trees"));
+
+        info_with_peers!("deriving PQ keys of the validators");
+
+        {
+            let signer = signer.clone_arc();
+            let vrf_tree_directory = vrf_tree_directory.clone();
+
+            tokio::task::spawn_blocking(move || signer.load_pq_keys(vrf_tree_directory.as_deref()))
+                .await??;
+        }
+
+        // TODO(PQ): Load the PQ keys of keys added through the key manager API.
+        let signer = signer.clone_arc();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = signer.build_missing_vrf_trees() {
+                warn_with_peers!("failed to build VRF trees: {error:?}");
+            }
+        });
     }
 
     let own_validator_indices = Arc::new(OwnValidatorIndices::new(signer.clone_arc()));

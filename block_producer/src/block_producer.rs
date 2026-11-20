@@ -113,6 +113,7 @@ use types::{
         containers::{
             Attestation as PqAttestation, AttesterSlashing as PqAttesterSlashing,
             BeaconBlock as PqBeaconBlock, BeaconBlockBody as PqBeaconBlockBody,
+            ExecutionPayloadEnvelope as PqExecutionPayloadEnvelope,
             ExecutionRequests as PqExecutionRequests, ProposerSlashing as PqProposerSlashing,
             SignedExecutionPayloadBid as PqSignedExecutionPayloadBid,
         },
@@ -865,7 +866,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             ..
         } = local_payload.result;
 
-        // TODO(PQ): Build PQ envelopes once the validator signs them with XMSS.
         let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Gloas(execution_requests))) =
             (execution_payload, execution_requests)
         else {
@@ -885,6 +885,63 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         };
 
         Some((envelope, blobs, kzg_proofs))
+    }
+
+    /// The envelope of a self-built PQ block: the cached local payload with the PQ execution
+    /// requests the execution engine returned for it.
+    pub async fn build_local_pq_execution_payload_envelope_contents(
+        &self,
+        beacon_block_root: H256,
+        parent_beacon_block_root: H256,
+    ) -> Option<(
+        PqExecutionPayloadEnvelope<P>,
+        ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        KzgProofs<P>,
+    )> {
+        let payload_root = self
+            .producer_context
+            .cached_payload_roots
+            .lock()
+            .await
+            .cache_get(&parent_beacon_block_root)
+            .copied()?;
+
+        let local_payload = self
+            .producer_context
+            .payload_cache
+            .lock()
+            .await
+            .cache_get(&payload_root)
+            .cloned()?;
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            execution_requests,
+            proofs,
+            blobs,
+            ..
+        } = local_payload.result;
+
+        let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Pq(execution_requests))) =
+            (execution_payload, execution_requests)
+        else {
+            warn_with_peers!("unexpected payload format in PQ envelope data");
+            return None;
+        };
+
+        let envelope = PqExecutionPayloadEnvelope {
+            payload,
+            execution_requests,
+            builder_index: BUILDER_INDEX_SELF_BUILD,
+            beacon_block_root,
+            parent_beacon_block_root,
+        };
+
+        Some((
+            envelope,
+            blobs.unwrap_or_default(),
+            proofs.unwrap_or_else(KzgProofs::empty_fulu),
+        ))
     }
 
     pub async fn track_collection_metrics(&self) {

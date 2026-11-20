@@ -16,6 +16,7 @@ doppelganger_protection = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
+hex = { workspace = true }
 itertools = { workspace = true }
 logging = { workspace = true }
 prometheus_metrics = { workspace = true }
@@ -23,6 +24,7 @@ rayon = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
+sha2 = { workspace = true }
 slashing_protection = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
@@ -30,6 +32,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 types = { workspace = true }
+xmss = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 helper_functions = { workspace = true }

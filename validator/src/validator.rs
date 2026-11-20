@@ -121,6 +121,8 @@ use crate::{
     validator_config::ValidatorConfig,
 };
 
+mod pq_duties;
+
 const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 
 // Some relays reject requests whose bodies are too long.
@@ -1327,6 +1329,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
+        if slot_head.phase() == Phase::Pq {
+            return self.propose_pq(beacon_nodes).await;
+        }
+
         let (proposer_index, public_key) = match beacon_nodes.state() {
             Some(beacon_state) => {
                 let proposer_index =
@@ -1854,6 +1860,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[instrument(level = "debug", skip_all)]
     async fn publish_aggregates_and_proofs(&self, beacon_nodes: &BeaconNodes<P, W>) {
         let slot_head = beacon_nodes.head();
+
+        if slot_head.phase() == Phase::Pq {
+            self.publish_pq_aggregates_and_proofs(beacon_nodes).await;
+            return;
+        }
+
         let config = &self.chain_source.chain_config;
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -2059,6 +2071,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     // Whether the duty runs on the `Attest` or `Aggregate` tick itself.
     // It does when its due point is that tick's start, as on every predefined network.
     fn sync_committee_duty_starts_at(&self, tick: Tick, duty: SyncCommitteeDuty) -> bool {
+        // PQ removes sync committees.
+        if self.chain_source.chain_config.phase_at_slot::<P>(tick.slot) == Phase::Pq {
+            return false;
+        }
+
         let interval_kind = match duty {
             SyncCommitteeDuty::Messages => TickKind::Attest,
             SyncCommitteeDuty::Contributions => TickKind::Aggregate,
@@ -2080,6 +2097,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     // That tick sets a timer, and the duty runs when it fires.
     fn schedule_sync_committee_duties(&self, tick: Tick, wait_group: &W) {
         let config = &self.chain_source.chain_config;
+
+        // PQ removes sync committees.
+        if config.phase_at_slot::<P>(tick.slot) == Phase::Pq {
+            return;
+        }
 
         for duty in [
             SyncCommitteeDuty::Messages,
@@ -2463,6 +2485,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
+        if slot_head.phase() == Phase::Pq {
+            return self
+                .attest_payload_pq(beacon_nodes, data, &own_members)
+                .await;
+        }
+
         let own_payload_attestations = self
             .own_payload_attestations(slot_head, data, &own_members)
             .await;
@@ -2795,6 +2823,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // slot after an early attempt that found no data.
         if attestation_data.is_empty() {
             return &[];
+        }
+
+        if phase == Phase::Pq {
+            let own_attestations = match self
+                .own_pq_singular_attestations(slot_head, own_members, &attestation_data)
+                .await
+            {
+                Ok(own_attestations) => own_attestations,
+                Err(error) => {
+                    warn_with_peers!("failed to sign PQ attestations: {error:?}");
+                    return &[];
+                }
+            };
+
+            return self
+                .own_singular_attestations
+                .get_or_init(|| own_attestations)
+                .as_slice();
         }
 
         let snapshot = self.signer.load();
@@ -3340,9 +3386,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
+        let is_pq = self.chain_source.chain_config.phase_at_slot::<P>(tick.slot) == Phase::Pq;
+
         if tick.is_start_of_slot() {
             self.spawn_update_beacon_committee_subscriptions(wait_group.clone(), &beacon_nodes);
-            self.spawn_prefetch_sync_committee_duties(wait_group.clone(), &beacon_nodes);
+
+            // PQ removes sync committees.
+            if !is_pq {
+                self.spawn_prefetch_sync_committee_duties(wait_group.clone(), &beacon_nodes);
+            }
+        }
+
+        if is_pq {
+            return Ok(());
         }
 
         self.update_sync_committee_subscriptions(&beacon_nodes)
@@ -3444,6 +3500,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
     async fn register_validators(&mut self, slot: Slot, current_epoch: Epoch) {
+        // TODO(PQ): Register PQ validators with builders.
+        if self.chain_source.chain_config.phase_at_epoch(current_epoch) == Phase::Pq {
+            return;
+        }
+
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch = last_registration_epoch
                 .saturating_add(EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION);
@@ -3691,7 +3752,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     // Builders learn the proposer's preferences ahead of its proposals.
     // The request auths signed for them are reused when the block is produced.
     #[instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_lines)]
     async fn submit_builder_preferences(&self, beacon_nodes: &BeaconNodes<P, W>) {
+        // TODO(PQ): Sign builder request auths with XMSS keys.
+        if beacon_nodes.head().phase() == Phase::Pq {
+            return;
+        }
+
         let signer_snapshot = self.signer.load().clone_arc();
 
         if signer_snapshot.no_keys() {
@@ -3861,6 +3928,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         drop(published);
 
+        let (pq_preferences, preferences): (Vec<_>, Vec<_>) =
+            preferences.into_iter().partition(|(_, preferences)| {
+                chain_config.phase_at_slot::<P>(preferences.proposal_slot) == Phase::Pq
+            });
+
+        if !pq_preferences.is_empty() {
+            self.publish_pq_proposer_preferences(beacon_nodes, pq_preferences);
+        }
+
         if preferences.is_empty() {
             return;
         }
@@ -3969,7 +4045,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .load()
             .keys()
             .filter_map(|pubkey| {
-                let validator_index = accessors::index_of_public_key(beacon_state, pubkey)?;
+                // A PQ state holds the XMSS keys derived from the BLS keys the signer holds.
+                let state_pubkey = match self.signer.pq_key(*pubkey) {
+                    Some(pq_key) if beacon_state.is_post_pq() => pq_key.state_public_key(),
+                    _ => *pubkey,
+                };
+
+                let validator_index = accessors::index_of_public_key(beacon_state, &state_pubkey)?;
                 Some((validator_index, *pubkey))
             })
             .collect::<HashMap<_, _>>();

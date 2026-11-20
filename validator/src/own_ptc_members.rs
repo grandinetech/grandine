@@ -195,10 +195,18 @@ impl OwnPTCMembers {
         duties
             .into_iter()
             // A duty for a key we do not hold would fail the whole signing batch.
-            .filter(|duty| signer_snapshot.has_key(duty.pubkey))
-            .map(|duty| PTCMember {
-                public_key: duty.pubkey,
-                validator_index: duty.validator_index,
+            // A PQ state holds the XMSS keys derived from the BLS keys the signer holds.
+            .filter_map(|duty| {
+                let public_key = if signer_snapshot.has_key(duty.pubkey) {
+                    duty.pubkey
+                } else {
+                    self.signer.bls_public_key_of(duty.pubkey)?
+                };
+
+                Some(PTCMember {
+                    public_key,
+                    validator_index: duty.validator_index,
+                })
             })
             // A validator drawn into several positions still sends a single message.
             .unique_by(|member| member.validator_index)

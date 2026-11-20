@@ -9,7 +9,10 @@ use logging::{debug_with_peers, warn_with_peers};
 use signer::Signer;
 use tokio::sync::Mutex;
 use types::{
-    phase0::primitives::{Epoch, ValidatorIndex},
+    phase0::{
+        consts::FAR_FUTURE_EPOCH,
+        primitives::{Epoch, ValidatorIndex},
+    },
     preset::Preset,
 };
 
@@ -110,8 +113,38 @@ impl OwnValidatorIndices {
             return;
         }
 
-        let resolved = match chain_source.validator_indices(&to_resolve).await {
-            Ok(resolved) => resolved,
+        // A PQ state holds the XMSS public keys derived from the BLS ones.
+        let state_keys = if chain_source.chain_config.pq_fork_epoch == FAR_FUTURE_EPOCH {
+            to_resolve
+                .iter()
+                .map(|public_key| (*public_key, *public_key))
+                .collect()
+        } else {
+            let state_keys = to_resolve
+                .iter()
+                .filter_map(|public_key| {
+                    let pq_key = self.signer.pq_key(*public_key)?;
+                    Some((pq_key.state_public_key(), *public_key))
+                })
+                .collect::<HashMap<_, _>>();
+
+            // A key whose PQ key is not derived yet is retried every slot.
+            if state_keys.len() < to_resolve.len() {
+                self.last_resolve_failed.store(true, Ordering::Relaxed);
+            }
+
+            state_keys
+        };
+
+        let lookup_keys = state_keys.keys().copied().collect_vec();
+
+        let resolved = match chain_source.validator_indices(&lookup_keys).await {
+            Ok(resolved) => resolved
+                .into_iter()
+                .filter_map(|(state_key, validator_index)| {
+                    Some((*state_keys.get(&state_key)?, validator_index))
+                })
+                .collect::<HashMap<_, _>>(),
             Err(error) => {
                 warn_with_peers!("failed to resolve validator indices: {error:?}");
                 self.last_resolve_failed.store(true, Ordering::Relaxed);

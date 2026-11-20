@@ -16,6 +16,7 @@ pub mod predicates;
 pub mod signing;
 pub mod slot_report;
 pub mod verifier;
+pub mod vrf_tree;
 
 // The runner for `bls/eth_fast_aggregate_verify` test cases uses `Verifier` from this crate.
 // The runner had to be moved here due to an unexpected issue with cyclic dependencies. See:

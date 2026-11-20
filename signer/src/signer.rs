@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    sync::Arc,
+    path::Path,
+    sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use anyhow::{Error as AnyhowError, Result};
@@ -30,8 +31,11 @@ use types::{
     redacting_url::RedactingUrl,
 };
 
+use xmss::{LeafIndex, XmssSignature};
+
 use crate::{
     Web3SignerConfig,
+    pq::{PqKey, PqKeys},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::{FetchedKeys, Web3Signer},
 };
@@ -44,6 +48,8 @@ const MAX_CONCURRENT_WEB3SIGNER_REQUESTS: usize = 32;
 enum Error {
     #[error("Cannot sign due to missing credentials for a public key: {public_key:?}")]
     MissingCredentials { public_key: PublicKeyBytes },
+    #[error("Cannot sign with XMSS due to a missing PQ key for a public key: {public_key:?}")]
+    MissingPqKey { public_key: PublicKeyBytes },
 }
 
 #[derive(Clone, Copy)]
@@ -66,6 +72,8 @@ enum SignMethod {
 pub struct Signer {
     snapshot: ArcSwap<Snapshot>,
     keys_changed: Notify,
+    // Keyed by the BLS public key of the local key the PQ key was derived from.
+    pq_keys: RwLock<PqKeys>,
 }
 
 impl Signer {
@@ -91,7 +99,142 @@ impl Signer {
         Self {
             snapshot,
             keys_changed: Notify::new(),
+            pq_keys: RwLock::default(),
         }
+    }
+
+    /// Derives the PQ keys of the local keys that do not have them yet, caching their VRF trees
+    /// in `cache_directory`. Building a VRF tree takes minutes.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn load_pq_keys(&self, cache_directory: Option<&Path>) -> Result<()> {
+        let local_keys = self
+            .load()
+            .sign_methods
+            .iter()
+            .filter_map(|(public_key, sign_method)| match sign_method {
+                SignMethod::SecretKey(secret_key, _) => Some((*public_key, secret_key.clone_arc())),
+                // TODO(PQ): Sign with XMSS through Web3Signer.
+                SignMethod::Web3Signer(_) => None,
+            })
+            .filter(|(public_key, _)| !self.pq_keys_read().contains_key(public_key))
+            .collect_vec();
+
+        for (public_key, secret_key) in local_keys {
+            let pq_key = PqKey::load(public_key, &secret_key, cache_directory)?;
+
+            info_with_peers!(
+                "loaded PQ key for validator {public_key:?} (XMSS public key: {:?})",
+                pq_key.xmss_public_key(),
+            );
+
+            self.pq_keys_write().insert(public_key, Arc::new(pq_key));
+        }
+
+        Ok(())
+    }
+
+    /// Builds the VRF trees the loaded PQ keys do not have yet, one at a time. Takes minutes per
+    /// key. Until its tree is built, a validator cannot propose.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn build_missing_vrf_trees(&self) -> Result<()> {
+        let missing = self
+            .pq_keys_read()
+            .iter()
+            .filter(|(_, pq_key)| !pq_key.has_vrf_tree())
+            .map(|(public_key, pq_key)| (*public_key, pq_key.clone_arc()))
+            .collect_vec();
+
+        for (index, (public_key, pq_key)) in missing.iter().enumerate() {
+            info_with_peers!(
+                "building VRF tree {} of {} (validator: {public_key:?})",
+                index.saturating_add(1),
+                missing.len(),
+            );
+
+            pq_key.build_vrf_tree()?;
+        }
+
+        Ok(())
+    }
+
+    /// The BLS public key of the local key whose PQ key a PQ state holds as `state_public_key`.
+    #[must_use]
+    pub fn bls_public_key_of(&self, state_public_key: PublicKeyBytes) -> Option<PublicKeyBytes> {
+        self.pq_keys_read()
+            .iter()
+            .find(|(_, pq_key)| pq_key.state_public_key() == state_public_key)
+            .map(|(public_key, _)| *public_key)
+    }
+
+    #[must_use]
+    pub fn pq_key(&self, public_key: PublicKeyBytes) -> Option<Arc<PqKey>> {
+        self.pq_keys_read().get(&public_key).cloned()
+    }
+
+    /// Signs each signing root with the XMSS key derived from the BLS public key at its leaf,
+    /// after recording the leaf in `slashing_protector`.
+    ///
+    /// A leaf that already holds a different signing root is not signed again, and its entry is
+    /// `None`. Signing it would let anyone forge signatures at that leaf.
+    pub async fn sign_pq(
+        &self,
+        requests: Vec<(PublicKeyBytes, u64, H256)>,
+        slashing_protector: &Mutex<SlashingProtector>,
+    ) -> Result<Vec<Option<XmssSignature>>> {
+        let reservations = slashing_protector
+            .lock()
+            .await
+            .reserve_xmss_leaves(requests.iter().copied())?;
+
+        let to_sign = izip!(requests, reservations)
+            .map(|((public_key, leaf_index, signing_root), reservation)| {
+                if !reservation.may_sign() {
+                    warn_with_peers!(
+                        "refusing to sign at XMSS leaf {leaf_index} of {public_key:?} again \
+                         ({reservation:?}, signing root: {signing_root:?})",
+                    );
+
+                    return Ok(None);
+                }
+
+                let pq_key = self
+                    .pq_key(public_key)
+                    .ok_or(Error::MissingPqKey { public_key })?;
+
+                Ok(Some((
+                    pq_key,
+                    LeafIndex::try_from(leaf_index)?,
+                    signing_root,
+                )))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        tokio::task::spawn_blocking(move || {
+            to_sign
+                .into_par_iter()
+                .map(|request| {
+                    request
+                        .map(|(pq_key, leaf_index, signing_root)| {
+                            pq_key
+                                .xmss()
+                                .sign(signing_root.as_fixed_bytes(), leaf_index)
+                        })
+                        .transpose()
+                        .map_err(Into::into)
+                })
+                .collect()
+        })
+        .await?
+    }
+
+    fn pq_keys_read(&self) -> RwLockReadGuard<'_, PqKeys> {
+        self.pq_keys.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn pq_keys_write(&self) -> RwLockWriteGuard<'_, PqKeys> {
+        self.pq_keys.write().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn enable_doppelganger_protection(

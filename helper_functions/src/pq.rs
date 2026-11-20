@@ -117,7 +117,7 @@ pub fn vrf_root_from_signature_field(signature: &[u8]) -> H256 {
 }
 
 /// [`keccak256`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-keccak256)
-fn keccak256(parts: &[&[u8]]) -> H256 {
+pub(crate) fn keccak256(parts: &[&[u8]]) -> H256 {
     let mut hasher = Keccak::v256();
     let mut output = [0; 32];
 
@@ -143,18 +143,21 @@ pub fn is_valid_vrf_proof(vrf_root: H256, slot: Slot, proof: &VrfProof) -> bool 
         .split_first()
         .expect("a VRF proof always has VRF_TREE_DEPTH + 1 entries");
 
-    let root = branch.iter().zip(0..).fold(
-        compute_vrf_leaf(*secret, slot),
+    vrf_root_from_branch(*secret, slot, branch) == vrf_root
+}
+
+/// The root of a VRF tree whose leaf at `index` commits to `secret`, given the leaf's branch.
+pub(crate) fn vrf_root_from_branch(secret: H256, index: u64, branch: &[H256]) -> H256 {
+    branch.iter().zip(0..).fold(
+        compute_vrf_leaf(secret, index),
         |value, (sibling, height)| {
-            if slot >> height & 1 == 1 {
+            if index >> height & 1 == 1 {
                 keccak256(&[sibling.as_bytes(), value.as_bytes()])
             } else {
                 keccak256(&[value.as_bytes(), sibling.as_bytes()])
             }
         },
-    );
-
-    root == vrf_root
+    )
 }
 
 /// `xmss.Verify` with the public key of the validator at `validator_index`.

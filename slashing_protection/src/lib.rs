@@ -102,6 +102,24 @@ pub struct Attestation {
     pub signing_root: Option<H256>,
 }
 
+/// The outcome of [`SlashingProtector::reserve_xmss_leaves`] for one leaf.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LeafReservation {
+    /// The leaf was unused and now holds the signing root.
+    New,
+    /// The leaf already holds the same signing root. Signing it again exposes nothing.
+    SameRoot,
+    /// The leaf holds a different signing root. Signing at it would expose the leaf.
+    Conflict { signed_root: H256 },
+}
+
+impl LeafReservation {
+    #[must_use]
+    pub const fn may_sign(self) -> bool {
+        matches!(self, Self::New | Self::SameRoot)
+    }
+}
+
 #[derive(Default)]
 #[cfg_attr(test, derive(Debug))]
 pub struct ImportReport {
@@ -571,6 +589,55 @@ impl SlashingProtector {
         );
 
         Ok(SlashingValidationOutcome::Accept)
+    }
+
+    /// Records that each validator is about to sign `signing_root` with its XMSS key at
+    /// `leaf_index`, unless it already signed a different root there.
+    ///
+    /// An XMSS key must never sign two different messages at one leaf. Callers must sign only the
+    /// leaves reported as [`LeafReservation::New`] or [`LeafReservation::SameRoot`].
+    pub fn reserve_xmss_leaves(
+        &mut self,
+        leaves: impl IntoIterator<Item = (PublicKeyBytes, u64, H256)>,
+    ) -> Result<Vec<LeafReservation>> {
+        let transaction = self.transaction()?;
+
+        let reservations = leaves
+            .into_iter()
+            .map(|(pubkey, leaf_index, signing_root)| {
+                let validator_id = Self::find_or_store_validator(&transaction, pubkey)?;
+
+                let signed_root = transaction
+                    .query_row(
+                        "SELECT signing_root FROM signed_leaves
+                        WHERE validator_id = ?1 AND leaf_index = ?2",
+                        (validator_id, leaf_index),
+                        |row| row.get::<_, [u8; 32]>(0),
+                    )
+                    .optional()?
+                    .map(H256);
+
+                let reservation = match signed_root {
+                    Some(signed_root) if signed_root == signing_root => LeafReservation::SameRoot,
+                    Some(signed_root) => LeafReservation::Conflict { signed_root },
+                    None => {
+                        transaction.execute(
+                            "INSERT INTO signed_leaves (validator_id, leaf_index, signing_root)
+                            VALUES (?1, ?2, ?3)",
+                            (validator_id, leaf_index, signing_root.as_bytes()),
+                        )?;
+
+                        LeafReservation::New
+                    }
+                };
+
+                Ok(reservation)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        transaction.commit()?;
+
+        Ok(reservations)
     }
 
     pub fn validate_and_store_own_block_proposal(
@@ -1046,6 +1113,53 @@ mod tests {
     const ATTESTATION_SIGNING_ROOT: H256 = H256(hex!(
         "587d6a4f59a58fe24f406e0502413e77fe1babddee641fda30034ed37ecc884d"
     ));
+
+    #[test]
+    fn xmss_leaves_refuse_a_second_signing_root_across_restarts() -> Result<()> {
+        let store_directory = Builder::new().tempdir()?;
+        let validator_directory = Builder::new().tempdir()?;
+        let open = || {
+            SlashingProtector::persistent(
+                store_directory.path(),
+                validator_directory.path(),
+                DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
+                H256::zero(),
+            )
+        };
+
+        let mut protector = open()?;
+
+        assert_eq!(
+            protector.reserve_xmss_leaves([
+                (PUBKEY, 7, BLOCK_SIGNING_ROOT),
+                (PUBKEY, 8, ATTESTATION_SIGNING_ROOT),
+            ])?,
+            [LeafReservation::New, LeafReservation::New],
+        );
+
+        drop(protector);
+
+        let mut protector = open()?;
+
+        let reservations = protector.reserve_xmss_leaves([
+            (PUBKEY, 7, BLOCK_SIGNING_ROOT),
+            (PUBKEY, 8, BLOCK_SIGNING_ROOT),
+        ])?;
+
+        assert_eq!(
+            reservations,
+            [
+                LeafReservation::SameRoot,
+                LeafReservation::Conflict {
+                    signed_root: ATTESTATION_SIGNING_ROOT,
+                },
+            ],
+        );
+        assert!(reservations[0].may_sign());
+        assert!(!reservations[1].may_sign());
+
+        Ok(())
+    }
 
     // Bundle `TempDir` with `SlashingProtector` to prevent the directory from being dropped early.
     // Calls to SQLite fail if the directory containing the database is deleted.

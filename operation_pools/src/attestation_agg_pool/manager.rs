@@ -29,7 +29,7 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
-        conversion::current_state,
+        conversion::{compute_pq_on_chain_aggregate, current_state},
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask,
@@ -190,6 +190,20 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             scoring_state,
         })
         .await
+    }
+
+    /// The pooled PQ aggregate of `key` with the most attesters, and its proof.
+    pub async fn best_pq_aggregate(
+        &self,
+        key: AttestationKey,
+    ) -> Result<Option<(PqAttestation<P>, AttestationProof<P>)>> {
+        let Some(aggregate) = self.pool.best_pq_aggregate(key).await else {
+            return Ok(None);
+        };
+
+        let (attestation, mut proofs) = compute_pq_on_chain_aggregate([aggregate.as_ref()])?;
+
+        Ok(proofs.pop().map(|proof| (attestation, proof)))
     }
 
     /// Pools a validated PQ aggregate with its proof.

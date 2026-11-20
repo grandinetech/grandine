@@ -1,4 +1,5 @@
 pub use crate::{
+    pq::PqKey,
     signer::{KeyOrigin, Signer, Snapshot},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::{
@@ -7,6 +8,7 @@ pub use crate::{
     },
 };
 
+mod pq;
 mod signer;
 mod types;
 mod web3signer {

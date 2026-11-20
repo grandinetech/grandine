@@ -8579,6 +8579,7 @@ dependencies = [
  "fs-err",
  "futures",
  "helper_functions",
+ "hex",
  "hex-literal",
  "httpmock",
  "itertools 0.14.0",
@@ -8590,6 +8591,7 @@ dependencies = [
  "serde-aux",
  "serde_json",
  "serde_utils",
+ "sha2 0.10.9",
  "slashing_protection",
  "ssz",
  "std_ext",
@@ -8597,6 +8599,8 @@ dependencies = [
  "tokio",
  "tracing",
  "types",
+ "xmss",
+ "zeroize",
 ]
 
 [[package]]
@@ -10110,6 +10114,7 @@ dependencies = [
  "typenum",
  "types",
  "validator_statistics",
+ "xmss",
  "zeroize",
 ]
 

@@ -152,6 +152,20 @@ impl<P: Preset> Pool<P> {
         self.pq_signatures.lock().await.seal(slot)
     }
 
+    pub async fn best_pq_aggregate(
+        &self,
+        key: AttestationKey,
+    ) -> Option<Arc<PqPoolAttestation<P>>> {
+        self.pq_aggregates
+            .read()
+            .await
+            .get(&key.data.target.epoch)?
+            .get(&key)?
+            .iter()
+            .max_by_key(|aggregate| aggregate.aggregation_bits.count_ones())
+            .cloned()
+    }
+
     pub async fn pq_aggregates_by_epoch(&self, epoch: Epoch) -> Vec<Arc<PqPoolAttestation<P>>> {
         self.pq_aggregates
             .read()

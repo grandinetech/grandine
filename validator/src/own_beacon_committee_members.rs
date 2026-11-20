@@ -5,10 +5,10 @@ use std::{
 };
 
 use anyhow::Result;
-use bls::{PublicKeyBytes, SignatureBytes};
+use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use helper_functions::{misc, predicates, signing::SignForSingleFork};
+use helper_functions::{misc, pq, predicates, signing::SignForSingleFork};
 use http_api_utils::ValidatorAttesterDutyResponse;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};
@@ -24,6 +24,7 @@ use types::{
     config::Config as ChainConfig,
     nonstandard::ForkInfo,
     phase0::primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
+    pq::beacon_state::BeaconState as PqBeaconState,
     preset::Preset,
 };
 
@@ -207,6 +208,12 @@ impl OwnBeaconCommitteeMembers {
         let duties =
             tokio::task::block_in_place(|| attester_duties_at_slot(state, slot, &indices))?;
 
+        if let BeaconState::Pq(state) = state {
+            return self
+                .init_pq_from_duties::<P>(state, dependent_root, slot, duties)
+                .await;
+        }
+
         self.init_from_duties::<P>(
             ForkInfo::from_state(state),
             dependent_root,
@@ -214,6 +221,68 @@ impl OwnBeaconCommitteeMembers {
             duties,
         )
         .await
+    }
+
+    /// PQ aggregators are drawn into the aggregation committee instead of selecting themselves,
+    /// and duties name the XMSS keys a PQ state holds.
+    async fn init_pq_from_duties<P: Preset>(
+        &self,
+        state: &PqBeaconState<P>,
+        dependent_root: H256,
+        slot: Slot,
+        duties: Vec<ValidatorAttesterDutyResponse>,
+    ) -> Result<()> {
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        let mut members = vec![];
+
+        for duty in duties.into_iter().unique_by(|duty| duty.validator_index) {
+            let ValidatorAttesterDutyResponse {
+                committee_index,
+                committee_length,
+                committees_at_slot,
+                pubkey,
+                slot,
+                validator_committee_index,
+                validator_index,
+            } = duty;
+
+            let Some(public_key) = self.signer.bls_public_key_of(pubkey) else {
+                continue;
+            };
+
+            members.push(BeaconCommitteeMember {
+                public_key,
+                validator_index,
+                committee_index,
+                committee_size: committee_length,
+                committees_at_slot,
+                position_in_committee: validator_committee_index,
+                slot,
+                is_aggregator: pq::is_aggregator(state, slot, committee_index, validator_index)?,
+                selection_proof: SignatureBytes::empty(),
+            });
+        }
+
+        members
+            .sort_unstable_by_key(|member| (member.committee_index, member.position_in_committee));
+
+        let members_by_slot = BTreeMap::from([(slot, members.into())]);
+
+        match self.members.entry_async(epoch).await {
+            Entry::Occupied(mut occupied) => {
+                if occupied.dependent_root == dependent_root && !occupied.stale_for_other_keys {
+                    occupied.members_by_slot.extend(members_by_slot);
+                } else {
+                    *occupied.get_mut() = EpochMembers::new(dependent_root, members_by_slot);
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert_entry(EpochMembers::new(dependent_root, members_by_slot));
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn cached_dependent_root(&self, epoch: Epoch) -> Option<H256> {

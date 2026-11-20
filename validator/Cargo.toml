@@ -67,6 +67,7 @@ tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 validator_statistics = { workspace = true }
+xmss = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]

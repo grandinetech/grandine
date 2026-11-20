@@ -35,6 +35,7 @@ use types::{
         containers::{Checkpoint, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, H256, Slot, SubnetId, ValidatorIndex},
     },
+    pq::containers::PayloadAttestationMessage as PqPayloadAttestationMessage,
     preset::Preset,
 };
 
@@ -231,6 +232,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
     PublishPayloadAttestation(Arc<PayloadAttestationMessage>),
+    PublishPqPayloadAttestation(Arc<PqPayloadAttestationMessage>),
     PublishProposerPreferences(Arc<SignedProposerPreferences>),
     UpdateDataColumnSubnets(u64),
 }
