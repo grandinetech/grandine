@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bitvec::vec::BitVec;
-use diff::{Error, Patch, PatchConfig, PositionSet, QueuePatch, Unlimited};
+use diff::{Error, Patch, PatchConfig, PositionSet, QueuePatch, Unlimited, VectorPatch};
 use helper_functions::{accessors, predicates};
 use itertools::izip;
 use pubkey_cache::PubkeyCache;
@@ -18,6 +18,10 @@ use types::{
     combined::BeaconState,
     config::Config,
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
+    gloas::{
+        builder_list_patch::BuilderListPatch,
+        containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
+    },
     nonstandard::{BlockRewards, Phase},
     phase0::{
         balances_patch::BalancesPatch,
@@ -152,6 +156,33 @@ impl DerivedFields {
     ) -> Option<Vec<QueuePatch<PendingConsolidation>>> {
         match self {
             Self::V1(fields) => fields.pending_consolidation_patches(count),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_patches(&self, count: usize) -> Option<Vec<BuilderListPatch>> {
+        match self {
+            Self::V1(fields) => fields.builder_patches(count),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_pending_payment_patches(
+        &self,
+        count: usize,
+    ) -> Option<Vec<VectorPatch<BuilderPendingPayment>>> {
+        match self {
+            Self::V1(fields) => fields.builder_pending_payment_patches(count),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_pending_withdrawal_patches(
+        &self,
+        count: usize,
+    ) -> Option<Vec<QueuePatch<BuilderPendingWithdrawal>>> {
+        match self {
+            Self::V1(fields) => fields.builder_pending_withdrawal_patches(count),
         }
     }
 }
@@ -488,6 +519,66 @@ impl DerivedFieldsV1 {
                 slots
                     .iter()
                     .map(|slot| slot.pending_consolidations.clone())
+                    .collect()
+            }),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_patches(&self, count: usize) -> Option<Vec<BuilderListPatch>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => None,
+            Self::Gloas(fields) => fields
+                .slots(count)
+                .map(|slots| slots.iter().map(|slot| slot.builders.clone()).collect()),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_pending_payment_patches(
+        &self,
+        count: usize,
+    ) -> Option<Vec<VectorPatch<BuilderPendingPayment>>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => None,
+            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+                slots
+                    .iter()
+                    .map(|slot| slot.builder_pending_payments.clone())
+                    .collect()
+            }),
+        }
+    }
+
+    #[must_use]
+    pub fn builder_pending_withdrawal_patches(
+        &self,
+        count: usize,
+    ) -> Option<Vec<QueuePatch<BuilderPendingWithdrawal>>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => None,
+            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+                slots
+                    .iter()
+                    .map(|slot| slot.builder_pending_withdrawals.clone())
                     .collect()
             }),
         }
@@ -978,6 +1069,9 @@ pub struct GloasSlotFields {
     pub pending_deposits: QueuePatch<PendingDeposit>,
     pub pending_partial_withdrawals: QueuePatch<PendingPartialWithdrawal>,
     pub pending_consolidations: QueuePatch<PendingConsolidation>,
+    pub builders: BuilderListPatch,
+    pub builder_pending_payments: VectorPatch<BuilderPendingPayment>,
+    pub builder_pending_withdrawals: QueuePatch<BuilderPendingWithdrawal>,
 }
 
 impl GloasSlotFields {
@@ -998,8 +1092,8 @@ impl GloasSlotFields {
         let randao_mix = accessors::get_randao_mix(changed, accessors::get_current_epoch(changed));
         let config = PatchConfig::default();
 
-        let (Some(post_electra_base), Some(post_electra_changed)) =
-            (base.post_electra(), changed.post_electra())
+        let (Some(post_gloas_base), Some(post_gloas_changed)) =
+            (base.post_gloas(), changed.post_gloas())
         else {
             return Err(Error::CrossPhaseDiff.into());
         };
@@ -1011,18 +1105,33 @@ impl GloasSlotFields {
             balances: Patch::diff(config, base.balances(), changed.balances())?,
             pending_deposits: Patch::diff(
                 config,
-                post_electra_base.pending_deposits(),
-                post_electra_changed.pending_deposits(),
+                post_gloas_base.pending_deposits(),
+                post_gloas_changed.pending_deposits(),
             )?,
             pending_partial_withdrawals: Patch::diff(
                 config,
-                post_electra_base.pending_partial_withdrawals(),
-                post_electra_changed.pending_partial_withdrawals(),
+                post_gloas_base.pending_partial_withdrawals(),
+                post_gloas_changed.pending_partial_withdrawals(),
             )?,
             pending_consolidations: Patch::diff(
                 config,
-                post_electra_base.pending_consolidations(),
-                post_electra_changed.pending_consolidations(),
+                post_gloas_base.pending_consolidations(),
+                post_gloas_changed.pending_consolidations(),
+            )?,
+            builders: Patch::diff(
+                config,
+                post_gloas_base.builders(),
+                post_gloas_changed.builders(),
+            )?,
+            builder_pending_payments: Patch::diff(
+                config,
+                post_gloas_base.builder_pending_payments(),
+                post_gloas_changed.builder_pending_payments(),
+            )?,
+            builder_pending_withdrawals: Patch::diff(
+                config,
+                post_gloas_base.builder_pending_withdrawals(),
+                post_gloas_changed.builder_pending_withdrawals(),
             )?,
         })
     }

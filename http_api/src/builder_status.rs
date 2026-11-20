@@ -4,8 +4,9 @@ use parse_display::{Display, FromStr};
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
-    combined::BeaconState, gloas::containers::Builder, gloas::primitives::BuilderIndex,
-    phase0::consts::FAR_FUTURE_EPOCH, preset::Preset, traits::BeaconState as _,
+    gloas::containers::Builder,
+    gloas::primitives::BuilderIndex,
+    phase0::{consts::FAR_FUTURE_EPOCH, primitives::Epoch},
 };
 #[derive(Clone, Copy, PartialEq, Eq, Hash, FromStr, DeserializeFromStr)]
 #[cfg_attr(test, derive(Debug))]
@@ -44,9 +45,7 @@ pub enum BuilderStatus {
 }
 
 impl BuilderStatus {
-    pub fn new<P: Preset>(builder: &Builder, state: &BeaconState<P>) -> Self {
-        let finalized_epoch = state.finalized_checkpoint().epoch;
-
+    pub const fn new(builder: &Builder, finalized_epoch: Epoch) -> Self {
         if builder.withdrawable_epoch != FAR_FUTURE_EPOCH {
             return Self::Exited;
         }

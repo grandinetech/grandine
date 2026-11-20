@@ -138,8 +138,7 @@ use types::{
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         self, BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        BlockBodyWithPayloadBid, BlockBodyWithSyncAggregate, PostGloasBeaconState,
-        SignedBeaconBlock as _,
+        BlockBodyWithPayloadBid, BlockBodyWithSyncAggregate, SignedBeaconBlock as _,
     },
 };
 use validator::{
@@ -1398,26 +1397,65 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
 pub async fn state_builder_pending_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let gloas = state.value.post_gloas().ok_or(Error::StatePreGloas)?;
+
+            let response = WithStatus {
+                value: gloas.builder_pending_withdrawals().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| {
+                    controller.builder_pending_withdrawals_at_slot(slot)
+                })?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| {
+                    controller.builder_pending_withdrawals_at_slot(slot)
+                })?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: builder_pending_withdrawals,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
-
-    let version = state.phase();
-    let builder_pending_withdrawals = state
-        .post_gloas()
-        .map(PostGloasBeaconState::builder_pending_withdrawals)
-        .ok_or(Error::StatePreGloas)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
     Ok(
-        EthResponse::json_or_ssz(builder_pending_withdrawals, &headers)?
+        EthResponse::json_or_ssz(&builder_pending_withdrawals, &headers)?
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
-            .version(version)
+            .version(chain_config.phase_at_slot::<P>(slot))
             .into_response(),
     )
 }
@@ -1431,26 +1469,61 @@ pub async fn state_builder_pending_withdrawals<P: Preset, W: Wait>(
 pub async fn state_builder_pending_payments<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(chain_config): State<Arc<ChainConfig>>,
     EthPath(state_id): EthPath<StateId>,
     headers: HeaderMap,
 ) -> Result<Response, Error> {
+    let (slot, response) = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+            let gloas = state.value.post_gloas().ok_or(Error::StatePreGloas)?;
+
+            let response = WithStatus {
+                value: gloas.builder_pending_payments().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            };
+
+            (state.value.slot(), Some(response))
+        }
+        StateId::Slot(slot) => {
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.builder_pending_payments_at_slot(slot))?,
+            )
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if chain_config.phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            (
+                slot,
+                tokio::task::block_in_place(|| controller.builder_pending_payments_at_slot(slot))?,
+            )
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: builder_pending_payments,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
-
-    let version = state.phase();
-    let builder_pending_payments = state
-        .post_gloas()
-        .map(PostGloasBeaconState::builder_pending_payments)
-        .ok_or(Error::StatePreGloas)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
     Ok(
-        EthResponse::json_or_ssz(builder_pending_payments, &headers)?
+        EthResponse::json_or_ssz(&builder_pending_payments, &headers)?
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
-            .version(version)
+            .version(chain_config.phase_at_slot::<P>(slot))
             .into_response(),
     )
 }
@@ -5806,13 +5879,43 @@ fn state_builders<P: Preset, W: Wait>(
     state_id: StateId,
     ids_and_statuses: &BuilderIdsAndStatusesBody,
 ) -> Result<EthResponse<Vec<StateBuilderResponse>>, Error> {
+    let response = match state_id {
+        StateId::Head | StateId::Genesis | StateId::Finalized | StateId::Justified => {
+            let state = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+
+            let gloas = state.value.post_gloas().ok_or(Error::StatePreGloas)?;
+
+            Some(WithStatus {
+                value: (gloas.builders().clone(), gloas.finalized_checkpoint().epoch),
+                status: state.status,
+                finalized: state.finalized,
+            })
+        }
+        StateId::Slot(slot) => {
+            if controller.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            tokio::task::block_in_place(|| controller.builders_and_finalized_epoch_at_slot(slot))?
+        }
+        StateId::Root(state_root) => {
+            let slot = tokio::task::block_in_place(|| controller.slot_by_state_root(state_root))?
+                .ok_or(Error::StateNotFound)?
+                .value;
+
+            if controller.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+                return Err(Error::StatePreGloas);
+            }
+
+            tokio::task::block_in_place(|| controller.builders_and_finalized_epoch_at_slot(slot))?
+        }
+    };
+
     let WithStatus {
-        value: state,
+        value: (builders, finalized_epoch),
         status,
         finalized,
-    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
-
-    let post_gloas_state = state.post_gloas().ok_or(Error::StatePreGloas)?;
+    } = response.ok_or(Error::StateNotFound)?;
 
     let ids = ids_and_statuses
         .ids()
@@ -5822,7 +5925,7 @@ fn state_builders<P: Preset, W: Wait>(
 
     let statuses = ids_and_statuses.statuses();
 
-    let builders = izip!(0.., post_gloas_state.builders())
+    let builders = izip!(0.., &builders)
         .filter(|(index, builder)| {
             if !ids.is_empty() {
                 let builder_index = BuilderId::BuilderIndex(*index);
@@ -5836,7 +5939,7 @@ fn state_builders<P: Preset, W: Wait>(
             }
 
             if !statuses.is_empty() {
-                let builder_status = BuilderStatus::new(builder, &state);
+                let builder_status = BuilderStatus::new(builder, finalized_epoch);
 
                 let allowed_by_status = statuses.iter().any(|status| status == &builder_status);
 
@@ -5849,7 +5952,7 @@ fn state_builders<P: Preset, W: Wait>(
         })
         .map(|(index, builder)| StateBuilderResponse {
             index,
-            status: BuilderStatus::new(builder, &state),
+            status: BuilderStatus::new(builder, finalized_epoch),
             builder: builder.clone(),
         })
         .collect();
