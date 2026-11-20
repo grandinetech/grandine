@@ -18,7 +18,8 @@ use ssz::{ProgressiveByteList, SszWrite as _, WriteError};
 use tiny_keccak::{Hasher as _, Keccak};
 use types::{
     capella::containers::Withdrawal,
-    gloas::containers::{ExecutionPayload, ExecutionRequests},
+    combined::EnvelopeExecutionRequests,
+    gloas::containers::ExecutionPayload,
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
@@ -35,7 +36,7 @@ const HEADER_FIELD_COUNT: usize = 23;
 pub fn compute_block_hash<P: Preset>(
     payload: &ExecutionPayload<P>,
     parent_beacon_block_root: H256,
-    execution_requests: &ExecutionRequests<P>,
+    execution_requests: EnvelopeExecutionRequests<'_, P>,
 ) -> Result<ExecutionBlockHash, WriteError> {
     let ExecutionPayload {
         parent_hash,
@@ -125,25 +126,51 @@ fn withdrawal_rlp(withdrawal: &Withdrawal) -> Vec<u8> {
 
 // `get_execution_requests_list` followed by the EIP-7685 commitment.
 // Empty request lists are omitted from both.
-fn requests_hash<P: Preset>(execution_requests: &ExecutionRequests<P>) -> Result<H256, WriteError> {
-    let ExecutionRequests {
-        deposits,
-        withdrawals,
-        consolidations,
-        builder_deposits,
-        builder_exits,
-        phantom: _,
-    } = execution_requests;
-
+fn requests_hash<P: Preset>(
+    execution_requests: EnvelopeExecutionRequests<'_, P>,
+) -> Result<H256, WriteError> {
     // Request types have fixed-size SSZ encodings.
     // An empty list is exactly an empty encoding.
-    let requests = [
-        (RequestType::Deposits, deposits.to_ssz()?),
-        (RequestType::Withdrawals, withdrawals.to_ssz()?),
-        (RequestType::Consolidations, consolidations.to_ssz()?),
-        (RequestType::BuilderDeposits, builder_deposits.to_ssz()?),
-        (RequestType::BuilderExits, builder_exits.to_ssz()?),
-    ];
+    let requests = match execution_requests {
+        EnvelopeExecutionRequests::Gloas(requests) => vec![
+            (RequestType::Deposits, requests.deposits.to_ssz()?),
+            (RequestType::Withdrawals, requests.withdrawals.to_ssz()?),
+            (
+                RequestType::Consolidations,
+                requests.consolidations.to_ssz()?,
+            ),
+            (
+                RequestType::BuilderDeposits,
+                requests.builder_deposits.to_ssz()?,
+            ),
+            (RequestType::BuilderExits, requests.builder_exits.to_ssz()?),
+        ],
+        EnvelopeExecutionRequests::Pq(requests) => vec![
+            (RequestType::Deposits, requests.deposits.to_ssz()?),
+            (RequestType::Withdrawals, requests.withdrawals.to_ssz()?),
+            (
+                RequestType::Consolidations,
+                requests.consolidations.to_ssz()?,
+            ),
+            (
+                RequestType::BuilderDeposits,
+                requests.builder_deposits.to_ssz()?,
+            ),
+            (RequestType::BuilderExits, requests.builder_exits.to_ssz()?),
+            (
+                RequestType::ValidatorPreregistrations,
+                requests.validator_preregistrations.to_ssz()?,
+            ),
+            (
+                RequestType::BuilderPreregistrations,
+                requests.builder_preregistrations.to_ssz()?,
+            ),
+            (
+                RequestType::VoluntaryExits,
+                requests.voluntary_exits.to_ssz()?,
+            ),
+        ],
+    };
 
     let mut hasher = Sha256::new();
 
@@ -178,7 +205,7 @@ mod tests {
     use anyhow::Result;
     use types::{
         electra::containers::DepositRequest,
-        gloas::containers::{BuilderExitRequest, ExecutionPayloadEnvelope},
+        gloas::containers::{BuilderExitRequest, ExecutionPayloadEnvelope, ExecutionRequests},
         preset::{Mainnet, Minimal},
     };
 
@@ -229,7 +256,7 @@ mod tests {
         );
 
         assert_eq!(
-            requests_hash(&execution_requests)?,
+            requests_hash(EnvelopeExecutionRequests::Gloas(&execution_requests))?,
             H256(hex!(
                 "737e865b174797788efa7ec0fadb0e25e5bc2e01877ba5db18cc87ab083dbdc5"
             )),
@@ -244,7 +271,11 @@ mod tests {
         );
 
         assert_eq!(
-            compute_block_hash(&payload, parent_beacon_block_root, &execution_requests)?,
+            compute_block_hash(
+                &payload,
+                parent_beacon_block_root,
+                EnvelopeExecutionRequests::Gloas(&execution_requests)
+            )?,
             payload.block_hash,
         );
 
@@ -279,7 +310,10 @@ mod tests {
             ))
             .finalize();
 
-        assert_eq!(requests_hash(&execution_requests)?, H256(expected.into()));
+        assert_eq!(
+            requests_hash(EnvelopeExecutionRequests::Gloas(&execution_requests))?,
+            H256(expected.into())
+        );
 
         Ok(())
     }
@@ -303,7 +337,9 @@ mod tests {
     #[test]
     fn empty_requests_hash_matches_eip_7685() -> Result<()> {
         assert_eq!(
-            requests_hash(&ExecutionRequests::<Minimal>::default())?,
+            requests_hash(EnvelopeExecutionRequests::Gloas(&ExecutionRequests::<
+                Minimal,
+            >::default()))?,
             H256(hex!(
                 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             )),
@@ -319,7 +355,11 @@ mod tests {
         let requests = ExecutionRequests::<Minimal>::default();
         let parent_beacon_block_root = H256::repeat_byte(1);
 
-        let original = compute_block_hash(&payload, parent_beacon_block_root, &requests)?;
+        let original = compute_block_hash(
+            &payload,
+            parent_beacon_block_root,
+            EnvelopeExecutionRequests::Gloas(&requests),
+        )?;
 
         let with_transaction = ExecutionPayload {
             transactions: Arc::new(vec![vec![2].try_into()?].try_into()?),
@@ -342,11 +382,31 @@ mod tests {
         };
 
         let hashes = [
-            compute_block_hash(&with_transaction, parent_beacon_block_root, &requests)?,
-            compute_block_hash(&with_block_access_list, parent_beacon_block_root, &requests)?,
-            compute_block_hash(&with_slot_number, parent_beacon_block_root, &requests)?,
-            compute_block_hash(&payload, parent_beacon_block_root, &with_deposit)?,
-            compute_block_hash(&payload, H256::repeat_byte(5), &requests)?,
+            compute_block_hash(
+                &with_transaction,
+                parent_beacon_block_root,
+                EnvelopeExecutionRequests::Gloas(&requests),
+            )?,
+            compute_block_hash(
+                &with_block_access_list,
+                parent_beacon_block_root,
+                EnvelopeExecutionRequests::Gloas(&requests),
+            )?,
+            compute_block_hash(
+                &with_slot_number,
+                parent_beacon_block_root,
+                EnvelopeExecutionRequests::Gloas(&requests),
+            )?,
+            compute_block_hash(
+                &payload,
+                parent_beacon_block_root,
+                EnvelopeExecutionRequests::Gloas(&with_deposit),
+            )?,
+            compute_block_hash(
+                &payload,
+                H256::repeat_byte(5),
+                EnvelopeExecutionRequests::Gloas(&requests),
+            )?,
         ];
 
         for hash in hashes {

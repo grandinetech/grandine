@@ -142,6 +142,8 @@ pub mod pq {
     pub mod storage;
     pub mod validator_list;
 
+    mod container_impls;
+
     #[cfg(test)]
     mod spec_tests;
 }

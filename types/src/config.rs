@@ -938,7 +938,12 @@ impl Config {
     pub fn rapid_upgrade(mut self) -> Self {
         self.config_name.to_mut().insert_str(0, "rapid-upgrade-");
 
-        for ((_, field), epoch) in self.fork_epochs_mut().zip(1..) {
+        // There is no upgrade to PQ. PQ networks start at PQ.
+        let upgrades = self
+            .fork_epochs_mut()
+            .filter(|(phase, _)| *phase != Phase::Pq);
+
+        for ((_, field), epoch) in upgrades.zip(1..) {
             *field = epoch;
         }
 

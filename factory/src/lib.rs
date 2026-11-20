@@ -34,7 +34,10 @@ use types::{
         BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
         ExecutionPayload as CapellaExecutionPayload,
     },
-    combined::{Attestation, BeaconBlock, BeaconState, ExecutionPayload, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconBlock, BeaconState, ExecutionPayload, SignedBeaconBlock,
+        SignedExecutionPayloadEnvelope as CombinedSignedExecutionPayloadEnvelope,
+    },
     config::Config,
     deneb::containers::{
         BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
@@ -355,7 +358,7 @@ pub fn execution_payload_envelope<P: Preset>(
     config: &Config,
     block: &SignedBeaconBlock<P>,
     state: &BeaconState<P>,
-) -> Result<Arc<SignedExecutionPayloadEnvelope<P>>> {
+) -> Result<Arc<CombinedSignedExecutionPayloadEnvelope<P>>> {
     let Some(post_gloas_state) = state.post_gloas() else {
         bail!("state should be post-Gloas");
     };
@@ -398,10 +401,9 @@ pub fn execution_payload_envelope<P: Preset>(
     let secret_key = interop::secret_key(block.message().proposer_index());
     let signature = message.sign(config, state, &secret_key).into();
 
-    Ok(Arc::new(SignedExecutionPayloadEnvelope {
-        message,
-        signature,
-    }))
+    Ok(Arc::new(
+        SignedExecutionPayloadEnvelope { message, signature }.into(),
+    ))
 }
 
 pub fn full_blocks_up_to_epoch<P: Preset>(

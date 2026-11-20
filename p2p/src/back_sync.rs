@@ -23,14 +23,13 @@ use ssz::{Ssz, SszHash as _, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
-    combined::{DataColumnSidecar, SignedBeaconBlock},
+    combined::{DataColumnSidecar, SignedBeaconBlock, SignedExecutionPayloadEnvelope},
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, Phase, StorageMode, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,

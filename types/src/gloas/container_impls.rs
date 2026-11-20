@@ -175,6 +175,26 @@ impl<P: Preset> SignedBlindedExecutionPayloadEnvelope<P> {
         self,
         payload_body: ExecutionPayloadBody<P>,
     ) -> Result<SignedExecutionPayloadEnvelope<P>, UnblindError> {
+        let Self { message, signature } = self;
+
+        Ok(SignedExecutionPayloadEnvelope {
+            signature,
+            message: ExecutionPayloadEnvelope {
+                payload: message.payload_header.unblind(payload_body)?,
+                execution_requests: message.execution_requests,
+                builder_index: message.builder_index,
+                beacon_block_root: message.beacon_block_root,
+                parent_beacon_block_root: message.parent_beacon_block_root,
+            },
+        })
+    }
+}
+
+impl<P: Preset> ExecutionPayloadHeader<P> {
+    pub fn unblind(
+        self,
+        payload_body: ExecutionPayloadBody<P>,
+    ) -> Result<ExecutionPayload<P>, UnblindError> {
         let ExecutionPayloadBody {
             transactions,
             withdrawals,
@@ -184,35 +204,26 @@ impl<P: Preset> SignedBlindedExecutionPayloadEnvelope<P> {
         let withdrawals = withdrawals.ok_or(UnblindError::MissingWithdrawals)?;
         let block_access_list = block_access_list.ok_or(UnblindError::MissingBlockAccessList)?;
 
-        Ok(SignedExecutionPayloadEnvelope {
-            signature: self.signature,
-            message: ExecutionPayloadEnvelope {
-                payload: ExecutionPayload {
-                    parent_hash: self.message.payload_header.parent_hash,
-                    fee_recipient: self.message.payload_header.fee_recipient,
-                    state_root: self.message.payload_header.state_root,
-                    receipts_root: self.message.payload_header.receipts_root,
-                    logs_bloom: self.message.payload_header.logs_bloom,
-                    prev_randao: self.message.payload_header.prev_randao,
-                    block_number: self.message.payload_header.block_number,
-                    gas_limit: self.message.payload_header.gas_limit,
-                    gas_used: self.message.payload_header.gas_used,
-                    timestamp: self.message.payload_header.timestamp,
-                    extra_data: self.message.payload_header.extra_data,
-                    base_fee_per_gas: self.message.payload_header.base_fee_per_gas,
-                    block_hash: self.message.payload_header.block_hash,
-                    transactions,
-                    withdrawals,
-                    blob_gas_used: self.message.payload_header.blob_gas_used,
-                    excess_blob_gas: self.message.payload_header.excess_blob_gas,
-                    block_access_list,
-                    slot_number: self.message.payload_header.slot_number,
-                },
-                execution_requests: self.message.execution_requests,
-                builder_index: self.message.builder_index,
-                beacon_block_root: self.message.beacon_block_root,
-                parent_beacon_block_root: self.message.parent_beacon_block_root,
-            },
+        Ok(ExecutionPayload {
+            parent_hash: self.parent_hash,
+            fee_recipient: self.fee_recipient,
+            state_root: self.state_root,
+            receipts_root: self.receipts_root,
+            logs_bloom: self.logs_bloom,
+            prev_randao: self.prev_randao,
+            block_number: self.block_number,
+            gas_limit: self.gas_limit,
+            gas_used: self.gas_used,
+            timestamp: self.timestamp,
+            extra_data: self.extra_data,
+            base_fee_per_gas: self.base_fee_per_gas,
+            block_hash: self.block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used: self.blob_gas_used,
+            excess_blob_gas: self.excess_blob_gas,
+            block_access_list,
+            slot_number: self.slot_number,
         })
     }
 }
@@ -244,12 +255,13 @@ impl<P: Preset> CombinedPayloadAttestation<P> {
         match self {
             Self::Attestation(payload_attestation) => payload_attestation.data,
             Self::Message(payload_attestation) => payload_attestation.data,
+            Self::PqMessage(payload_attestation) => payload_attestation.data,
         }
     }
 
     pub const fn message(&self) -> Option<&Arc<PayloadAttestationMessage>> {
         match self {
-            Self::Attestation(_) => None,
+            Self::Attestation(_) | Self::PqMessage(_) => None,
             Self::Message(message) => Some(message),
         }
     }

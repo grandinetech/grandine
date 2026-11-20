@@ -27,15 +27,13 @@ use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        SignedBeaconBlock, SignedExecutionPayloadEnvelope,
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     electra::containers::SingleAttestation,
     gloas::{
-        containers::{
-            CombinedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
-        },
+        containers::{CombinedPayloadAttestation, PayloadAttestationMessage},
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
@@ -887,7 +885,7 @@ impl<P: Preset> Context<P> {
 
         self.controller().wait_for_tasks();
 
-        let expected_block_root = envelope.message.beacon_block_root;
+        let expected_block_root = envelope.block_root();
 
         assert!(matches!(
             self.next_p2p_message(),
@@ -916,7 +914,7 @@ impl<P: Preset> Context<P> {
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         bls_setting: BlsSetting,
     ) {
-        let expected_block_root = envelope.message.beacon_block_root;
+        let expected_block_root = envelope.block_root();
         let next_message = self.on_execution_payload(envelope, bls_setting);
 
         match next_message {

@@ -51,6 +51,7 @@ use types::{
     combined::{
         Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
         SignedBlindedBeaconBlock,
+        SignedExecutionPayloadEnvelope as CombinedSignedExecutionPayloadEnvelope,
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
@@ -920,13 +921,16 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 .await;
         }
 
+        let signed_envelope = Arc::new(CombinedSignedExecutionPayloadEnvelope::from(
+            signed_envelope.as_ref().clone(),
+        ));
+
         self.context
             .chain
             .controller
             .on_own_execution_payload_envelope(signed_envelope.clone_arc());
 
-        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
-            .send(&self.context.p2p_tx);
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.context.p2p_tx);
 
         Ok(())
     }

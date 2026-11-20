@@ -4,7 +4,6 @@ use core::{
 };
 use std::sync::Arc;
 
-use derive_more::Constructor;
 use ethereum_types::H64;
 use libp2p_identity::PeerId;
 use serde::{
@@ -16,7 +15,6 @@ use ssz::{
     ByteList, ByteVector, ContiguousList, ContiguousVector, ProgressiveList, ReadError,
     SszReadDefault, SszWrite as _,
 };
-use typenum::Unsigned;
 use types::{
     bellatrix::{
         containers::ExecutionPayload as BellatrixExecutionPayload,
@@ -50,17 +48,24 @@ use types::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot, UnixSeconds,
         ValidatorIndex,
     },
+    pq::containers::{
+        BuilderPreregistrationRequest, ExecutionRequests as PqExecutionRequests,
+        ValidatorPreregistrationRequest, VoluntaryExitRequest,
+    },
     preset::Preset,
 };
 
 pub const MAX_PAYLOAD_BODIES_PER_REQUEST: usize = 32;
 
-const SUPPORTED_REQUEST_TYPES: &[&str; 5] = &[
+const SUPPORTED_REQUEST_TYPES: &[&str; 8] = &[
     RequestType::Deposits.request_type(),
     RequestType::Withdrawals.request_type(),
     RequestType::Consolidations.request_type(),
     RequestType::BuilderDeposits.request_type(),
     RequestType::BuilderExits.request_type(),
+    RequestType::ValidatorPreregistrations.request_type(),
+    RequestType::BuilderPreregistrations.request_type(),
+    RequestType::VoluntaryExits.request_type(),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -70,6 +75,9 @@ pub enum RequestType {
     Consolidations,
     BuilderDeposits,
     BuilderExits,
+    ValidatorPreregistrations,
+    BuilderPreregistrations,
+    VoluntaryExits,
 }
 
 impl RequestType {
@@ -81,6 +89,9 @@ impl RequestType {
             Self::Consolidations => "0x02",
             Self::BuilderDeposits => "0x03",
             Self::BuilderExits => "0x04",
+            Self::ValidatorPreregistrations => "0x07",
+            Self::BuilderPreregistrations => "0x08",
+            Self::VoluntaryExits => "0x09",
         }
     }
 
@@ -92,6 +103,9 @@ impl RequestType {
             Self::Consolidations => 0x02,
             Self::BuilderDeposits => 0x03,
             Self::BuilderExits => 0x04,
+            Self::ValidatorPreregistrations => 0x07,
+            Self::BuilderPreregistrations => 0x08,
+            Self::VoluntaryExits => 0x09,
         }
     }
 
@@ -103,6 +117,9 @@ impl RequestType {
             Self::Consolidations => "consolidation",
             Self::BuilderDeposits => "builder_deposit",
             Self::BuilderExits => "builder_exit",
+            Self::ValidatorPreregistrations => "validator_preregistration",
+            Self::BuilderPreregistrations => "builder_preregistration",
+            Self::VoluntaryExits => "voluntary_exit",
         }
     }
 }
@@ -117,6 +134,9 @@ impl TryFrom<u8> for RequestType {
             0x02 => Ok(Self::Consolidations),
             0x03 => Ok(Self::BuilderDeposits),
             0x04 => Ok(Self::BuilderExits),
+            0x07 => Ok(Self::ValidatorPreregistrations),
+            0x08 => Ok(Self::BuilderPreregistrations),
+            0x09 => Ok(Self::VoluntaryExits),
             v => Err(v),
         }
     }
@@ -1094,14 +1114,44 @@ impl From<PayloadStatus> for PayloadStatusV1 {
 }
 
 #[cfg_attr(test, derive(Default, Debug, Eq, PartialEq))]
-#[derive(Clone, Constructor)]
+#[derive(Clone)]
 pub struct RawExecutionRequests<P: Preset>(
     ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
     ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
     ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
     ContiguousList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
     ContiguousList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
+    // The PQ limits are not type-level. They are checked with the rest of the envelope.
+    ProgressiveList<ValidatorPreregistrationRequest>,
+    ProgressiveList<BuilderPreregistrationRequest>,
+    ProgressiveList<VoluntaryExitRequest>,
 );
+
+impl<P: Preset> RawExecutionRequests<P> {
+    /// Requests without the PQ request types.
+    #[must_use]
+    pub fn new(
+        deposits: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
+        withdrawals: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+        consolidations: ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+        builder_deposits: ContiguousList<
+            BuilderDepositRequest,
+            P::MaxBuilderDepositRequestsPerPayload,
+        >,
+        builder_exits: ContiguousList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
+    ) -> Self {
+        Self(
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+            ProgressiveList::default(),
+            ProgressiveList::default(),
+            ProgressiveList::default(),
+        )
+    }
+}
 
 impl<P: Preset> Serialize for RawExecutionRequests<P> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -1114,6 +1164,9 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
             consolidation_requests,
             builder_deposits,
             builder_exits,
+            validator_preregistrations,
+            builder_preregistrations,
+            voluntary_exits,
         ) = self;
         let mut seq = serializer.serialize_seq(None)?;
 
@@ -1165,6 +1218,28 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
             ))?;
         }
 
+        for (request_type, bytes) in [
+            (
+                RequestType::ValidatorPreregistrations,
+                validator_preregistrations.to_ssz(),
+            ),
+            (
+                RequestType::BuilderPreregistrations,
+                builder_preregistrations.to_ssz(),
+            ),
+            (RequestType::VoluntaryExits, voluntary_exits.to_ssz()),
+        ] {
+            let bytes = bytes.map_err(S::Error::custom)?;
+
+            if !bytes.is_empty() {
+                seq.serialize_element(&format_args!(
+                    "{}{}",
+                    request_type.request_type(),
+                    const_hex::encode(bytes).as_str(),
+                ))?;
+            }
+        }
+
         seq.end()
     }
 }
@@ -1179,16 +1254,15 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
             _phantom_data: PhantomData<P>,
         }
 
-        fn decode_requests<B, E, T, N>(
+        fn decode_requests<B, E, L>(
             bytes: B,
             request_type: RequestType,
             prev_request_type: &mut Option<RequestType>,
-        ) -> Result<ContiguousList<T, N>, E>
+        ) -> Result<L, E>
         where
             E: serde::de::Error,
             B: AsRef<[u8]>,
-            N: Unsigned,
-            T: SszReadDefault,
+            L: SszReadDefault,
         {
             if let Some(prev_request_type) = prev_request_type
                 && *prev_request_type >= request_type
@@ -1218,7 +1292,7 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                 ));
             }
 
-            ContiguousList::from_ssz_default(bytes).map_err(serde::de::Error::custom)
+            L::from_ssz_default(bytes).map_err(serde::de::Error::custom)
         }
 
         impl<'de, P: Preset> Visitor<'de> for RawExecutionRequestsVisitor<P> {
@@ -1238,6 +1312,9 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                 let mut consolidation_requests = ContiguousList::default();
                 let mut builder_deposits = ContiguousList::default();
                 let mut builder_exits = ContiguousList::default();
+                let mut validator_preregistrations = ProgressiveList::default();
+                let mut builder_preregistrations = ProgressiveList::default();
+                let mut voluntary_exits = ProgressiveList::default();
 
                 while let Some(next_element) = seq.next_element::<String>()? {
                     if let Some(digits) =
@@ -1297,6 +1374,42 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                         continue;
                     }
 
+                    if let Some(digits) = next_element
+                        .strip_prefix(RequestType::ValidatorPreregistrations.request_type())
+                    {
+                        validator_preregistrations = decode_requests(
+                            digits,
+                            RequestType::ValidatorPreregistrations,
+                            &mut prev_request_type,
+                        )?;
+
+                        continue;
+                    }
+
+                    if let Some(digits) = next_element
+                        .strip_prefix(RequestType::BuilderPreregistrations.request_type())
+                    {
+                        builder_preregistrations = decode_requests(
+                            digits,
+                            RequestType::BuilderPreregistrations,
+                            &mut prev_request_type,
+                        )?;
+
+                        continue;
+                    }
+
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::VoluntaryExits.request_type())
+                    {
+                        voluntary_exits = decode_requests(
+                            digits,
+                            RequestType::VoluntaryExits,
+                            &mut prev_request_type,
+                        )?;
+
+                        continue;
+                    }
+
                     return Err(serde::de::Error::unknown_variant(
                         &next_element,
                         SUPPORTED_REQUEST_TYPES,
@@ -1309,6 +1422,9 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                     consolidation_requests,
                     builder_deposits,
                     builder_exits,
+                    validator_preregistrations,
+                    builder_preregistrations,
+                    voluntary_exits,
                 ))
             }
         }
@@ -1335,6 +1451,9 @@ impl<P: Preset> From<ElectraExecutionRequests<P>> for RawExecutionRequests<P> {
             consolidations,
             ContiguousList::default(),
             ContiguousList::default(),
+            ProgressiveList::default(),
+            ProgressiveList::default(),
+            ProgressiveList::default(),
         )
     }
 }
@@ -1376,11 +1495,43 @@ impl<P: Preset> TryFrom<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
             consolidations.try_into()?,
             builder_deposits.try_into()?,
             builder_exits.try_into()?,
+            ProgressiveList::default(),
+            ProgressiveList::default(),
+            ProgressiveList::default(),
         ))
     }
 }
 
-impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
+impl<P: Preset> TryFrom<PqExecutionRequests<P>> for RawExecutionRequests<P> {
+    type Error = ReadError;
+
+    fn try_from(execution_requests: PqExecutionRequests<P>) -> Result<Self, Self::Error> {
+        let PqExecutionRequests {
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+            validator_preregistrations,
+            builder_preregistrations,
+            voluntary_exits,
+            phantom: _,
+        } = execution_requests;
+
+        Ok(Self(
+            deposits.try_into()?,
+            withdrawals.try_into()?,
+            consolidations.try_into()?,
+            builder_deposits.try_into()?,
+            builder_exits.try_into()?,
+            validator_preregistrations,
+            builder_preregistrations,
+            voluntary_exits,
+        ))
+    }
+}
+
+impl<P: Preset> From<RawExecutionRequests<P>> for PqExecutionRequests<P> {
     fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
         let RawExecutionRequests(
             deposits,
@@ -1388,6 +1539,35 @@ impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
             consolidations,
             builder_deposits,
             builder_exits,
+            validator_preregistrations,
+            builder_preregistrations,
+            voluntary_exits,
+        ) = raw_execution_requests;
+
+        Self {
+            deposits: deposits.into(),
+            withdrawals: withdrawals.into(),
+            consolidations: consolidations.into(),
+            builder_deposits: builder_deposits.into(),
+            builder_exits: builder_exits.into(),
+            validator_preregistrations,
+            builder_preregistrations,
+            voluntary_exits,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
+    fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
+        // PQ request types never come from a Gloas execution layer.
+        let RawExecutionRequests(
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+            ..,
         ) = raw_execution_requests;
 
         Self {
@@ -1408,6 +1588,7 @@ impl<P: Preset> TryFrom<ExecutionRequests<P>> for RawExecutionRequests<P> {
         match execution_requests {
             ExecutionRequests::Electra(requests) => Ok(requests.into()),
             ExecutionRequests::Gloas(requests) => requests.try_into(),
+            ExecutionRequests::Pq(requests) => requests.try_into(),
         }
     }
 }
@@ -1459,6 +1640,7 @@ mod tests {
     use anyhow::Result;
     use hex_literal::hex;
     use serde_json::{Value, json};
+    use typenum::Unsigned as _;
     use types::{
         electra::containers::ConsolidationRequest, phase0::primitives::H160, preset::Mainnet,
     };

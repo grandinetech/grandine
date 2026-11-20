@@ -52,8 +52,9 @@ use transition_functions::{
 use typenum::Unsigned as _;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, ExecutionPayloadParams,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, EnvelopeExecutionRequests,
+        EnvelopeSignature, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedExecutionPayloadEnvelope,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -72,8 +73,7 @@ use types::{
         },
         containers::{
             Builder, BuilderExitRequest, CombinedPayloadAttestation, ExecutionPayloadBid,
-            ExecutionRequests, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-            SignedProposerPreferences,
+            SignedExecutionPayloadBid, SignedProposerPreferences,
         },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -86,6 +86,10 @@ use types::{
         },
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
+    },
+    pq::{
+        consts::{LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE, LEAF_OFFSET_PTC_ATTESTER},
+        validator_list::{padded_pubkey, unpadded_pubkey},
     },
     preset::{DataAvailabilityTimelyThreshold, PayloadTimelyThreshold, Preset},
     traits::{
@@ -545,7 +549,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             == state.latest_execution_payload_bid().block_hash)
             .then(|| self.cached_execution_payload_envelope_by_root(parent_block_root))
             .flatten()
-            .map(|envelope| &envelope.message.execution_requests);
+            .map(|envelope| envelope.message().execution_requests());
 
         self.accepted_payload_bids_for_parent(slot, parent_block_hash, parent_block_root)
             .filter(move |bid| {
@@ -2936,7 +2940,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let parent_payload_exits_builder = self
                 .cached_execution_payload_envelope_by_root(bid.parent_block_root)
                 .is_some_and(|envelope| {
-                    is_builder_exiting(builder, &envelope.message.execution_requests)
+                    is_builder_exiting(builder, envelope.message().execution_requests())
                 });
 
             if parent_payload_exits_builder {
@@ -4633,7 +4637,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The execution request counts are within their limits
-        verify_execution_requests_limits(envelope.message().execution_requests())?;
+        match envelope.message().execution_requests() {
+            EnvelopeExecutionRequests::Gloas(execution_requests) => {
+                verify_execution_requests_limits(execution_requests)?;
+            }
+            EnvelopeExecutionRequests::Pq(execution_requests) => {
+                transition_functions::pq::verify_execution_requests_limits(execution_requests)?;
+            }
+        }
 
         // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
         let execution_requests_root = envelope.message().execution_requests().hash_tree_root();
@@ -4757,13 +4768,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 post_gloas_state.builders().get(builder_index)?.pubkey
             };
 
+            let signing_root = envelope.message().signing_root(&self.chain_config, &state);
+
             // [REJECT] The builder signature envelope.signature is valid
-            SingleVerifier.verify_singular(
-                envelope.message().signing_root(&self.chain_config, &state),
-                envelope.signature(),
-                self.pubkey_cache.get_or_insert(pubkey)?,
-                SignatureKind::ExecutionPayloadEnvelope,
-            )?;
+            match envelope.signature() {
+                EnvelopeSignature::Bls(signature) => SingleVerifier.verify_singular(
+                    signing_root,
+                    signature,
+                    self.pubkey_cache.get_or_insert(pubkey)?,
+                    SignatureKind::ExecutionPayloadEnvelope,
+                )?,
+                EnvelopeSignature::Xmss(signature) => {
+                    let leaf_index = pq::compute_xmss_leaf_index(
+                        state.latest_block_header().slot,
+                        LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE,
+                    )?;
+
+                    ensure!(
+                        xmss::verify_u64(
+                            &unpadded_pubkey(&pubkey),
+                            leaf_index,
+                            signing_root.as_fixed_bytes(),
+                            signature,
+                        ),
+                        helper_functions::error::Error::SignatureInvalid(
+                            SignatureKind::ExecutionPayloadEnvelope,
+                        ),
+                    );
+                }
+            }
         }
 
         // A blinded envelope comes from storage, so its payload was already sent to the EL.
@@ -4794,11 +4827,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .map(misc::kzg_commitment_to_versioned_hash)
                 .collect();
 
-            let params = Some(ExecutionPayloadParams::Gloas {
-                versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests: envelope.message().execution_requests().clone(),
-            });
+            let params = Some(
+                envelope
+                    .message()
+                    .execution_requests()
+                    .payload_params(versioned_hashes, parent_beacon_block_root),
+            );
 
             // TODO(Gloas): review envelope validation for HTTP API
             execution_engine.notify_new_payload(
@@ -4977,6 +5011,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .get_or_insert(*accessors::public_key(state, validator_index)?)?,
                         SignatureKind::PayloadAttestation,
                     )?;
+                }
+
+                vec![validator_index]
+            }
+            CombinedPayloadAttestation::PqMessage(payload_attestation) => {
+                let validator_index = payload_attestation.validator_index;
+
+                if validate_signature {
+                    ensure!(
+                        pq::verify_validator_signature(
+                            state,
+                            validator_index,
+                            pq::compute_xmss_leaf_index(data.slot, LEAF_OFFSET_PTC_ATTESTER)?,
+                            data.signing_root(&self.chain_config, state),
+                            &payload_attestation.signature,
+                        )?,
+                        helper_functions::error::Error::SignatureInvalid(
+                            SignatureKind::PayloadAttestation,
+                        ),
+                    );
                 }
 
                 vec![validator_index]
@@ -7989,13 +8043,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
 fn is_builder_exiting<P: Preset>(
     builder: &Builder,
-    execution_requests: &ExecutionRequests<P>,
+    execution_requests: EnvelopeExecutionRequests<'_, P>,
 ) -> bool {
-    execution_requests.builder_exits.iter().any(|request| {
+    let is_pq = matches!(execution_requests, EnvelopeExecutionRequests::Pq(_));
+
+    execution_requests.builder_exits().iter().any(|request| {
         let BuilderExitRequest {
             source_address,
-            pubkey,
+            mut pubkey,
         } = *request;
+
+        // PQ builders are keyed by `pubkey[16:]`, and their padded keys have a zero prefix.
+        if is_pq {
+            pubkey = padded_pubkey(unpadded_pubkey(&pubkey));
+        }
 
         pubkey == builder.pubkey && source_address == builder.execution_address
     })

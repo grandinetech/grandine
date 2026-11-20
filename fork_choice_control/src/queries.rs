@@ -35,16 +35,15 @@ use types::{
     RandaoMixes,
     altair::containers::SyncCommittee,
     combined::{
-        BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock, UnblindError,
+        BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedExecutionPayloadEnvelope, UnblindError,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
-        containers::{
-            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
-        },
+        containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{
@@ -2903,7 +2902,7 @@ where
                 }
             };
 
-            let execution_block_hash = envelope.message.payload_header.block_hash;
+            let execution_block_hash = envelope.message().block_hash();
 
             pending_payloads.push((output.len(), envelope, execution_block_hash));
             output.push(Err(BlockError::PayloadBodyNotFound {

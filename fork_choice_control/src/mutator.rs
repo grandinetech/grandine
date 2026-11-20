@@ -579,13 +579,13 @@ where
                         self.store
                             .cached_execution_payload_envelope_by_root(head.block_root)
                             .map(|envelope| {
-                                params = Some(ExecutionPayloadParams::Gloas {
-                                    versioned_hashes,
-                                    parent_beacon_block_root: head.block.message().parent_root(),
-                                    execution_requests: envelope.message.execution_requests.clone(),
-                                });
+                                params =
+                                    Some(envelope.message().execution_requests().payload_params(
+                                        versioned_hashes,
+                                        head.block.message().parent_root(),
+                                    ));
 
-                                envelope.message.payload.clone().into()
+                                envelope.execution_payload().clone().into()
                             })
                     } else {
                         head.block
@@ -2520,7 +2520,7 @@ where
                 let beacon_block_root = envelope.block_root();
                 let slot = envelope.slot();
                 let builder_index = envelope.builder_index();
-                let block_hash = envelope.message.payload.block_hash;
+                let block_hash = envelope.message().block_hash();
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
 
@@ -5330,12 +5330,7 @@ where
             gossip_ids.extend(
                 execution_payload_envelopes
                     .extract_if(.., |pending| {
-                        pending
-                            .execution_payload_envelope
-                            .message
-                            .payload
-                            .slot_number
-                            .saturating_sub(1)
+                        pending.execution_payload_envelope.slot().saturating_sub(1)
                             <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
@@ -6703,7 +6698,7 @@ mod tests {
         envelope.message.payload.slot_number = slot;
 
         PendingExecutionPayloadEnvelope {
-            execution_payload_envelope: Arc::new(envelope),
+            execution_payload_envelope: Arc::new(envelope.into()),
             origin,
             seen_before_deadline: false,
             processing_timings: ProcessingTimings::new(),

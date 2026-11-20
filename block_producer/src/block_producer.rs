@@ -1381,7 +1381,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             // phase and envelope is missing (so it should error out).
                             snapshot
                                 .stored_envelope_by_root(parent_root)?
-                                .map(|envelope| envelope.execution_requests().clone())
+                                .and_then(|envelope| envelope.execution_requests().gloas().cloned())
                                 .unwrap_or_default()
                         } else {
                             GloasExecutionRequests::default()
@@ -1622,7 +1622,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .controller
                         .snapshot()
                         .stored_envelope_by_root(root)?
-                        .map(|envelope| envelope.execution_requests().clone()))
+                        .and_then(|envelope| envelope.execution_requests().gloas().cloned()))
                 },
             )?;
             // Attestation packing is optional; parent processing above and final block
@@ -2312,7 +2312,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         chain_config,
                         &self.producer_context.pubkey_cache,
                         &mut state_copy,
-                        envelope.execution_requests(),
+                        envelope
+                            .execution_requests()
+                            .gloas()
+                            .ok_or_else(|| anyhow!("PQ envelope after a Gloas block"))?,
                     )?;
 
                     gloas::get_expected_withdrawals(&state_copy)?.0
@@ -3812,7 +3815,8 @@ mod gloas_scoring_tests {
         let signed = types::gloas::containers::SignedExecutionPayloadEnvelope {
             signature: envelope.sign(&config, &post, &keys[0]).into(),
             message: envelope,
-        };
+        }
+        .into();
         controller.on_own_execution_payload_envelope(Arc::new(signed));
         controller.wait_for_tasks();
         assert!(

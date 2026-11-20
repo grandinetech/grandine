@@ -66,10 +66,12 @@ use crate::{
     combined::{
         Attestation as CombinedAtteststation, AttesterSlashing as CombinedAttesterSlashing,
         BeaconBlock as CombinedBeaconBlock, BeaconState as CombinedBeaconState,
-        BlindedBeaconBlock as CombinedBlindedBeaconBlock,
-        ExecutionPayloadHeader as CombinedExecutionPayloadHeader,
+        BlindedBeaconBlock as CombinedBlindedBeaconBlock, EnvelopeExecutionRequests,
+        EnvelopeSignature, ExecutionPayloadHeader as CombinedExecutionPayloadHeader,
         SignedBeaconBlock as CombinedSignedBeaconBlock,
         SignedBlindedBeaconBlock as CombinedSignedBlindedBeaconBlock,
+        SignedBlindedExecutionPayloadEnvelope as CombinedSignedBlindedExecutionPayloadEnvelope,
+        SignedExecutionPayloadEnvelope as CombinedSignedExecutionPayloadEnvelope,
     },
     deneb::{
         beacon_state::BeaconState as DenebBeaconState,
@@ -109,10 +111,7 @@ use crate::{
             BlindedExecutionPayloadEnvelope as GloasBlindedExecutionPayloadEnvelope,
             ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
             ExecutionPayloadEnvelope as GloasExecutionPayloadEnvelope,
-            ExecutionRequests as GloasExecutionRequests,
             IndexedAttestation as GloasIndexedAttestation, PayloadAttestation,
-            SignedBlindedExecutionPayloadEnvelope as GloasSignedBlindedExecutionPayloadEnvelope,
-            SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -136,7 +135,11 @@ use crate::{
     },
     pq::{
         beacon_state::BeaconState as PqBeaconState,
-        containers::{BeaconBlock as PqBeaconBlock, BeaconBlockBody as PqBeaconBlockBody},
+        containers::{
+            BeaconBlock as PqBeaconBlock, BeaconBlockBody as PqBeaconBlockBody,
+            BlindedExecutionPayloadEnvelope as PqBlindedExecutionPayloadEnvelope,
+            ExecutionPayloadEnvelope as PqExecutionPayloadEnvelope,
+        },
     },
     preset::{Preset, SlotsPerHistoricalRoot},
 };
@@ -1248,19 +1251,19 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBlindedBeaconBlock<P> {
 
 pub trait SignedExecutionPayloadEnvelope<P: Preset>: Debug + Send + Sync {
     fn message(&self) -> &dyn ExecutionPayloadEnvelope<P>;
-    fn signature(&self) -> SignatureBytes;
+    fn signature(&self) -> EnvelopeSignature<'_>;
 
     // `None` when the payload body has been stripped.
-    fn into_full(self: Arc<Self>) -> Option<Arc<GloasSignedExecutionPayloadEnvelope<P>>>;
+    fn into_full(self: Arc<Self>) -> Option<Arc<CombinedSignedExecutionPayloadEnvelope<P>>>;
 }
 
-impl<P: Preset> SignedExecutionPayloadEnvelope<P> for GloasSignedExecutionPayloadEnvelope<P> {
+impl<P: Preset> SignedExecutionPayloadEnvelope<P> for CombinedSignedExecutionPayloadEnvelope<P> {
     fn message(&self) -> &dyn ExecutionPayloadEnvelope<P> {
-        &self.message
+        self.message()
     }
 
-    fn signature(&self) -> SignatureBytes {
-        self.signature
+    fn signature(&self) -> EnvelopeSignature<'_> {
+        self.signature()
     }
 
     fn into_full(self: Arc<Self>) -> Option<Arc<Self>> {
@@ -1269,17 +1272,17 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> for GloasSignedExecutionPayloa
 }
 
 impl<P: Preset> SignedExecutionPayloadEnvelope<P>
-    for GloasSignedBlindedExecutionPayloadEnvelope<P>
+    for CombinedSignedBlindedExecutionPayloadEnvelope<P>
 {
     fn message(&self) -> &dyn ExecutionPayloadEnvelope<P> {
-        &self.message
+        self.message()
     }
 
-    fn signature(&self) -> SignatureBytes {
-        self.signature
+    fn signature(&self) -> EnvelopeSignature<'_> {
+        self.signature()
     }
 
-    fn into_full(self: Arc<Self>) -> Option<Arc<GloasSignedExecutionPayloadEnvelope<P>>> {
+    fn into_full(self: Arc<Self>) -> Option<Arc<CombinedSignedExecutionPayloadEnvelope<P>>> {
         None
     }
 }
@@ -1289,7 +1292,7 @@ pub trait ExecutionPayloadEnvelope<P: Preset>: SszHash<PackingFactor = U1> {
     fn block_root(&self) -> H256;
     fn builder_index(&self) -> BuilderIndex;
     fn parent_root(&self) -> H256;
-    fn execution_requests(&self) -> &GloasExecutionRequests<P>;
+    fn execution_requests(&self) -> EnvelopeExecutionRequests<'_, P>;
     fn parent_hash(&self) -> ExecutionBlockHash;
     fn block_hash(&self) -> ExecutionBlockHash;
     fn prev_randao(&self) -> H256;
@@ -1310,18 +1313,30 @@ pub trait ExecutionPayloadEnvelope<P: Preset>: SszHash<PackingFactor = U1> {
 
     [GloasExecutionPayloadEnvelope<P>]
     [payload]
-    [&self.execution_requests]
+    [EnvelopeExecutionRequests::Gloas(&self.execution_requests)]
     [self.payload.withdrawals.hash_tree_root()]
     [Some(&self.payload)];
 
     [GloasBlindedExecutionPayloadEnvelope<P>]
     [payload_header]
-    [&self.execution_requests]
+    [EnvelopeExecutionRequests::Gloas(&self.execution_requests)]
+    [self.payload_header.withdrawals_root]
+    [None];
+
+    [PqExecutionPayloadEnvelope<P>]
+    [payload]
+    [EnvelopeExecutionRequests::Pq(&self.execution_requests)]
+    [self.payload.withdrawals.hash_tree_root()]
+    [Some(&self.payload)];
+
+    [PqBlindedExecutionPayloadEnvelope<P>]
+    [payload_header]
+    [EnvelopeExecutionRequests::Pq(&self.execution_requests)]
     [self.payload_header.withdrawals_root]
     [None];
 )]
 impl<P: Preset> ExecutionPayloadEnvelope<P> for implementor {
-    fn execution_requests(&self) -> &GloasExecutionRequests<P> {
+    fn execution_requests(&self) -> EnvelopeExecutionRequests<'_, P> {
         execution_requests_body
     }
 

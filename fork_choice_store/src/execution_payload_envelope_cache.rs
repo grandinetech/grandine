@@ -2,9 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use ssz::H256;
 use std_ext::ArcExt as _;
-use types::{
-    gloas::containers::SignedExecutionPayloadEnvelope, phase0::primitives::Slot, preset::Preset,
-};
+use types::{combined::SignedExecutionPayloadEnvelope, phase0::primitives::Slot, preset::Preset};
 
 #[derive(Clone, Default)]
 pub struct ExecutionPayloadEnvelopeCache<P: Preset> {

@@ -661,7 +661,8 @@ impl Context<Minimal> {
             &chain_config,
             &pubkey_cache,
             genesis_state,
-            Phase::CARDINALITY
+            // PQ is not reached by an upgrade.
+            (Phase::CARDINALITY - 1)
                 .try_into()
                 .expect("number of phases should fit in u64"),
         )

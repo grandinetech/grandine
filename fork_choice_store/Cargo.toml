@@ -45,6 +45,7 @@ tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
 unwrap_none = { workspace = true }
+xmss = { workspace = true }
 
 [features]
 # Compare attestation scores used by the Fast Confirmation Rule with a literal implementation of

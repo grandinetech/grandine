@@ -9,9 +9,8 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
-    combined::{DataColumnSidecar, SignedBeaconBlock},
+    combined::{DataColumnSidecar, SignedBeaconBlock, SignedExecutionPayloadEnvelope},
     deneb::containers::BlobSidecar,
-    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     phase0::primitives::Slot,
     preset::Preset,

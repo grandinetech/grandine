@@ -100,7 +100,7 @@ use types::{
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        SignedBeaconBlock, SignedBlindedBeaconBlock, SignedExecutionPayloadEnvelope,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -115,7 +115,8 @@ use types::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             Builder, ExecutionPayloadEnvelope, PayloadAttestation, PayloadAttestationData,
-            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            PayloadAttestationMessage, SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
             SignedExecutionPayloadEnvelopeContents, SignedProposerPreferences,
         },
         primitives::BuilderIndex,
@@ -2727,11 +2728,13 @@ pub async fn publish_execution_payload_envelope<P: Preset, W: Wait>(
         blobs,
     } = resolve_execution_payload_envelope_contents(&block_producer, &headers, body).await?;
 
-    let signed_envelope = Arc::new(signed_execution_payload_envelope);
+    let signed_envelope = Arc::new(SignedExecutionPayloadEnvelope::from(
+        signed_execution_payload_envelope,
+    ));
 
     if !blobs.is_empty() {
-        let beacon_block_root = signed_envelope.message.beacon_block_root;
-        let slot = signed_envelope.message.payload.slot_number;
+        let beacon_block_root = signed_envelope.block_root();
+        let slot = signed_envelope.slot();
 
         publish_gloas_data_column_sidecars(
             &controller,
@@ -7039,8 +7042,9 @@ async fn resolve_execution_payload_envelope_contents<P: Preset, W: Wait>(
         return deserialize_json_or_ssz::<SignedExecutionPayloadEnvelopeContents<P>>(headers, body);
     }
 
+    // TODO(feature/pq): accept PQ envelopes once validators sign them.
     let signed_execution_payload_envelope =
-        deserialize_json_or_ssz::<SignedExecutionPayloadEnvelope<P>>(headers, body)?;
+        deserialize_json_or_ssz::<GloasSignedExecutionPayloadEnvelope<P>>(headers, body)?;
 
     let beacon_block_root = signed_execution_payload_envelope.message.beacon_block_root;
     let (cached_envelope, blobs, kzg_proofs) = block_producer

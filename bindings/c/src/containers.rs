@@ -763,6 +763,14 @@ impl TryInto<RawExecutionRequests<Mainnet>> for CExecutionRequests {
                 RequestType::BuilderExits => {
                     builder_exit_requests = ContiguousList::from_ssz_default(bytes)?;
                 }
+                RequestType::ValidatorPreregistrations
+                | RequestType::BuilderPreregistrations
+                | RequestType::VoluntaryExits => {
+                    anyhow::bail!(
+                        "Invalid execution requests - PQ request type 0x{:02x} is not supported",
+                        ty.request_type_byte(),
+                    );
+                }
             }
         }
 

@@ -6,8 +6,8 @@ use duplicate::duplicate_item;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
-    BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash, SszList, SszRead,
-    SszReadDefault, SszSize, SszWrite, WriteError,
+    BitVector, ContiguousList, H256, Hc, Offset, ProgressiveList, ReadError, Size, SszHash,
+    SszList, SszRead, SszReadDefault, SszSize, SszWrite, WriteError,
 };
 use static_assertions::{assert_not_impl_any, const_assert_eq};
 use thiserror::Error;
@@ -103,15 +103,20 @@ use crate::{
         containers::{
             AggregateAndProof as GloasAggregateAndProof, Attestation as GloasAttestation,
             AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
-            DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayload as GloasExecutionPayload,
-            ExecutionPayloadBid, ExecutionRequests as GloasExecutionRequests,
+            BuilderExitRequest, DataColumnSidecar as GloasDataColumnSidecar,
+            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
+            ExecutionRequests as GloasExecutionRequests,
             LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
-            LightClientUpdate as GloasLightClientUpdate,
+            LightClientUpdate as GloasLightClientUpdate, PayloadEnvelopeIdentifier,
             SignedAggregateAndProof as GloasSignedAggregateAndProof,
-            SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
+            SignedBeaconBlock as GloasSignedBeaconBlock,
+            SignedBlindedExecutionPayloadEnvelope as GloasSignedBlindedExecutionPayloadEnvelope,
+            SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{ExecutionPayloadBody, Phase},
     phase0::{
@@ -133,16 +138,21 @@ use crate::{
         containers::{
             AggregateAndProof as PqAggregateAndProof, Attestation as PqAttestation,
             AttesterSlashing as PqAttesterSlashing, BeaconBlock as PqBeaconBlock,
+            ExecutionRequests as PqExecutionRequests,
             SignedAggregateAndProof as PqSignedAggregateAndProof,
-            SignedBeaconBlock as PqSignedBeaconBlock, SingleAttestation as PqSingleAttestation,
+            SignedBeaconBlock as PqSignedBeaconBlock,
+            SignedBlindedExecutionPayloadEnvelope as PqSignedBlindedExecutionPayloadEnvelope,
+            SignedExecutionPayloadEnvelope as PqSignedExecutionPayloadEnvelope,
+            SingleAttestation as PqSingleAttestation,
         },
     },
     preset::{Mainnet, Preset},
     traits::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithExecutionRequests,
-        ExecutionPayload as ExecutionPayloadTrait, PostAltairBeaconState, PostBellatrixBeaconState,
-        PostCapellaBeaconState, PostElectraBeaconState, PostFuluBeaconState, PostGloasBeaconState,
-        SignedBeaconBlock as _,
+        ExecutionPayload as ExecutionPayloadTrait,
+        ExecutionPayloadEnvelope as ExecutionPayloadEnvelopeTrait, PostAltairBeaconState,
+        PostBellatrixBeaconState, PostCapellaBeaconState, PostElectraBeaconState,
+        PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -1894,6 +1904,11 @@ pub enum ExecutionPayloadParams<P: Preset> {
         parent_beacon_block_root: H256,
         execution_requests: GloasExecutionRequests<P>,
     },
+    Pq {
+        versioned_hashes: Vec<VersionedHash>,
+        parent_beacon_block_root: H256,
+        execution_requests: PqExecutionRequests<P>,
+    },
 }
 
 #[derive(Debug, Clone, From, PartialEq, Eq, Deserialize, Serialize)]
@@ -1901,14 +1916,16 @@ pub enum ExecutionPayloadParams<P: Preset> {
 pub enum ExecutionRequests<P: Preset> {
     Electra(ElectraExecutionRequests<P>),
     Gloas(GloasExecutionRequests<P>),
+    Pq(PqExecutionRequests<P>),
 }
 
 impl<P: Preset> SszSize for ExecutionRequests<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
         ElectraExecutionRequests::<P>::SIZE,
         GloasExecutionRequests::<P>::SIZE,
+        PqExecutionRequests::<P>::SIZE,
     ]);
 }
 
@@ -1917,6 +1934,7 @@ impl<P: Preset> SszWrite for ExecutionRequests<P> {
         match self {
             Self::Electra(execution_requests) => execution_requests.write_variable(bytes),
             Self::Gloas(execution_requests) => execution_requests.write_variable(bytes),
+            Self::Pq(execution_requests) => execution_requests.write_variable(bytes),
         }
     }
 }
@@ -1928,6 +1946,286 @@ impl<P: Preset> SszHash for ExecutionRequests<P> {
         match self {
             Self::Electra(execution_requests) => execution_requests.hash_tree_root(),
             Self::Gloas(execution_requests) => execution_requests.hash_tree_root(),
+            Self::Pq(execution_requests) => execution_requests.hash_tree_root(),
+        }
+    }
+}
+
+/// The execution requests of a payload envelope.
+#[derive(Clone, Copy, Debug)]
+pub enum EnvelopeExecutionRequests<'requests, P: Preset> {
+    Gloas(&'requests GloasExecutionRequests<P>),
+    Pq(&'requests PqExecutionRequests<P>),
+}
+
+impl<'requests, P: Preset> EnvelopeExecutionRequests<'requests, P> {
+    #[must_use]
+    pub fn hash_tree_root(self) -> H256 {
+        match self {
+            Self::Gloas(execution_requests) => execution_requests.hash_tree_root(),
+            Self::Pq(execution_requests) => execution_requests.hash_tree_root(),
+        }
+    }
+
+    #[must_use]
+    pub const fn builder_exits(self) -> &'requests ProgressiveList<BuilderExitRequest> {
+        match self {
+            Self::Gloas(execution_requests) => &execution_requests.builder_exits,
+            Self::Pq(execution_requests) => &execution_requests.builder_exits,
+        }
+    }
+
+    #[must_use]
+    pub const fn gloas(self) -> Option<&'requests GloasExecutionRequests<P>> {
+        match self {
+            Self::Gloas(execution_requests) => Some(execution_requests),
+            Self::Pq(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn payload_params(
+        self,
+        versioned_hashes: Vec<VersionedHash>,
+        parent_beacon_block_root: H256,
+    ) -> ExecutionPayloadParams<P> {
+        match self {
+            Self::Gloas(execution_requests) => ExecutionPayloadParams::Gloas {
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests: execution_requests.clone(),
+            },
+            Self::Pq(execution_requests) => ExecutionPayloadParams::Pq {
+                versioned_hashes,
+                parent_beacon_block_root,
+                execution_requests: execution_requests.clone(),
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn to_owned(self) -> ExecutionRequests<P> {
+        match self {
+            Self::Gloas(execution_requests) => ExecutionRequests::Gloas(execution_requests.clone()),
+            Self::Pq(execution_requests) => ExecutionRequests::Pq(execution_requests.clone()),
+        }
+    }
+}
+
+/// The signature of a payload envelope.
+#[derive(Clone, Copy, Debug)]
+pub enum EnvelopeSignature<'signature> {
+    Bls(SignatureBytes),
+    Xmss(&'signature XmssSignature),
+}
+
+// The phase of an envelope is not determined by its slot alone, but the two layouts differ in the
+// offset of `message`, which follows the fixed-size `signature`.
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum SignedExecutionPayloadEnvelope<P: Preset> {
+    Gloas(GloasSignedExecutionPayloadEnvelope<P>),
+    Pq(PqSignedExecutionPayloadEnvelope<P>),
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From)]
+pub enum SignedBlindedExecutionPayloadEnvelope<P: Preset> {
+    Gloas(GloasSignedBlindedExecutionPayloadEnvelope<P>),
+    Pq(PqSignedBlindedExecutionPayloadEnvelope<P>),
+}
+
+const GLOAS_ENVELOPE_MESSAGE_OFFSET: usize = Offset::SIZE.get() + SignatureBytes::SIZE.get();
+const PQ_ENVELOPE_MESSAGE_OFFSET: usize = Offset::SIZE.get() + XmssSignature::SIZE.get();
+
+fn envelope_phase(bytes: &[u8]) -> Result<Phase, ReadError> {
+    let offset_bytes = ssz::subslice(bytes, 0..Offset::SIZE.get())?;
+    let offset = usize::try_from(u32::from_ssz_default(offset_bytes)?)
+        .expect("u32 fits in usize on every supported platform");
+
+    match offset {
+        GLOAS_ENVELOPE_MESSAGE_OFFSET => Ok(Phase::Gloas),
+        PQ_ENVELOPE_MESSAGE_OFFSET => Ok(Phase::Pq),
+        _ => Err(ReadError::Custom {
+            message: "payload envelope has an unknown layout",
+        }),
+    }
+}
+
+duplicate::duplicate! {
+    [
+        implementor                                  gloas_type                                     pq_type;
+        [SignedExecutionPayloadEnvelope<P>]          [GloasSignedExecutionPayloadEnvelope<P>]        [PqSignedExecutionPayloadEnvelope<P>];
+        [SignedBlindedExecutionPayloadEnvelope<P>]   [GloasSignedBlindedExecutionPayloadEnvelope<P>] [PqSignedBlindedExecutionPayloadEnvelope<P>];
+    ]
+
+    impl<P: Preset> SszSize for implementor {
+        const SIZE: Size = Size::for_untagged_union([<gloas_type>::SIZE, <pq_type>::SIZE]);
+    }
+
+    impl<P: Preset, C> SszRead<C> for implementor {
+        fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+            match envelope_phase(bytes)? {
+                Phase::Pq => Ok(Self::Pq(SszReadDefault::from_ssz_default(bytes)?)),
+                _ => Ok(Self::Gloas(SszReadDefault::from_ssz_default(bytes)?)),
+            }
+        }
+    }
+
+    impl<P: Preset> SszWrite for implementor {
+        fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+            match self {
+                Self::Gloas(envelope) => envelope.write_variable(bytes),
+                Self::Pq(envelope) => envelope.write_variable(bytes),
+            }
+        }
+    }
+
+    impl<P: Preset> SszHash for implementor {
+        type PackingFactor = U1;
+
+        fn hash_tree_root(&self) -> H256 {
+            match self {
+                Self::Gloas(envelope) => envelope.hash_tree_root(),
+                Self::Pq(envelope) => envelope.hash_tree_root(),
+            }
+        }
+    }
+
+}
+
+impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
+        }
+    }
+
+    #[expect(clippy::same_name_method)]
+    #[must_use]
+    pub fn message(&self) -> &dyn ExecutionPayloadEnvelopeTrait<P> {
+        match self {
+            Self::Gloas(envelope) => &envelope.message,
+            Self::Pq(envelope) => &envelope.message,
+        }
+    }
+
+    #[expect(clippy::same_name_method)]
+    #[must_use]
+    pub const fn signature(&self) -> EnvelopeSignature<'_> {
+        match self {
+            Self::Gloas(envelope) => EnvelopeSignature::Bls(envelope.signature),
+            Self::Pq(envelope) => EnvelopeSignature::Xmss(&envelope.signature),
+        }
+    }
+
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        self.message().slot()
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        self.message().block_root()
+    }
+
+    #[must_use]
+    pub fn builder_index(&self) -> BuilderIndex {
+        self.message().builder_index()
+    }
+
+    #[must_use]
+    pub const fn execution_payload(&self) -> &GloasExecutionPayload<P> {
+        match self {
+            Self::Gloas(envelope) => &envelope.message.payload,
+            Self::Pq(envelope) => &envelope.message.payload,
+        }
+    }
+
+    #[must_use]
+    pub fn execution_payload_body(&self) -> ExecutionPayloadBody<P> {
+        self.execution_payload().into()
+    }
+
+    #[must_use]
+    pub const fn gloas(&self) -> Option<&GloasSignedExecutionPayloadEnvelope<P>> {
+        match self {
+            Self::Gloas(envelope) => Some(envelope),
+            Self::Pq(_) => None,
+        }
+    }
+}
+
+impl<P: Preset> From<&SignedExecutionPayloadEnvelope<P>> for PayloadEnvelopeIdentifier {
+    fn from(envelope: &SignedExecutionPayloadEnvelope<P>) -> Self {
+        Self {
+            beacon_block_root: envelope.block_root(),
+            builder_index: envelope.builder_index(),
+        }
+    }
+}
+
+impl<P: Preset> SignedBlindedExecutionPayloadEnvelope<P> {
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
+        }
+    }
+
+    #[expect(clippy::same_name_method)]
+    #[must_use]
+    pub fn message(&self) -> &dyn ExecutionPayloadEnvelopeTrait<P> {
+        match self {
+            Self::Gloas(envelope) => &envelope.message,
+            Self::Pq(envelope) => &envelope.message,
+        }
+    }
+
+    #[expect(clippy::same_name_method)]
+    #[must_use]
+    pub const fn signature(&self) -> EnvelopeSignature<'_> {
+        match self {
+            Self::Gloas(envelope) => EnvelopeSignature::Bls(envelope.signature),
+            Self::Pq(envelope) => EnvelopeSignature::Xmss(&envelope.signature),
+        }
+    }
+
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        self.message().slot()
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        self.message().block_root()
+    }
+
+    #[must_use]
+    pub fn builder_index(&self) -> BuilderIndex {
+        self.message().builder_index()
+    }
+
+    pub fn unblind(
+        self,
+        payload_body: ExecutionPayloadBody<P>,
+    ) -> Result<SignedExecutionPayloadEnvelope<P>, UnblindError> {
+        match self {
+            Self::Gloas(envelope) => envelope.unblind(payload_body).map(Into::into),
+            Self::Pq(envelope) => envelope.unblind(payload_body).map(Into::into),
+        }
+    }
+}
+
+impl<P: Preset> From<SignedExecutionPayloadEnvelope<P>>
+    for SignedBlindedExecutionPayloadEnvelope<P>
+{
+    fn from(envelope: SignedExecutionPayloadEnvelope<P>) -> Self {
+        match envelope {
+            SignedExecutionPayloadEnvelope::Gloas(envelope) => Self::Gloas(envelope.into()),
+            SignedExecutionPayloadEnvelope::Pq(envelope) => Self::Pq(envelope.into()),
         }
     }
 }

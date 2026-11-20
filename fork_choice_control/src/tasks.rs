@@ -29,14 +29,12 @@ use tracing::{Span, instrument};
 use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, DataColumnSidecar,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::{
-        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
-    },
+    gloas::containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,

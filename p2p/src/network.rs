@@ -56,7 +56,7 @@ use types::{
     capella::containers::SignedBlsToExecutionChange,
     combined::{
         Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        SignedBeaconBlock, SignedExecutionPayloadEnvelope,
     },
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -65,8 +65,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedProposerPreferences,
     },
     nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{

@@ -15,14 +15,12 @@ use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
-        SignedBeaconBlock,
+        SignedBeaconBlock, SignedExecutionPayloadEnvelope,
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
     gloas::{
-        containers::{
-            CombinedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
-        },
+        containers::{CombinedPayloadAttestation, PayloadAttestationMessage},
         primitives::PayloadStatus,
     },
     nonstandard::{Phase, TimedPowBlock},
