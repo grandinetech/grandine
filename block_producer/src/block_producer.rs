@@ -67,7 +67,7 @@ use types::{
     },
     combined::{
         AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload,
-        ExecutionPayloadHeader, ExecutionRequests, SignedBlindedBeaconBlock,
+        ExecutionPayloadHeader, ExecutionRequests, ProposerSlashing, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -99,7 +99,7 @@ use types::{
         containers::{
             Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
-            ProposerSlashing, SignedVoluntaryExit,
+            ProposerSlashing as Phase0ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
             CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber,
@@ -302,7 +302,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .lock()
             .await
             .retain(|slashing| {
-                let proposer_index = slashing.signed_header_1.message.proposer_index;
+                let proposer_index = slashing.proposer_index();
 
                 let proposer = match finalized_state
                     .validators()
@@ -562,8 +562,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
 
         let index_seen = proposer_slashings
             .iter()
-            .map(|proposer_slashing| proposer_slashing.signed_header_1.message.proposer_index)
-            .contains(&slashing.signed_header_1.message.proposer_index);
+            .map(ProposerSlashing::proposer_index)
+            .contains(&slashing.proposer_index());
 
         if index_seen {
             return Ok(PoolAdditionOutcome::Ignore);
@@ -575,12 +575,30 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .preprocessed_state_at_current_slot()
             .await?;
 
-        let outcome = match unphased::validate_proposer_slashing(
-            &self.producer_context.chain_config,
-            &self.producer_context.pubkey_cache,
-            &state,
-            slashing,
-        ) {
+        let result = match &slashing {
+            // Phase0 validation would decompress the padded XMSS keys of a PQ state as BLS keys.
+            ProposerSlashing::Phase0(_) if state.phase() == Phase::Pq => {
+                Err(AnyhowError::msg("proposer slashing is from before PQ"))
+            }
+            ProposerSlashing::Pq(_) if state.phase() != Phase::Pq => Err(AnyhowError::msg(
+                "PQ proposer slashing for a state before PQ",
+            )),
+            ProposerSlashing::Phase0(proposer_slashing) => unphased::validate_proposer_slashing(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                &state,
+                *proposer_slashing,
+            ),
+            ProposerSlashing::Pq(proposer_slashing) => {
+                transition_functions::pq::validate_proposer_slashing(
+                    &self.producer_context.chain_config,
+                    &state,
+                    proposer_slashing,
+                )
+            }
+        };
+
+        let outcome = match result {
             Ok(()) => {
                 proposer_slashings.push(slashing);
                 PoolAdditionOutcome::Accept
@@ -1717,7 +1735,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     async fn prepare_proposer_slashings(
         &self,
-    ) -> ContiguousList<ProposerSlashing, P::MaxProposerSlashings> {
+    ) -> ContiguousList<Phase0ProposerSlashing, P::MaxProposerSlashings> {
         let _timer = self
             .producer_context
             .metrics
@@ -1726,18 +1744,23 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut slashings = self.producer_context.proposer_slashings.lock().await;
 
+        // TODO(PQ): Pack PQ proposer slashings into PQ blocks.
         let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
-            unphased::validate_proposer_slashing(
-                &self.producer_context.chain_config,
-                &self.producer_context.pubkey_cache,
-                &self.beacon_state,
-                *slashing,
-            )
-            .is_ok()
+            slashing.phase0().is_some_and(|slashing| {
+                unphased::validate_proposer_slashing(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    *slashing,
+                )
+                .is_ok()
+            })
         });
 
         let slashings = ContiguousList::try_from_iter(
-            slashings.drain(0..split_index.min(P::MaxProposerSlashings::USIZE)),
+            slashings
+                .drain(0..split_index.min(P::MaxProposerSlashings::USIZE))
+                .filter_map(|slashing| slashing.phase0().copied()),
         )
         .expect(
             "the call to Vec::drain above limits the \
@@ -2778,7 +2801,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             fee_recipient,
             target_gas_limit,
             ..
-        } = proposer_preferences.message;
+        } = *proposer_preferences.message();
 
         let Some(parent_gas_limit) = self
             .producer_context
@@ -3867,12 +3890,15 @@ mod gloas_scoring_tests {
         };
         let (tx, rx) = futures::channel::oneshot::channel();
         controller.on_api_proposer_preferences(
-            Arc::new(types::gloas::containers::SignedProposerPreferences {
-                signature: preferences
-                    .sign(&config, &proposal_state, &keys[usize::try_from(proposer)?])
-                    .into(),
-                message: preferences,
-            }),
+            Arc::new(
+                types::gloas::containers::SignedProposerPreferences {
+                    signature: preferences
+                        .sign(&config, &proposal_state, &keys[usize::try_from(proposer)?])
+                        .into(),
+                    message: preferences,
+                }
+                .into(),
+            ),
             tx,
         );
         assert_eq!(rx.await??, types::nonstandard::ValidationOutcome::Accept);

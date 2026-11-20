@@ -52,6 +52,7 @@ use types::{
         Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
         SignedBlindedBeaconBlock,
         SignedExecutionPayloadEnvelope as CombinedSignedExecutionPayloadEnvelope,
+        SignedProposerPreferences as CombinedSignedProposerPreferences,
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
@@ -955,6 +956,10 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         preferences: &[Arc<SignedProposerPreferences>],
     ) -> Result<()> {
         for signed_preferences in preferences {
+            let signed_preferences = Arc::new(CombinedSignedProposerPreferences::from(
+                *signed_preferences.as_ref(),
+            ));
+
             // Pass into own fork-choice store so bids for this slot pass the
             // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
             self.context
@@ -962,7 +967,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 .controller
                 .on_own_proposer_preferences(signed_preferences.clone_arc());
 
-            ValidatorToP2p::PublishProposerPreferences(signed_preferences.clone_arc())
+            ValidatorToP2p::PublishProposerPreferences(signed_preferences)
                 .send(&self.context.p2p_tx);
         }
 

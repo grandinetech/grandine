@@ -20,8 +20,9 @@ use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{
-        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        Attestation, AttesterSlashing, DataColumnSidecar, ProposerSlashing,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
@@ -30,11 +31,10 @@ use types::{
     },
     gloas::containers::{
         PayloadAttestationMessage, PayloadEnvelopeIdentifier, SignedExecutionPayloadBid,
-        SignedProposerPreferences,
     },
     nonstandard::Phase,
     phase0::{
-        containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
+        containers::{Checkpoint, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,

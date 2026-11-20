@@ -570,6 +570,32 @@ pub(super) fn process_proposer_slashing<P: Preset>(
     proposer_slashing: &ProposerSlashing,
     slot_report: impl SlotReport,
 ) -> Result<()> {
+    let index = validate_proposer_slashing_without_signatures(state, proposer_slashing)?;
+
+    slash_validator(
+        config,
+        state,
+        index,
+        None,
+        SlashingKind::Proposer,
+        slot_report,
+    )
+}
+
+/// The checks of [`process_proposer_slashing`] and the header signatures, without slashing.
+pub fn validate_proposer_slashing<P: Preset>(
+    config: &Config,
+    state: &impl BeaconStateTrait<P>,
+    proposer_slashing: &ProposerSlashing,
+) -> Result<()> {
+    validate_proposer_slashing_without_signatures(state, proposer_slashing)?;
+    verify_proposer_slashing_signatures(config, state, proposer_slashing)
+}
+
+fn validate_proposer_slashing_without_signatures<P: Preset>(
+    state: &impl BeaconStateTrait<P>,
+    proposer_slashing: &ProposerSlashing,
+) -> Result<ValidatorIndex> {
     let header_1 = proposer_slashing.signed_header_1.message;
     let header_2 = proposer_slashing.signed_header_2.message;
 
@@ -602,28 +628,21 @@ pub(super) fn process_proposer_slashing<P: Preset>(
 
     ensure!(
         is_slashable_validator(
-            state.validators.partial_validator(index)?,
+            state.validators().partial_validator(index)?,
             get_current_epoch(state),
         ),
         Error::<P>::ProposerNotSlashable {
             index,
-            proposer: state.validators.get(index)?,
+            proposer: state.validators().get(index)?,
         },
     );
 
-    slash_validator(
-        config,
-        state,
-        index,
-        None,
-        SlashingKind::Proposer,
-        slot_report,
-    )
+    Ok(index)
 }
 
 fn verify_proposer_slashing_signatures<P: Preset>(
     config: &Config,
-    state: &BeaconState<P>,
+    state: &impl BeaconStateTrait<P>,
     proposer_slashing: &ProposerSlashing,
 ) -> Result<()> {
     for signed_header in [

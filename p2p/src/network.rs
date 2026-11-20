@@ -55,8 +55,9 @@ use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
     combined::{
-        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        Attestation, AttesterSlashing, DataColumnSidecar, ProposerSlashing,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -64,13 +65,11 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedProposerPreferences,
-    },
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
-        containers::{ProposerSlashing, SignedVoluntaryExit},
+        containers::SignedVoluntaryExit,
         primitives::{Epoch, ForkDigest, H256, NodeId, Slot, SubnetId},
     },
     preset::Preset,
@@ -979,14 +978,14 @@ impl<P: Preset, W: Wait> Network<P, W> {
     ) {
         trace_with_peers!(
             "publishing proposer preferences: (validator_index: {}, slot: {})",
-            signed_proposer_preferences.message.validator_index,
-            signed_proposer_preferences.message.proposal_slot
+            signed_proposer_preferences.message().validator_index,
+            signed_proposer_preferences.message().proposal_slot
         );
 
         // Proposer preferences are published on the fork digest of their proposal epoch,
         // which may be the next fork digest.
         let proposal_epoch =
-            misc::compute_epoch_at_slot::<P>(signed_proposer_preferences.message.proposal_slot);
+            misc::compute_epoch_at_slot::<P>(signed_proposer_preferences.message().proposal_slot);
         let fork_digest = self.fork_context.context_bytes(proposal_epoch);
         let message = PubsubMessage::ProposerPreferences(signed_proposer_preferences);
 

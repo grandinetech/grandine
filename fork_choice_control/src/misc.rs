@@ -19,13 +19,16 @@ use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
-    combined::{DataColumnSidecar, SignedAggregateAndProof, SignedExecutionPayloadEnvelope},
+    combined::{
+        DataColumnSidecar, SignedAggregateAndProof, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
+    },
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadEnvelopeIdentifier, SignedProposerPreferences},
+    gloas::containers::PayloadEnvelopeIdentifier,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };

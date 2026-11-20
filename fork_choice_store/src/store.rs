@@ -29,7 +29,7 @@ use helper_functions::{
     accessors, electra,
     error::SignatureKind,
     gloas, misc, phase0, pq, predicates,
-    signing::SignForSingleFork as _,
+    signing::SignForSingleFork,
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
@@ -53,8 +53,8 @@ use typenum::Unsigned as _;
 use types::{
     combined::{
         Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, EnvelopeExecutionRequests,
-        EnvelopeSignature, SignedAggregateAndProof, SignedBeaconBlock,
-        SignedExecutionPayloadEnvelope,
+        SignatureRef, SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -73,7 +73,7 @@ use types::{
         },
         containers::{
             Builder, BuilderExitRequest, CombinedPayloadAttestation, ExecutionPayloadBid,
-            SignedExecutionPayloadBid, SignedProposerPreferences,
+            SignedExecutionPayloadBid,
         },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -88,7 +88,10 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
     pq::{
-        consts::{LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE, LEAF_OFFSET_PTC_ATTESTER},
+        consts::{
+            LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE, LEAF_OFFSET_PROPOSER_PREFERENCES,
+            LEAF_OFFSET_PTC_ATTESTER,
+        },
         validator_list::{padded_pubkey, unpadded_pubkey},
     },
     preset::{DataAvailabilityTimelyThreshold, PayloadTimelyThreshold, Preset},
@@ -2846,7 +2849,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > `bid.fee_recipient` matches the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
-        if bid.fee_recipient != proposer_preference.message.fee_recipient {
+        if bid.fee_recipient != proposer_preference.message().fee_recipient {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "`bid.fee_recipient` does not match the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`",
             ));
@@ -2872,7 +2875,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if !predicates::is_gas_limit_target_compatible(
             parent_gas_limit,
             bid.gas_limit,
-            proposer_preference.message.target_gas_limit,
+            proposer_preference.message().target_gas_limit,
         ) {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "bid gas_limit is not compatible with target_gas_limit",
@@ -2969,7 +2972,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         signed_preferences: Arc<SignedProposerPreferences>,
         origin: &ProposerPreferencesOrigin,
     ) -> Result<ProposerPreferencesAction> {
-        let preferences = &signed_preferences.message;
+        let preferences = signed_preferences.message();
         let validator_index = preferences.validator_index;
         let proposal_slot = preferences.proposal_slot;
         let dependent_root = preferences.dependent_root;
@@ -3046,16 +3049,51 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [REJECT] signed_proposer_preferences.signature is valid with respect to the validator's public key
-        if origin.verify_signatures() {
-            let validator = state.validators().get(validator_index)?;
-            let pubkey = self.pubkey_cache.get_or_insert(validator.pubkey)?;
+        // BLS verification would decompress the padded XMSS keys of a PQ state as BLS keys.
+        ensure!(
+            (signed_preferences.phase() == Phase::Pq) == (state.phase() == Phase::Pq),
+            Error::<P>::InvalidProposerPreferencesSignature { signed_preferences },
+        );
 
-            if let Err(error) = preferences.verify(
-                &self.chain_config,
-                &state,
-                signed_preferences.signature,
-                pubkey,
-            ) {
+        if origin.verify_signatures() {
+            let result = match signed_preferences.signature() {
+                SignatureRef::Bls(signature) => {
+                    let validator = state.validators().get(validator_index)?;
+                    let pubkey = self.pubkey_cache.get_or_insert(validator.pubkey)?;
+
+                    preferences.verify(&self.chain_config, &state, signature, pubkey)
+                }
+                SignatureRef::Xmss(signature) => {
+                    let leaf_index = pq::compute_xmss_leaf_index(
+                        proposal_slot,
+                        LEAF_OFFSET_PROPOSER_PREFERENCES,
+                    )?;
+                    let signing_root = SignForSingleFork::<P>::signing_root(
+                        preferences,
+                        &self.chain_config,
+                        &state,
+                    );
+
+                    pq::verify_validator_signature(
+                        &state,
+                        validator_index,
+                        leaf_index,
+                        signing_root,
+                        signature,
+                    )
+                    .and_then(|valid| {
+                        ensure!(
+                            valid,
+                            helper_functions::error::Error::SignatureInvalid(
+                                SignatureKind::ProposerPreferences,
+                            ),
+                        );
+                        Ok(())
+                    })
+                }
+            };
+
+            if let Err(error) = result {
                 bail!(
                     error.context(Error::<P>::InvalidProposerPreferencesSignature {
                         signed_preferences
@@ -4772,13 +4810,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             // [REJECT] The builder signature envelope.signature is valid
             match envelope.signature() {
-                EnvelopeSignature::Bls(signature) => SingleVerifier.verify_singular(
+                SignatureRef::Bls(signature) => SingleVerifier.verify_singular(
                     signing_root,
                     signature,
                     self.pubkey_cache.get_or_insert(pubkey)?,
                     SignatureKind::ExecutionPayloadEnvelope,
                 )?,
-                EnvelopeSignature::Xmss(signature) => {
+                SignatureRef::Xmss(signature) => {
                     let leaf_index = pq::compute_xmss_leaf_index(
                         state.latest_block_header().slot,
                         LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE,
@@ -5570,9 +5608,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         signed_preferences: Arc<SignedProposerPreferences>,
     ) {
-        let slot = signed_preferences.message.proposal_slot;
-        let dependent_root = signed_preferences.message.dependent_root;
-        let validator_index = signed_preferences.message.validator_index;
+        let slot = signed_preferences.message().proposal_slot;
+        let dependent_root = signed_preferences.message().dependent_root;
+        let validator_index = signed_preferences.message().validator_index;
 
         self.accepted_proposer_preferences
             .insert((dependent_root, slot, validator_index), signed_preferences);

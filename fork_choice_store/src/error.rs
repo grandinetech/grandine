@@ -5,9 +5,12 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
-    combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedProposerPreferences,
+    },
     deneb::containers::BlobSidecar,
-    gloas::containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
+    gloas::containers::SignedExecutionPayloadBid,
     phase0::primitives::{
         Epoch, ExecutionBlockHash, H256, Slot, SubnetId, UnixSeconds, ValidatorIndex,
     },

@@ -110,11 +110,12 @@ use crate::{
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate, PayloadEnvelopeIdentifier,
-            SignedAggregateAndProof as GloasSignedAggregateAndProof,
+            ProposerPreferences, SignedAggregateAndProof as GloasSignedAggregateAndProof,
             SignedBeaconBlock as GloasSignedBeaconBlock,
             SignedBlindedExecutionPayloadEnvelope as GloasSignedBlindedExecutionPayloadEnvelope,
             SignedExecutionPayloadBid,
             SignedExecutionPayloadEnvelope as GloasSignedExecutionPayloadEnvelope,
+            SignedProposerPreferences as GloasSignedProposerPreferences,
         },
         primitives::BuilderIndex,
     },
@@ -124,7 +125,8 @@ use crate::{
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
             AttestationData, AttesterSlashing as Phase0AttesterSlashing,
-            BeaconBlock as Phase0BeaconBlock,
+            BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader,
+            ProposerSlashing as Phase0ProposerSlashing,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock, SignedBeaconBlockHeader,
         },
@@ -138,11 +140,12 @@ use crate::{
         containers::{
             AggregateAndProof as PqAggregateAndProof, Attestation as PqAttestation,
             AttesterSlashing as PqAttesterSlashing, BeaconBlock as PqBeaconBlock,
-            ExecutionRequests as PqExecutionRequests,
+            ExecutionRequests as PqExecutionRequests, ProposerSlashing as PqProposerSlashing,
             SignedAggregateAndProof as PqSignedAggregateAndProof,
             SignedBeaconBlock as PqSignedBeaconBlock,
             SignedBlindedExecutionPayloadEnvelope as PqSignedBlindedExecutionPayloadEnvelope,
             SignedExecutionPayloadEnvelope as PqSignedExecutionPayloadEnvelope,
+            SignedProposerPreferences as PqSignedProposerPreferences,
             SingleAttestation as PqSingleAttestation,
         },
     },
@@ -2012,9 +2015,9 @@ impl<'requests, P: Preset> EnvelopeExecutionRequests<'requests, P> {
     }
 }
 
-/// The signature of a payload envelope.
+/// A BLS signature before PQ, an XMSS signature from PQ.
 #[derive(Clone, Copy, Debug)]
-pub enum EnvelopeSignature<'signature> {
+pub enum SignatureRef<'signature> {
     Bls(SignatureBytes),
     Xmss(&'signature XmssSignature),
 }
@@ -2113,10 +2116,10 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
 
     #[expect(clippy::same_name_method)]
     #[must_use]
-    pub const fn signature(&self) -> EnvelopeSignature<'_> {
+    pub const fn signature(&self) -> SignatureRef<'_> {
         match self {
-            Self::Gloas(envelope) => EnvelopeSignature::Bls(envelope.signature),
-            Self::Pq(envelope) => EnvelopeSignature::Xmss(&envelope.signature),
+            Self::Gloas(envelope) => SignatureRef::Bls(envelope.signature),
+            Self::Pq(envelope) => SignatureRef::Xmss(&envelope.signature),
         }
     }
 
@@ -2186,10 +2189,10 @@ impl<P: Preset> SignedBlindedExecutionPayloadEnvelope<P> {
 
     #[expect(clippy::same_name_method)]
     #[must_use]
-    pub const fn signature(&self) -> EnvelopeSignature<'_> {
+    pub const fn signature(&self) -> SignatureRef<'_> {
         match self {
-            Self::Gloas(envelope) => EnvelopeSignature::Bls(envelope.signature),
-            Self::Pq(envelope) => EnvelopeSignature::Xmss(&envelope.signature),
+            Self::Gloas(envelope) => SignatureRef::Bls(envelope.signature),
+            Self::Pq(envelope) => SignatureRef::Xmss(&envelope.signature),
         }
     }
 
@@ -2908,6 +2911,137 @@ impl<P: Preset> AttesterSlashing<P> {
         match self {
             Self::Pq(attester_slashing) => Some(attester_slashing),
             _ => None,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ProposerSlashing {
+    Phase0(Phase0ProposerSlashing),
+    Pq(PqProposerSlashing),
+}
+
+impl SszSize for ProposerSlashing {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
+        Phase0ProposerSlashing::SIZE,
+        PqProposerSlashing::SIZE,
+    ]);
+}
+
+impl SszWrite for ProposerSlashing {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Phase0(proposer_slashing) => proposer_slashing.write_variable(bytes),
+            Self::Pq(proposer_slashing) => proposer_slashing.write_variable(bytes),
+        }
+    }
+}
+
+impl ProposerSlashing {
+    /// The headers' signatures change in PQ, and nothing in the bytes tells the phases apart.
+    pub fn from_ssz_at_phase(phase: Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        match phase {
+            Phase::Pq => PqProposerSlashing::from_ssz_default(bytes).map(Self::Pq),
+            _ => Phase0ProposerSlashing::from_ssz_default(bytes).map(Self::Phase0),
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Phase0(_) => Phase::Phase0,
+            Self::Pq(_) => Phase::Pq,
+        }
+    }
+
+    #[must_use]
+    pub const fn header_1(&self) -> BeaconBlockHeader {
+        match self {
+            Self::Phase0(proposer_slashing) => proposer_slashing.signed_header_1.message,
+            Self::Pq(proposer_slashing) => proposer_slashing.signed_header_1.message,
+        }
+    }
+
+    #[must_use]
+    pub const fn proposer_index(&self) -> ValidatorIndex {
+        self.header_1().proposer_index
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
+        self.header_1().slot
+    }
+
+    #[must_use]
+    pub const fn phase0(&self) -> Option<&Phase0ProposerSlashing> {
+        match self {
+            Self::Phase0(proposer_slashing) => Some(proposer_slashing),
+            Self::Pq(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn pq(&self) -> Option<&PqProposerSlashing> {
+        match self {
+            Self::Phase0(_) => None,
+            Self::Pq(proposer_slashing) => Some(proposer_slashing),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum SignedProposerPreferences {
+    Gloas(GloasSignedProposerPreferences),
+    Pq(PqSignedProposerPreferences),
+}
+
+impl SszSize for SignedProposerPreferences {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
+        GloasSignedProposerPreferences::SIZE,
+        PqSignedProposerPreferences::SIZE,
+    ]);
+}
+
+impl SszWrite for SignedProposerPreferences {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Gloas(preferences) => preferences.write_variable(bytes),
+            Self::Pq(preferences) => preferences.write_variable(bytes),
+        }
+    }
+}
+
+impl SignedProposerPreferences {
+    pub fn from_ssz_at_phase(phase: Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        match phase {
+            Phase::Pq => PqSignedProposerPreferences::from_ssz_default(bytes).map(Self::Pq),
+            _ => GloasSignedProposerPreferences::from_ssz_default(bytes).map(Self::Gloas),
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
+        }
+    }
+
+    #[must_use]
+    pub const fn message(&self) -> &ProposerPreferences {
+        match self {
+            Self::Gloas(preferences) => &preferences.message,
+            Self::Pq(preferences) => &preferences.message,
+        }
+    }
+
+    #[must_use]
+    pub const fn signature(&self) -> SignatureRef<'_> {
+        match self {
+            Self::Gloas(preferences) => SignatureRef::Bls(preferences.signature),
+            Self::Pq(preferences) => SignatureRef::Xmss(&preferences.signature),
         }
     }
 }

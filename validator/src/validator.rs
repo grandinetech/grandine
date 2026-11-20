@@ -67,7 +67,8 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{
-        AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
+        AggregateAndProof, Attestation, AttesterSlashing, BeaconState, ProposerSlashing,
+        SignedAggregateAndProof,
     },
     config::Config,
     electra::containers::{
@@ -88,8 +89,7 @@ use types::{
         consts::GENESIS_SLOT,
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
-            ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
-            SignedVoluntaryExit,
+            SignedAggregateAndProof as Phase0SignedAggregateAndProof, SignedVoluntaryExit,
         },
         primitives::{
             Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256, ValidatorIndex,
@@ -528,7 +528,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
                         if let Some(block_producer) = self.chain_source.block_producer() {
-                            block_producer.add_new_proposer_slashing(proposer_slashing).await;
+                            block_producer.add_new_proposer_slashing(proposer_slashing.into()).await;
                         }
                     }
                 },
@@ -650,7 +650,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let outcome = match block_producer
-            .handle_external_proposer_slashing(slashing)
+            .handle_external_proposer_slashing(slashing.clone())
             .await
         {
             Ok(outcome) => outcome,

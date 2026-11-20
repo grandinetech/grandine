@@ -30,11 +30,12 @@ use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, DataColumnSidecar,
         SignedAggregateAndProof, SignedBeaconBlock, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,

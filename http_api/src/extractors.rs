@@ -34,13 +34,11 @@ use serde_with::{As, DisplayFromStr};
 use ssz::SszRead;
 use types::{
     altair::containers::SignedContributionAndProof,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof},
+    combined::{Attestation, AttesterSlashing, ProposerSlashing, SignedAggregateAndProof},
     config::Config,
     nonstandard::Phase,
     phase0::{
-        containers::{
-            AttesterSlashing as Phase0AttesterSlashing, ProposerSlashing, SignedVoluntaryExit,
-        },
+        containers::{AttesterSlashing as Phase0AttesterSlashing, SignedVoluntaryExit},
         primitives::{Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,

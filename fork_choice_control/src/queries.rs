@@ -36,14 +36,13 @@ use types::{
     altair::containers::SyncCommittee,
     combined::{
         BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
-        SignedExecutionPayloadEnvelope, UnblindError,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences, UnblindError,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
-        consts::PAYLOAD_STATUS_FULL,
-        containers::{SignedExecutionPayloadBid, SignedProposerPreferences},
+        consts::PAYLOAD_STATUS_FULL, containers::SignedExecutionPayloadBid,
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{
@@ -108,7 +107,7 @@ where
         self.store_snapshot()
             .accepted_proposer_preferences()
             .filter(|signed_preferences| {
-                let preferences = &signed_preferences.message;
+                let preferences = signed_preferences.message();
 
                 preferences.proposal_slot >= min_slot
                     && slot.is_none_or(|slot| preferences.proposal_slot == slot)
@@ -118,8 +117,8 @@ where
             .cloned()
             .sorted_by_key(|signed_preferences| {
                 (
-                    signed_preferences.message.proposal_slot,
-                    signed_preferences.message.validator_index,
+                    signed_preferences.message().proposal_slot,
+                    signed_preferences.message().validator_index,
                 )
             })
             .collect()
