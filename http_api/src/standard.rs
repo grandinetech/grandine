@@ -6,7 +6,6 @@ use core::{fmt::Display, str::FromStr, time::Duration};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
-    time::SystemTime,
 };
 
 use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
@@ -30,7 +29,6 @@ use builder_api::{
     gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderPreferencesEntry, BuilderUrl},
     unphased::containers::SignedValidatorRegistrationV1,
 };
-use clock::Tick;
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
@@ -40,6 +38,7 @@ use fork_choice_control::{
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+    StateCacheError,
 };
 use futures::{
     channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
@@ -83,7 +82,7 @@ use transition_functions::attestation_rewards::{
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    Ptc,
+    ProposerLookahead, Ptc,
     altair::{
         consts::SyncCommitteeSubnetCount,
         containers::{
@@ -481,13 +480,20 @@ pub struct StateBuilderResponse {
     builder: Builder,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 struct StateSyncCommitteeResponse<'indices> {
     #[serde(with = "As::<Vec<DisplayFromStr>>")]
     validators: Vec<ValidatorIndex>,
     #[serde(with = "As::<Vec<&[DisplayFromStr]>>")]
     validator_aggregates: Vec<&'indices [ValidatorIndex]>,
 }
+
+#[derive(Serialize, Ssz)]
+#[serde(transparent)]
+#[ssz(derive_hash = false, derive_read = false, transparent)]
+struct StateProposerLookaheadResponse<P: Preset>(
+    #[serde(with = "serde_utils::string_or_native_sequence")] ProposerLookahead<P>,
+);
 
 #[derive(Serialize, Ssz)]
 pub struct StatePtcResponse<P: Preset> {
@@ -590,13 +596,18 @@ pub async fn genesis<P: Preset>(
 }
 
 /// `GET /eth/v1/builder/states/{state_id}/expected_withdrawals`
+#[expect(clippy::type_complexity)]
 #[instrument(skip_all, level = "debug", name = "http_api::expected_withdrawals")]
 pub async fn expected_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ExpectedWithdrawalsQuery>,
-) -> Result<EthResponse<Vec<Withdrawal>>, Error> {
+    headers: HeaderMap,
+) -> Result<
+    EthResponse<ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>, (), JsonOrSsz>,
+    Error,
+> {
     let WithStatus {
         value: state,
         status,
@@ -621,14 +632,32 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
             tokio::task::block_in_place(|| {
                 controller.preprocessed_state_post_block_blocking(block_root, proposal_slot)
             })
+            .map_err(|error| match error.downcast_ref::<StateCacheError>() {
+                // The requested `proposal_slot` is too far ahead of the state.
+                // The default one is the next slot, so only a requested one is the client's fault.
+                Some(StateCacheError::StateFarBehind { .. }) if query.proposal_slot.is_some() => {
+                    Error::InvalidSlot(error)
+                }
+                _ => Error::Internal(error),
+            })
         })
         .transpose()?
         .unwrap_or(state);
 
-    let state = state.post_capella().ok_or(Error::StatePreCapella)?;
-    let expected_withdrawals = transition_functions::capella::get_expected_withdrawals(state)?;
+    let expected_withdrawals = if let Some(state) = state.post_gloas() {
+        transition_functions::gloas::get_expected_withdrawals(state)?.0
+    } else if let Some(state) = state.post_electra() {
+        transition_functions::electra::get_expected_withdrawals(state)?.0
+    } else if let Some(state) = state.post_capella() {
+        transition_functions::capella::get_expected_withdrawals(state)?
+    } else {
+        return Err(Error::StatePreCapella);
+    };
 
-    Ok(EthResponse::json(expected_withdrawals)
+    let expected_withdrawals =
+        ContiguousList::try_from_iter(expected_withdrawals).map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(expected_withdrawals, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
@@ -825,7 +854,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     let validator = state
         .validators()
         .get(validator_index)
-        .map_err(AnyhowError::new)?;
+        .map_err(|_| Error::ValidatorNotFound)?;
 
     let balance = state
         .balances()
@@ -973,7 +1002,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
             }
             Either::Left(core::iter::once(slot))
         }
-        None => Either::Right(misc::slots_in_epoch::<P>(epoch)?),
+        None => Either::Right(misc::slots_in_epoch::<P>(epoch).map_err(Error::InvalidEpoch)?),
     };
 
     // TODO(Grandine Team): Optimize state lookup.
@@ -995,8 +1024,15 @@ pub async fn state_committees<P: Preset, W: Wait>(
         .await??;
     }
 
-    let relative_epoch = accessors::relative_epoch(&state, epoch)?;
+    // Committees are only available for the previous, current and next epoch of the state.
+    let relative_epoch = accessors::relative_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
     let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
+
+    if let Some(index) = query.index
+        && index >= committee_count_per_slot
+    {
+        return Err(Error::CommitteeIndexOutOfRange { index, epoch });
+    }
 
     let indices = query
         .index
@@ -1036,12 +1072,8 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let Some(state) = state.post_altair() else {
-        return Ok(EthResponse::json(StateSyncCommitteeResponse::default())
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .into_response());
-    };
+    // States before Altair have no sync committees.
+    let state = state.post_altair().ok_or(Error::StatePreAltair)?;
 
     let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
     let state_period = misc::sync_committee_period::<P>(state_epoch);
@@ -1097,6 +1129,8 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     let proposer_lookahead = state
         .post_fulu()
         .map(PostFuluBeaconState::proposer_lookahead)
+        .cloned()
+        .map(StateProposerLookaheadResponse::<P>)
         .ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
@@ -1310,14 +1344,14 @@ pub async fn state_randao<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    // If `epoch` is in the future, return the RANDAO mix for the current epoch.
-    // This matches how RANDAO mixes are updated during epoch transitions.
-    // RANDAO mixes for future epochs are unstable, but so is the one for the current epoch.
+    // `state.randao_mixes` only holds mixes for epochs in
+    // `(state_epoch - EPOCHS_PER_HISTORICAL_VECTOR, state_epoch]`.
+    // Mixes for future epochs are not known yet.
     let state_epoch = accessors::get_current_epoch(&state);
-    let epoch = query.epoch.unwrap_or(state_epoch).min(state_epoch);
-    let difference = state_epoch.saturating_sub(epoch);
+    let epoch = query.epoch.unwrap_or(state_epoch);
 
-    if difference > P::EpochsPerHistoricalVector::U64 {
+    if epoch > state_epoch || state_epoch.saturating_sub(epoch) >= P::EpochsPerHistoricalVector::U64
+    {
         return Err(Error::EpochOutOfRangeForStateRandao);
     }
 
@@ -1372,13 +1406,30 @@ pub async fn block_headers<P: Preset, W: Wait>(
         BlockHeadersQuery {
             slot: None,
             parent_root: Some(parent_root),
-        } => controller
-            .stored_block_by_root(parent_root)?
-            .and_then(|parent_block| parent_block.value.message().slot().checked_add(1))
-            .map(opt_block_by_slot)
-            .transpose()?
-            .flatten()
-            .filter(|(_, with_status)| with_status.value.message().parent_root() == parent_root),
+        } => {
+            // The child may be separated from its parent by empty slots,
+            // so look for the first canonical block after the parent.
+            // Use one snapshot so both lookups see the same store.
+            let snapshot = controller.snapshot();
+
+            let child = snapshot
+                .stored_block_by_root(parent_root)?
+                .map(|parent_block| {
+                    snapshot.canonical_block_after_slot(parent_block.value.message().slot())
+                })
+                .transpose()?
+                .flatten()
+                .map(|with_status| {
+                    let root = with_status.value.root;
+                    (
+                        root,
+                        with_status.map(|block_with_root| block_with_root.block),
+                    )
+                });
+
+            child
+                .filter(|(_, with_status)| with_status.value.message().parent_root() == parent_root)
+        }
         BlockHeadersQuery {
             slot: Some(slot),
             parent_root: Some(parent_root),
@@ -1528,7 +1579,7 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(block_id): EthPath<BlockId>,
     headers: HeaderMap,
-) -> Result<EthResponse<SignedBlindedBeaconBlock<P>, (), JsonOrSsz>, Error> {
+) -> Result<Response, Error> {
     let WithStatus {
         value: block,
         status,
@@ -1536,6 +1587,16 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let signed_blinded_block = match block {
+        // Blocks before Bellatrix have no execution payload, so their blinded form is the same.
+        StoredBlock::Full(block) if block.phase() < Phase::Bellatrix => {
+            let version = block.phase();
+
+            return Ok(EthResponse::json_or_ssz(block, &headers)?
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized)
+                .version(version)
+                .into_response());
+        }
         StoredBlock::Full(block) => Arc::unwrap_or_clone(block)
             .try_into()
             .map_err(Error::BlockNotBlindable)?,
@@ -1547,7 +1608,8 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     Ok(EthResponse::json_or_ssz(signed_blinded_block, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
-        .version(version))
+        .version(version)
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
@@ -2305,6 +2367,9 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             .state_at_slot_cached_blocking(last_slot)?
             .ok_or(Error::StateNotFound)?;
 
+        // Reject unknown validators before computing rewards for the whole epoch.
+        let validator_indices = requested_validator_indices(&state, validator_ids)?;
+
         // The cached state is left intact. Its persistent parts are shared with the copy.
         let mut post_state = state.clone_arc();
 
@@ -2315,7 +2380,7 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             epoch,
         )?;
 
-        let response = attestation_rewards_response(&state, &rewards, validator_ids)?;
+        let response = attestation_rewards_response(&rewards, validator_indices)?;
 
         Ok::<_, Error>(
             EthResponse::json(response)
@@ -2326,27 +2391,42 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
     .await?
 }
 
-fn attestation_rewards_response<P: Preset>(
+// Unknown validators are rejected rather than skipped.
+fn requested_validator_indices<P: Preset>(
     state: &BeaconState<P>,
-    rewards: &AttestationRewards<P>,
     validator_ids: Vec<ValidatorId>,
+) -> Result<Vec<ValidatorIndex>, Error> {
+    let validator_count = state.validators().len_u64();
+
+    validator_ids
+        .into_iter()
+        .map(|validator_id| match validator_id {
+            ValidatorId::ValidatorIndex(validator_index) if validator_index < validator_count => {
+                Ok(validator_index)
+            }
+            ValidatorId::ValidatorIndex(validator_index) => {
+                Err(Error::InvalidValidatorIndex(validator_index))
+            }
+            ValidatorId::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey)
+                .ok_or(Error::UnknownValidatorPublicKey(pubkey)),
+        })
+        .collect()
+}
+
+fn attestation_rewards_response<P: Preset>(
+    rewards: &AttestationRewards<P>,
+    validator_indices: Vec<ValidatorIndex>,
 ) -> Result<AttestationRewardsResponse> {
     let validators = rewards.validators();
 
     // With no validators requested, respond with all that could have been rewarded or penalized.
-    let validator_indices = if validator_ids.is_empty() {
+    let validator_indices = if validator_indices.is_empty() {
         izip!(0.., validators)
             .filter(|(_, validator)| validator.eligible)
             .map(|(validator_index, _)| validator_index)
             .collect_vec()
     } else {
-        validator_ids
-            .into_iter()
-            .filter_map(|validator_id| validator_id.validator_index(state))
-            .filter(|validator_index| {
-                usize::try_from(*validator_index).is_ok_and(|index| index < validators.len())
-            })
-            .collect_vec()
+        validator_indices
     };
 
     // Effective balances are multiples of `EFFECTIVE_BALANCE_INCREMENT`,
@@ -2361,7 +2441,9 @@ fn attestation_rewards_response<P: Preset>(
                 effective_balance,
                 eligible,
                 reward,
-            } = validators[usize::try_from(validator_index)?];
+            } = *validators
+                .get(usize::try_from(validator_index)?)
+                .ok_or_else(|| anyhow!("no attestation reward for validator {validator_index}"))?;
 
             if eligible {
                 let increments =
@@ -3311,13 +3393,11 @@ pub async fn node_health(State(is_synced): State<Arc<SyncedStatus>>) -> StatusCo
     name = "http_api::validator_attester_duties"
 )]
 pub async fn validator_attester_duties<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorAttesterDutyResponse>>, Error> {
-    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+    let current_epoch = current_epoch_with_clock_disparity(&controller)?;
 
     if epoch > current_epoch.saturating_add(1) {
         return Err(Error::InvalidEpoch(anyhow!(
@@ -3334,11 +3414,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
             // epoch serves them without advancing through that whole epoch.
             let start_slot = misc::compute_start_slot_at_epoch::<P>(misc::previous_epoch(epoch));
 
-            state_id::state(
-                &StateId::Slot(start_slot),
-                &controller,
-                &anchor_checkpoint_provider,
-            )?
+            state_id::state_at_slot(start_slot, &controller)?
         }
     };
 
@@ -3371,17 +3447,8 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 
 fn current_epoch_with_clock_disparity<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    chain_config: &ChainConfig,
 ) -> Result<Epoch> {
-    // Fork choice enters a slot only once it handles the slot's tick, which a request sent at
-    // the epoch boundary can beat by a few milliseconds.
-    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-    let time = now.saturating_add(chain_config.maximum_gossip_clock_disparity);
-    let tick = Tick::at_time_in_ms::<P>(
-        chain_config,
-        u64::try_from(time.as_millis())?,
-        controller.genesis_time(),
-    )?;
+    let tick = state_id::tick_with_clock_disparity(controller)?;
 
     Ok(tick
         .epoch::<P>()
@@ -3390,13 +3457,11 @@ fn current_epoch_with_clock_disparity<P: Preset, W: Wait>(
 
 /// `POST /eth/v1/validator/duties/ptc/{epoch}`
 pub async fn validator_ptc_duties<P: Preset, W: Wait>(
-    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorPTCDutyResponse>>, Error> {
-    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+    let current_epoch = current_epoch_with_clock_disparity(&controller)?;
 
     if epoch > current_epoch.saturating_add(1) {
         return Err(Error::InvalidEpoch(anyhow!(
@@ -3436,11 +3501,7 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
             status,
             // `duties` responses are not supposed to contain a `finalized` field.
             finalized: _,
-        } = state_id::state(
-            &StateId::Slot(start_slot),
-            &controller,
-            &anchor_checkpoint_provider,
-        )?;
+        } = state_id::state_at_slot(start_slot, &controller)?;
 
         (state, status)
     };
@@ -3471,17 +3532,9 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
 pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
-    get_proposer_duties(
-        chain_config,
-        controller,
-        anchor_checkpoint_provider,
-        epoch,
-        false,
-    )
-    .await
+    get_proposer_duties(chain_config, controller, epoch, false).await
 }
 
 // This endpoint is introduced to account for deterministic proposer lookahead
@@ -3490,23 +3543,14 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
 pub async fn validator_proposer_duties_v2<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
-    get_proposer_duties(
-        chain_config,
-        controller,
-        anchor_checkpoint_provider,
-        epoch,
-        true,
-    )
-    .await
+    get_proposer_duties(chain_config, controller, epoch, true).await
 }
 
 async fn get_proposer_duties<P: Preset, W: Wait>(
     chain_config: Arc<ChainConfig>,
     controller: ApiController<P, W>,
-    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     epoch: Epoch,
     post_fulu_check: bool,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
@@ -3515,7 +3559,7 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
 
     let (state, status) = if start_slot >= head.value.slot() {
         let block_root = controller.head().value.block_root;
-        // `state_id::state` allows only a limited range of empty slots to be processed
+        // `state_id::state_at_slot` allows only a limited range of empty slots to be processed
         let state = controller
             .preprocessed_state_for_block_production(block_root, start_slot)
             .await?;
@@ -3527,11 +3571,7 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
             status,
             // `duties` responses are not supposed to contain a `finalized` field.
             finalized: _,
-        } = state_id::state(
-            &StateId::Slot(start_slot),
-            &controller,
-            &anchor_checkpoint_provider,
-        )?;
+        } = state_id::state_at_slot(start_slot, &controller)?;
 
         (state, status)
     };
@@ -3570,7 +3610,6 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
 pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorSyncDutyResponse>>, Error> {
@@ -3594,14 +3633,10 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     } else {
         // A committee is known a period ahead, so the state at the current epoch serves the next
         // period even while fork choice is still finishing the previous one.
-        let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+        let current_epoch = current_epoch_with_clock_disparity(&controller)?;
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
-        let state = state_id::state(
-            &StateId::Slot(start_slot),
-            &controller,
-            &anchor_checkpoint_provider,
-        )?;
+        let state = state_id::state_at_slot(start_slot, &controller)?;
 
         if let Some(committee) = state_sync_committee(&state.value, requested_period) {
             (state, committee)
@@ -3613,7 +3648,8 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     let duties = validator_indices
         .into_iter()
         .map(|validator_index| {
-            let validator_pubkey = accessors::public_key(&state, validator_index)?;
+            let validator_pubkey = accessors::public_key(&state, validator_index)
+                .map_err(|_| Error::InvalidValidatorIndex(validator_index))?;
 
             let validator_sync_committee_indices = committee
                 .pubkeys
@@ -3633,7 +3669,7 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
             }))
         })
         .filter_map(Result::transpose)
-        .collect::<Result<_>>()?;
+        .collect::<Result<_, Error>>()?;
 
     Ok(EthResponse::json(duties).execution_optimistic(status.is_optimistic()))
 }
@@ -4407,7 +4443,6 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 )]
 pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
     EthJson(subscriptions): EthJson<Vec<BeaconCommitteeSubscription>>,
 ) -> Result<(), Error> {
@@ -4427,11 +4462,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
             Ok(relative_epoch) => (current_state.clone_arc(), relative_epoch),
             Err(_) => {
                 let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-                let state_with_status = state_id::state(
-                    &StateId::Slot(start_slot),
-                    &controller,
-                    &anchor_checkpoint_provider,
-                )?;
+                let state_with_status = state_id::state_at_slot(start_slot, &controller)?;
 
                 (state_with_status.value, RelativeEpoch::Current)
             }

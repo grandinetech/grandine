@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_extra::{extract::QueryRejection, typed_header::TypedHeaderRejection};
-use bls::{SignatureBytes, traits::SignatureBytes as _};
+use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use fork_choice_control::BlockError;
 use futures::channel::oneshot::Canceled;
 use http_api_utils::{ApiError, PhaseHeaderError};
@@ -24,7 +24,7 @@ use types::{
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
     nonstandard::Phase,
-    phase0::primitives::{Epoch, Slot, ValidatorIndex},
+    phase0::primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
 };
 
 #[derive(Debug, Error)]
@@ -54,6 +54,8 @@ pub enum Error {
          the expected number of committees ({computed})"
     )]
     CommitteesAtSlotMismatch { requested: u64, computed: u64 },
+    #[error("committee index {index} does not exist in epoch {epoch}")]
+    CommitteeIndexOutOfRange { index: CommitteeIndex, epoch: Epoch },
     #[error("current slot has no sync committee")]
     CurrentSlotHasNoSyncCommittee,
     #[error("endpoint not implemented")]
@@ -158,6 +160,8 @@ pub enum Error {
     InvalidSignedVoluntaryExit(#[source] AnyhowError),
     #[error("invalid sync committee messages")]
     InvalidSyncCommitteeMessages(Vec<IndexedError>),
+    #[error("invalid validator index {0}")]
+    InvalidValidatorIndex(ValidatorIndex),
     #[error("invalid validator indices")]
     InvalidValidatorIndices(#[source] JsonRejection),
     #[error("invalid validator signatures")]
@@ -188,6 +192,8 @@ pub enum Error {
     SlotHeadNotAvailable,
     #[error("state is post-Gloas")]
     StatePostGloas,
+    #[error("state is pre-Altair")]
+    StatePreAltair,
     #[error("state is pre-Capella")]
     StatePreCapella,
     #[error("state is pre-Electra")]
@@ -213,6 +219,8 @@ pub enum Error {
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
+    #[error("unknown validator public key {0:?}")]
+    UnknownValidatorPublicKey(PublicKeyBytes),
     #[error("validator not found")]
     ValidatorNotFound,
     #[error("validator {validator_index} is not in payload timeliness committee")]
@@ -278,8 +286,12 @@ impl IntoResponse for Error {
 impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
+            // The Beacon API reports malformed bodies as 400 and never uses 422.
             Self::InvalidJsonBody(json_rejection)
-            | Self::InvalidValidatorIndices(json_rejection) => json_rejection.status(),
+            | Self::InvalidValidatorIndices(json_rejection) => match json_rejection {
+                JsonRejection::JsonDataError(_) => StatusCode::BAD_REQUEST,
+                _ => json_rejection.status(),
+            },
             Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
@@ -295,6 +307,7 @@ impl Error {
             | Self::BlockPreFulu
             | Self::BlockPreGloas
             | Self::CommitteesAtSlotMismatch { .. }
+            | Self::CommitteeIndexOutOfRange { .. }
             | Self::ContentTypeHeaderInvalid(_)
             | Self::CurrentSlotHasNoSyncCommittee
             | Self::EpochBeforePrevious { .. }
@@ -333,6 +346,8 @@ impl Error {
             | Self::InvalidSyncCommitteeMessages(_)
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
+            | Self::InvalidValidatorIndex(_)
+            | Self::UnknownValidatorPublicKey(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::InvalidSlot(_)
             | Self::ExecutionPayloadEnvelopeSlotMismatch { .. }
@@ -340,6 +355,7 @@ impl Error {
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
             | Self::StatePostGloas
+            | Self::StatePreAltair
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
