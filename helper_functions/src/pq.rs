@@ -6,6 +6,7 @@ use bls::PublicKeyBytes;
 use pq_prover::{ProverBackend, Statement};
 use sha2::{Digest as _, Sha256};
 use ssz::{H256, SszBitList as _};
+use tiny_keccak::{Hasher as _, Keccak};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -20,8 +21,9 @@ use types::{
         beacon_state::BeaconState as PqBeaconState,
         consts::{
             AGGREGATORS_PER_COMMITTEE, LEAF_OFFSET_AGGREGATE_AND_PROOF, LEGACY_VRF_ROOT_DOMAIN,
-            LEGACY_XMSS_PUBKEY_DOMAIN, XMSS_ATTESTATION_LEAVES, XMSS_BUILDER_BID_LEAVES,
-            XMSS_DEPOSIT_PREFIX, XMSS_LEAVES_PER_SLOT, XMSS_RESERVED_LEAVES,
+            LEGACY_XMSS_PUBKEY_DOMAIN, VRF_LEAF_DOMAIN, XMSS_ATTESTATION_LEAVES,
+            XMSS_BUILDER_BID_LEAVES, XMSS_DEPOSIT_PREFIX, XMSS_LEAVES_PER_SLOT,
+            XMSS_RESERVED_LEAVES,
         },
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof, SingleAttestation},
         primitives::{AggregationCommittee, AggregationCommittees, VrfProof},
@@ -35,7 +37,7 @@ use xmss::{XmssPublicKey, XmssSignature};
 use crate::{
     accessors,
     error::{Error, SignatureKind},
-    misc, predicates,
+    misc,
 };
 
 /// [`compute_xmss_attestation_leaf_index`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-compute_xmss_attestation_leaf_index)
@@ -114,14 +116,45 @@ pub fn vrf_root_from_signature_field(signature: &[u8]) -> H256 {
     H256::from_slice(&signature[..H256::len_bytes()])
 }
 
+/// [`keccak256`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-keccak256)
+fn keccak256(parts: &[&[u8]]) -> H256 {
+    let mut hasher = Keccak::v256();
+    let mut output = [0; 32];
+
+    for part in parts {
+        hasher.update(part);
+    }
+
+    hasher.finalize(&mut output);
+
+    H256(output)
+}
+
+/// [`compute_vrf_leaf`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-compute_vrf_leaf)
+#[must_use]
+pub fn compute_vrf_leaf(secret: H256, index: u64) -> H256 {
+    keccak256(&[VRF_LEAF_DOMAIN, secret.as_bytes(), &index.to_le_bytes()])
+}
+
 /// [`is_valid_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-is_valid_vrf_proof)
 #[must_use]
 pub fn is_valid_vrf_proof(vrf_root: H256, slot: Slot, proof: &VrfProof) -> bool {
-    let (leaf, branch) = proof
+    let (secret, branch) = proof
         .split_first()
         .expect("a VRF proof always has VRF_TREE_DEPTH + 1 entries");
 
-    predicates::is_valid_merkle_branch(*leaf, branch.iter().copied(), slot, vrf_root)
+    let root = branch.iter().zip(0..).fold(
+        compute_vrf_leaf(*secret, slot),
+        |value, (sibling, height)| {
+            if slot >> height & 1 == 1 {
+                keccak256(&[sibling.as_bytes(), value.as_bytes()])
+            } else {
+                keccak256(&[value.as_bytes(), sibling.as_bytes()])
+            }
+        },
+    );
+
+    root == vrf_root
 }
 
 /// `xmss.Verify` with the public key of the validator at `validator_index`.

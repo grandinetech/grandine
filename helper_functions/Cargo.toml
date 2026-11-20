@@ -31,6 +31,7 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
+tiny-keccak = { workspace = true }
 tracing = { workspace = true, optional = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
