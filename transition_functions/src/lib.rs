@@ -102,7 +102,8 @@ pub mod phase0 {
 pub mod altair {
     pub use block_processing::sync_committee_rewards;
     pub use epoch_intermediates::{
-        AltairValidatorSummary as ValidatorSummary, EpochDeltasForReport, Statistics,
+        AltairValidatorSummary as ValidatorSummary, EpochDeltasForReport, EpochRewardScalars,
+        RewardSummary, Statistics,
     };
     pub use epoch_processing::EpochReport;
 
@@ -112,8 +113,7 @@ pub mod altair {
         verify_sync_aggregate_signature,
     };
     pub(crate) use epoch_intermediates::{
-        AltairEpochDeltas as EpochDeltas, EpochDeltasForTransition, epoch_deltas, statistics,
-        statistics_and_summaries,
+        EpochDeltasForTransition, epoch_deltas, statistics, statistics_and_summaries,
     };
     pub(crate) use epoch_processing::{
         epoch_report, process_epoch, process_inactivity_updates,
@@ -136,14 +136,12 @@ pub(crate) mod bellatrix {
         process_attester_slashing, process_block, process_block_for_gossip,
         process_proposer_slashing,
     };
-    pub use epoch_intermediates::epoch_deltas;
     pub use epoch_processing::{epoch_report, process_epoch, process_slashings};
     pub use slot_processing::process_slots;
     pub use state_transition::{state_transition, verify_signatures};
 
     mod blinded_block_processing;
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod slot_processing;
     mod state_transition;
@@ -161,14 +159,12 @@ pub mod capella {
         process_block, process_block_for_gossip, process_bls_to_execution_change,
         process_operations, process_withdrawals, update_next_withdrawal_validator_index,
     };
-    pub(crate) use epoch_intermediates::epoch_deltas;
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
 
     mod blinded_block_processing;
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod slot_processing;
     mod state_transition;
@@ -178,14 +174,12 @@ pub mod capella {
 pub mod deneb {
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
-    pub(crate) use epoch_intermediates::epoch_deltas;
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
 
     mod blinded_block_processing;
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod slot_processing;
     mod state_transition;
@@ -207,7 +201,6 @@ pub mod electra {
         process_operations, process_proposer_slashing, process_withdrawal_request,
         process_withdrawals,
     };
-    pub(crate) use epoch_intermediates::epoch_deltas;
     pub(crate) use epoch_processing::{
         apply_pending_deposit, epoch_report, process_effective_balance_updates, process_epoch,
         process_pending_consolidations, process_registry_updates, process_slashings,
@@ -217,14 +210,12 @@ pub mod electra {
 
     mod blinded_block_processing;
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod slot_processing;
     mod state_transition;
 }
 
 pub mod fulu {
-    pub(crate) use epoch_intermediates::epoch_deltas;
     pub use epoch_processing::process_proposer_lookahead;
 
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
@@ -237,7 +228,6 @@ pub mod fulu {
 
     mod blinded_block_processing;
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod slot_processing;
     mod state_transition;
@@ -250,13 +240,11 @@ pub mod gloas {
     };
 
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
-    pub(crate) use epoch_intermediates::epoch_deltas;
     pub(crate) use epoch_processing::process_epoch;
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
 
     mod block_processing;
-    mod epoch_intermediates;
     mod epoch_processing;
     mod execution_payload_processing;
     mod slot_processing;
