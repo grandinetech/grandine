@@ -602,6 +602,40 @@ impl Context<Minimal> {
         }
     }
 
+    // Slots 3, 4 and 10 are finalized, archived and too old to be in `state_roots` of the head state.
+    // Slot 90 is not finalized.
+    pub fn minimal_minimal_12_epochs_with_empty_slots() -> Self {
+        let chain_config = ChainConfig::minimal();
+        let pubkey_cache = PubkeyCache::default();
+        let (genesis_state, deposit_tree) = Self::min_genesis_state(&chain_config, &pubkey_cache);
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state.clone_arc());
+
+        let extra_blocks = factory::full_blocks_up_to_epoch_with_empty_slots(
+            &chain_config,
+            &pubkey_cache,
+            genesis_state,
+            12,
+            &[3, 4, 10, 90],
+        )
+        .expect("blocks should be constructed successfully");
+
+        let FinalizedCheckpoint {
+            block: anchor_block,
+            state: anchor_state,
+        } = anchor_checkpoint_provider.checkpoint().value;
+
+        Self {
+            chain_config,
+            anchor_checkpoint_provider,
+            anchor_block,
+            anchor_state,
+            deposit_tree: Some(deposit_tree),
+            extra_blocks,
+            validator_keys: vec![],
+        }
+    }
+
     pub fn minimal_rapid_upgrade_none() -> Self {
         let chain_config = ChainConfig::minimal().rapid_upgrade();
         let pubkey_cache = PubkeyCache::default();

@@ -344,8 +344,10 @@ impl<P: Preset> Storage<P> {
 
         let finalized_validators = store.finalized_validators();
 
+        let mut finalized = finalized.rev().peekable();
+        let newest_finalized_in_batch = finalized.peek().copied();
         let unfinalized = unfinalized.zip(core::iter::repeat(false));
-        let finalized = finalized.rev().zip(core::iter::repeat(true));
+        let finalized = finalized.zip(core::iter::repeat(true));
 
         let mut chain = unfinalized
             .chain(finalized)
@@ -365,6 +367,8 @@ impl<P: Preset> Storage<P> {
         debug_with_peers!("saving store head slot: {store_head_slot}");
 
         let mut update_finalized_validators = false;
+        let mut newer_finalized = None::<&ChainLink<P>>;
+        let mut empty_slot_state = None::<Arc<BeaconState<P>>>;
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -394,6 +398,41 @@ impl<P: Preset> Storage<P> {
                         SlotByStateRoot(block.message().state_root()),
                         state_slot,
                     )?);
+
+                    // Roots of states in empty slots are taken from `state.state_roots` of a later
+                    // finalized state, filling the gap between this block and the newer one.
+                    // Batches overlap by one block, so gaps outside the batch are covered by others.
+                    if let Some(newer) = newer_finalized.replace(chain_link)
+                        && let Some(newest_finalized_in_batch) = newest_finalized_in_batch
+                    {
+                        for slot in state_slot.saturating_add(1)..newer.slot() {
+                            let state = empty_slot_state
+                                .get_or_insert_with(|| newest_finalized_in_batch.state(store));
+
+                            // Fall back to the next block's state if the batch is too long.
+                            // Gaps longer than `SLOTS_PER_HISTORICAL_ROOT` are partly skipped.
+                            let state_root = accessors::get_state_root_at_slot(&**state, slot)
+                                .or_else(|error| {
+                                    if state.slot() == newer.slot() {
+                                        return Err(error);
+                                    }
+
+                                    *state = newer.state(store);
+                                    accessors::get_state_root_at_slot(&**state, slot)
+                                });
+
+                            match state_root {
+                                Ok(state_root) => {
+                                    batch.push(serialize(SlotByStateRoot(state_root), slot)?);
+                                }
+                                Err(error) => debug_with_peers!(
+                                    "failed to get state root in empty slot {slot} from \
+                                     state in slot {}: {error}",
+                                    state.slot(),
+                                ),
+                            }
+                        }
+                    }
                 }
 
                 let state = OnceCell::new();

@@ -42,7 +42,7 @@ use types::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot},
     traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
@@ -471,11 +471,12 @@ where
     //                      It will also only search the canonical chain.
     //                      `Store` used to have an index mapping state roots to block roots.
     //                      Consider bringing that back.
-    pub fn state_by_state_root(
+    pub fn state_by_state_root_blocking(
         &self,
         state_root: H256,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        let store = self.store_snapshot();
+        let snapshot = self.snapshot();
+        let store = &snapshot.store_snapshot;
 
         if let Some(with_status) = store.state_by_state_root(state_root) {
             return Ok(Some(with_status));
@@ -487,6 +488,21 @@ where
         {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));
+        }
+
+        // States in empty slots are not produced by any block, so their roots are only recorded in
+        // `state.state_roots` of later states. Storage only indexes finalized ones once archived.
+        // The head state holds the roots of the latest `SLOTS_PER_HISTORICAL_ROOT` slots.
+        let head_state = snapshot.head_state();
+        let head_slot = head_state.slot();
+        let earliest_slot = head_slot.saturating_sub(SlotsPerHistoricalRoot::<P>::U64);
+
+        let matching_slot = (earliest_slot..head_slot)
+            .rev()
+            .find(|slot| *head_state.state_roots().mod_index(*slot) == state_root);
+
+        if let Some(slot) = matching_slot {
+            return snapshot.state_at_slot_blocking(slot);
         }
 
         Ok(None)
