@@ -173,6 +173,7 @@ pub struct Metrics {
     pub fc_attester_slashing_task_times: Histogram,
     pub fc_preprocess_state_task_times: Histogram,
     pub fc_checkpoint_state_task_times: Histogram,
+    pub fc_fast_confirmation_times: Histogram,
     pub fc_persist_pubkey_cache_task_times: Histogram,
     pub fc_cache_deposit_signatures_task_times: Histogram,
     pub fc_block_payload_attestation_task_times: Histogram,
@@ -194,6 +195,7 @@ pub struct Metrics {
     // EF interop metrics
     beacon_head_slot: IntGauge,
     beacon_finalized_epoch: IntGauge,
+    beacon_fast_confirmed_slot: IntGauge,
     beacon_current_justified_epoch: IntGauge,
     beacon_previous_justified_epoch: IntGauge,
     beacon_current_active_validators: IntGauge,
@@ -813,6 +815,11 @@ impl Metrics {
                 "Forkchoice CheckpointStateTask times",
             ))?,
 
+            fc_fast_confirmation_times: Histogram::with_opts(histogram_opts!(
+                "FC_FAST_CONFIRMATION_TIMES",
+                "Forkchoice Fast Confirmation Rule times",
+            ))?,
+
             fc_block_payload_attestation_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_BLOCK_PAYLOAD_ATTESTATION_TASK_TIMES",
                 "Forkchoice BlockPayloadAttesttionTask times",
@@ -877,6 +884,11 @@ impl Metrics {
             beacon_finalized_epoch: IntGauge::new(
                 "beacon_finalized_epoch",
                 "Current finalized epoch",
+            )?,
+
+            beacon_fast_confirmed_slot: IntGauge::new(
+                "beacon_fast_confirmed_slot",
+                "Slot of the latest block confirmed by the Fast Confirmation Rule",
             )?,
 
             beacon_current_justified_epoch: IntGauge::new(
@@ -1200,6 +1212,7 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_checkpoint_state_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_fast_confirmation_times.clone()))?;
         default_registry.register(Box::new(self.fc_persist_pubkey_cache_task_times.clone()))?;
         default_registry.register(Box::new(
             self.fc_cache_deposit_signatures_task_times.clone(),
@@ -1223,6 +1236,7 @@ impl Metrics {
         default_registry.register(Box::new(self.process_slot_times.clone()))?;
         default_registry.register(Box::new(self.beacon_head_slot.clone()))?;
         default_registry.register(Box::new(self.beacon_finalized_epoch.clone()))?;
+        default_registry.register(Box::new(self.beacon_fast_confirmed_slot.clone()))?;
         default_registry.register(Box::new(self.beacon_current_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_previous_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
@@ -1522,6 +1536,10 @@ impl Metrics {
 
     pub fn set_beacon_finalized_epoch(&self, epoch: Epoch) {
         self.beacon_finalized_epoch.set(epoch as i64);
+    }
+
+    pub fn set_beacon_fast_confirmed_slot(&self, slot: Slot) {
+        self.beacon_fast_confirmed_slot.set(slot as i64);
     }
 
     pub fn set_beacon_current_justified_epoch(&self, epoch: Epoch) {

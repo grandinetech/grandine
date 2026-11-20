@@ -25,6 +25,9 @@ pub struct StoreConfig {
     pub sync_without_reconstruction: bool,
     #[derivative(Default(value = "false"))]
     pub disable_proposer_reorgs: bool,
+    // Whether to run the Fast Confirmation Rule and report fast confirmed blocks as safe.
+    #[derivative(Default(value = "false"))]
+    pub fast_confirmation: bool,
     // No `derivative` attribute: `BuilderCircuitBreakerConfig` supplies its own defaults.
     pub builder_circuit_breaker: BuilderCircuitBreakerConfig,
 }

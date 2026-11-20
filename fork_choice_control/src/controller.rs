@@ -279,6 +279,19 @@ where
         }
     }
 
+    /// Queues a run of the Fast Confirmation Rule in the mutator thread, without a separate task.
+    /// Use `Controller::wait_for_tasks` before looking at the result.
+    ///
+    /// `consensus-spec-tests` run the rule at specific steps.
+    /// A running node does so in `Mutator::handle_tick`.
+    #[cfg(test)]
+    pub fn on_fast_confirmation(&self) {
+        MutatorMessage::FastConfirmation {
+            wait_group: self.owned_wait_group(),
+        }
+        .send(&self.mutator_tx)
+    }
+
     pub fn on_back_sync_status(&self, is_back_synced: bool) {
         MutatorMessage::BackSyncStatus {
             wait_group: self.owned_wait_group(),

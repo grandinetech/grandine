@@ -30,7 +30,7 @@ use types::{
     nonstandard::{PartialValidator, Phase},
     phase0::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
-        containers::{AttestationData, DepositMessage},
+        containers::AttestationData,
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot},
     },
     preset::Preset,
@@ -41,7 +41,7 @@ use types::{
 };
 
 use crate::{
-    accessors,
+    accessors, deposit_signatures,
     error::{Error, SignatureKind},
     signing::{SignForAllForks as _, SignForSingleFork as _},
     verifier::Verifier,
@@ -580,30 +580,29 @@ pub fn is_gas_limit_target_compatible(
     gas_limit == target_gas_limit.clamp(min_gas_limit, max_gas_limit)
 }
 
+/// [`is_valid_deposit_signature`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.4/specs/electra/beacon-chain.md#new-is_valid_deposit_signature)
+///
+/// Uses the result in `PubkeyCache::deposit_signatures` if there is one.
+/// Results are cached ahead of the Gloas fork transition, which saves verifying
+/// the same signatures again when the deposits are applied.
 #[must_use]
 pub fn is_valid_deposit_signature(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     deposit: &PendingDeposit,
 ) -> bool {
-    let PendingDeposit {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-        signature,
-        ..
-    } = *deposit;
+    let key @ (signing_root, signature) =
+        deposit_signatures::deposit_signature_key(config, deposit);
 
-    let deposit_message = DepositMessage {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-    };
+    if let Some(is_valid) = pubkey_cache.deposit_signatures().get(&key) {
+        return is_valid;
+    }
 
     pubkey_cache
-        .get_or_insert(pubkey)
-        .and_then(|decompressed| deposit_message.verify(config, signature, decompressed))
-        .is_ok()
+        .get_or_insert(deposit.pubkey)
+        .is_ok_and(|decompressed| {
+            deposit_signatures::verify_decompressed(signing_root, signature, decompressed)
+        })
 }
 
 #[must_use]

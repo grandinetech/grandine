@@ -2,11 +2,12 @@ use std::{path::PathBuf, sync::Arc};
 
 use clock::Tick;
 use duplicate::duplicate_item;
-use execution_engine::PayloadStatusWithBlockHash;
-use helper_functions::misc;
+use execution_engine::{PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus};
+use fork_choice_store::FastConfirmationStore;
+use helper_functions::{deposit_signatures::deposit_signature_key, misc};
 use pubkey_cache::PubkeyCache;
 use serde::Deserialize;
-use spec_test_utils::Case;
+use spec_test_utils::{BlsSetting, Case};
 use ssz::{ContiguousList, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -19,14 +20,16 @@ use types::{
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
+    electra::containers::{DepositRequest, PendingDeposit},
     gloas::{
         containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
         primitives::PayloadStatus,
     },
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
+        consts::GENESIS_SLOT,
         containers::Checkpoint,
-        primitives::{H256, Slot, UnixSeconds},
+        primitives::{ExecutionBlockHash, H256, Slot, UnixSeconds},
     },
     preset::{Mainnet, Minimal, Preset},
     traits::{BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
@@ -90,6 +93,15 @@ struct Checks {
     payload_data_availability_vote: Option<PtcVotes>,
     // TODO: assert viable_for_head_roots_and_weights
     viable_for_head_roots_and_weights: Option<Vec<ViableHeadRootAndWeight>>,
+    // Fast confirmation checks.
+    // `#[serde(flatten)]` cannot be used because it does not work with `deny_unknown_fields`.
+    previous_epoch_observed_justified_checkpoint: Option<Checkpoint>,
+    current_epoch_observed_justified_checkpoint: Option<Checkpoint>,
+    previous_epoch_greatest_unrealized_checkpoint: Option<Checkpoint>,
+    previous_slot_head: Option<H256>,
+    current_slot_head: Option<H256>,
+    confirmed_root: Option<H256>,
+    safe_execution_block_hash: Option<ExecutionBlockHash>,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +140,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/get_head/*/*"]                      [altair_mainnet_get_head]                      [Mainnet] [Altair];
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/get_proposer_head/*/*"]             [altair_mainnet_get_proposer_head]             [Mainnet] [Altair];
     ["consensus-spec-tests/tests/mainnet/altair/fork_choice/on_block/*/*"]                      [altair_mainnet_on_block]                      [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fast_confirmation/*/*/*"]                       [altair_minimal_fast_confirmation]             [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/ex_ante/*/*"]                       [altair_minimal_ex_ante]                       [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/get_head/*/*"]                      [altair_minimal_get_head]                      [Minimal] [Altair];
     ["consensus-spec-tests/tests/minimal/altair/fork_choice/get_proposer_head/*/*"]             [altair_minimal_get_proposer_head]             [Minimal] [Altair];
@@ -139,6 +152,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/get_proposer_head/*/*"]          [bellatrix_mainnet_get_proposer_head]          [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/on_block/*/*"]                   [bellatrix_mainnet_on_block]                   [Mainnet] [Bellatrix];
     ["consensus-spec-tests/tests/mainnet/bellatrix/fork_choice/on_merge_block/*/*"]             [bellatrix_mainnet_on_merge_block]             [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fast_confirmation/*/*/*"]                    [bellatrix_minimal_fast_confirmation]          [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/ex_ante/*/*"]                    [bellatrix_minimal_ex_ante]                    [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/get_head/*/*"]                   [bellatrix_minimal_get_head]                   [Minimal] [Bellatrix];
     ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice/get_proposer_head/*/*"]          [bellatrix_minimal_get_proposer_head]          [Minimal] [Bellatrix];
@@ -152,6 +166,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/get_head/*/*"]                     [capella_mainnet_get_head]                     [Mainnet] [Capella];
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/get_proposer_head/*/*"]            [capella_mainnet_get_proposer_head]            [Mainnet] [Capella];
     ["consensus-spec-tests/tests/mainnet/capella/fork_choice/on_block/*/*"]                     [capella_mainnet_on_block]                     [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fast_confirmation/*/*/*"]                      [capella_minimal_fast_confirmation]            [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/ex_ante/*/*"]                      [capella_minimal_ex_ante]                      [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/get_head/*/*"]                     [capella_minimal_get_head]                     [Minimal] [Capella];
     ["consensus-spec-tests/tests/minimal/capella/fork_choice/get_proposer_head/*/*"]            [capella_minimal_get_proposer_head]            [Minimal] [Capella];
@@ -164,6 +179,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/get_head/*/*"]                       [deneb_mainnet_get_head]                       [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/get_proposer_head/*/*"]              [deneb_mainnet_get_proposer_head]              [Mainnet] [Deneb];
     ["consensus-spec-tests/tests/mainnet/deneb/fork_choice/on_block/*/*"]                       [deneb_mainnet_on_block]                       [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fast_confirmation/*/*/*"]                        [deneb_minimal_fast_confirmation]              [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/ex_ante/*/*"]                        [deneb_minimal_ex_ante]                        [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/get_head/*/*"]                       [deneb_minimal_get_head]                       [Minimal] [Deneb];
     ["consensus-spec-tests/tests/minimal/deneb/fork_choice/get_proposer_head/*/*"]              [deneb_minimal_get_proposer_head]              [Minimal] [Deneb];
@@ -176,6 +192,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_head/*/*"]                     [electra_mainnet_get_head]                     [Mainnet] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/get_proposer_head/*/*"]            [electra_mainnet_get_proposer_head]            [Mainnet] [Electra];
     ["consensus-spec-tests/tests/mainnet/electra/fork_choice/on_block/*/*"]                     [electra_mainnet_on_block]                     [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fast_confirmation/*/*/*"]                      [electra_minimal_fast_confirmation]            [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/deposit_with_reorg/*/*"]           [electra_deposit_with_reorg_minimal]           [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/ex_ante/*/*"]                      [electra_minimal_ex_ante]                      [Minimal] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/fork_choice/get_head/*/*"]                     [electra_minimal_get_head]                     [Minimal] [Electra];
@@ -189,6 +206,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_head/*/*"]                        [fulu_mainnet_get_head]                        [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/get_proposer_head/*/*"]               [fulu_mainnet_get_proposer_head]               [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/mainnet/fulu/fork_choice/on_block/*/*"]                        [fulu_mainnet_on_block]                        [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fast_confirmation/*/*/*"]                         [fulu_minimal_fast_confirmation]               [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/deposit_with_reorg/*/*"]              [fulu_deposit_with_reorg_minimal]              [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/ex_ante/*/*"]                         [fulu_minimal_ex_ante]                         [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/get_head/*/*"]                        [fulu_minimal_get_head]                        [Minimal] [Fulu];
@@ -207,6 +225,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_mainnet_on_payload_attestation_message] [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_data_availability/*/*"]      [gloas_mainnet_payload_data_availability]      [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_timeliness/*/*"]             [gloas_mainnet_payload_timeliness]             [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fast_confirmation/*/*/*"]                        [gloas_minimal_fast_confirmation]              [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/deposit_with_reorg/*/*"]             [gloas_minimal_deposit_with_reorg]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/filter_node_tree_variants/*/*"]      [gloas_minimal_filter_node_tree_variants]      [Minimal] [Gloas];
@@ -232,6 +251,41 @@ fn function_name(case: Case<'_>) {
     });
 }
 
+/// Marks the signatures of `deposit_requests` as valid in the deposit signature cache.
+///
+/// Test cases with `bls_setting` set to `Ignored` are generated with BLS disabled.
+/// `consensus-specs` signs deposits with stub signatures and accepts them in that case.
+/// Grandine verifies deposit signatures in epoch processing, which has no notion of
+/// `bls_setting`, but uses cached results when there are any.
+fn trust_deposit_signatures<'request>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    deposit_requests: impl IntoIterator<Item = &'request DepositRequest>,
+) {
+    let cache = pubkey_cache.deposit_signatures();
+
+    for request in deposit_requests {
+        let DepositRequest {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            ..
+        } = *request;
+
+        // The slot is not part of the signed message.
+        let deposit = PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            slot: GENESIS_SLOT,
+        };
+
+        cache.insert(deposit_signature_key(config, &deposit), true);
+    }
+}
+
 #[expect(clippy::too_many_lines)]
 async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
     let anchor_block = case
@@ -245,6 +299,12 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
     let genesis_time = anchor_state.genesis_time();
     let pubkey_cache = Arc::new(PubkeyCache::default());
 
+    // `consensus-specs` has no notion of optimistic sync, so every imported payload is valid.
+    // The Fast Confirmation Rule only confirms blocks with valid payloads.
+    let mark_payloads_valid = case
+        .case_path_relative_to_workspace_root
+        .contains("/fast_confirmation/");
+
     let tick_at_time = |time| {
         Tick::at_time::<P>(config, time, genesis_time)
             .expect("configurations used in tests have valid values of SECONDS_PER_SLOT")
@@ -252,7 +312,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
     let mut context = Context::<P>::new(
         config.clone_arc(),
-        pubkey_cache,
+        pubkey_cache.clone_arc(),
         anchor_block,
         anchor_state,
         false,
@@ -356,7 +416,34 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                         context.on_block_with_missing_blobs(&block, expected_blob_count);
                     }
                 } else if valid {
-                    context.on_valid_block(&block);
+                    // `fast_confirmation` test cases are generated without valid signatures.
+                    if matches!(meta.bls_setting, BlsSetting::Ignored) {
+                        if let Some(body) = block.message().body().with_execution_requests() {
+                            trust_deposit_signatures(
+                                config,
+                                &pubkey_cache,
+                                &body.execution_requests().deposits,
+                            );
+                        }
+
+                        context.on_valid_test_block(&block, meta.bls_setting);
+                    } else {
+                        context.on_valid_block(&block);
+                    }
+
+                    if let Some(block_hash) =
+                        block.execution_block_hash().filter(|_| mark_payloads_valid)
+                    {
+                        context.on_notified_new_payload(
+                            beacon_block_root,
+                            block_hash,
+                            PayloadStatusV1 {
+                                status: PayloadValidationStatus::Valid,
+                                latest_valid_hash: Some(block_hash),
+                                validation_error: None,
+                            },
+                        );
+                    }
                 } else {
                     context.on_invalid_block(&block);
                 }
@@ -371,7 +458,29 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                 );
 
                 if valid {
+                    if matches!(meta.bls_setting, BlsSetting::Ignored) {
+                        trust_deposit_signatures(
+                            config,
+                            &pubkey_cache,
+                            &envelope.message.execution_requests.deposits,
+                        );
+                    }
+
                     context.on_valid_execution_payload(&envelope, meta.bls_setting);
+
+                    if mark_payloads_valid {
+                        let block_hash = envelope.message.payload.block_hash;
+
+                        context.on_notified_new_payload(
+                            envelope.message.beacon_block_root,
+                            block_hash,
+                            PayloadStatusV1 {
+                                status: PayloadValidationStatus::Valid,
+                                latest_valid_hash: Some(block_hash),
+                                validation_error: None,
+                            },
+                        );
+                    }
                 } else {
                     context.on_invalid_execution_payload(&envelope, meta.bls_setting);
                 }
@@ -426,7 +535,11 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     }
                 };
 
-                context.on_attester_slashing(attester_slashing);
+                if matches!(meta.bls_setting, BlsSetting::Ignored) {
+                    context.on_test_attester_slashing(attester_slashing, meta.bls_setting);
+                } else {
+                    context.on_attester_slashing(attester_slashing);
+                }
             }
             Step::Checks { checks } => {
                 let Checks {
@@ -440,7 +553,41 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     payload_timeliness_vote,
                     payload_data_availability_vote,
                     viable_for_head_roots_and_weights: _,
+                    previous_epoch_observed_justified_checkpoint,
+                    current_epoch_observed_justified_checkpoint,
+                    previous_epoch_greatest_unrealized_checkpoint,
+                    previous_slot_head,
+                    current_slot_head,
+                    confirmed_root,
+                    safe_execution_block_hash,
                 } = *checks;
+
+                // `consensus-spec-tests` runs `on_fast_confirmation` implicitly
+                // right before every step that checks the fast confirmation store.
+                if let Some(confirmed_root) = confirmed_root {
+                    context.on_fast_confirmation();
+
+                    context.assert_fast_confirmation(FastConfirmationStore {
+                        confirmed_root,
+                        previous_epoch_observed_justified_checkpoint:
+                            previous_epoch_observed_justified_checkpoint
+                                .expect("fast confirmation checks should be complete"),
+                        current_epoch_observed_justified_checkpoint:
+                            current_epoch_observed_justified_checkpoint
+                                .expect("fast confirmation checks should be complete"),
+                        previous_epoch_greatest_unrealized_checkpoint:
+                            previous_epoch_greatest_unrealized_checkpoint
+                                .expect("fast confirmation checks should be complete"),
+                        previous_slot_head: previous_slot_head
+                            .expect("fast confirmation checks should be complete"),
+                        current_slot_head: current_slot_head
+                            .expect("fast confirmation checks should be complete"),
+                    });
+                }
+
+                if let Some(safe_execution_block_hash) = safe_execution_block_hash {
+                    context.assert_fast_confirmed_execution_payload_hash(safe_execution_block_hash);
+                }
 
                 if let Some(HeadCheck {
                     slot,

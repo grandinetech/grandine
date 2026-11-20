@@ -434,6 +434,10 @@ impl BeaconNodeConfig {
             info!("proposer re-orgs disabled");
         }
 
+        if store_config.fast_confirmation {
+            info!("fast confirmation rule enabled");
+        }
+
         if chain_config.is_peerdas_scheduled() {
             info!("custody mode: {custody_mode:?}");
         }

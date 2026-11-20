@@ -104,6 +104,7 @@ where
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        tick: Tick,
         database: Database,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
@@ -112,8 +113,6 @@ where
         event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
-        let tick = Tick::block_proposal(&anchor_block);
-
         let storage = Arc::new(Storage::new(
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
@@ -163,12 +162,15 @@ impl<P: Preset> AdHocBenchController<P> {
         database: Database,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
+        let tick = Tick::block_proposal(&anchor_block);
+
         Self::new_internal(
             chain_config,
             pubkey_cache,
             store_config,
             anchor_block,
             anchor_state,
+            tick,
             database,
             NullExecutionEngine,
             None,
@@ -189,12 +191,15 @@ impl<P: Preset> BenchController<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
+        let tick = Tick::block_proposal(&anchor_block);
+
         Self::new_internal(
             chain_config,
             pubkey_cache,
             StoreConfig::default(),
             anchor_block,
             anchor_state,
+            tick,
             Database::in_memory(),
             NullExecutionEngine,
             None,
@@ -214,12 +219,14 @@ impl<P: Preset> TestController<P> {
         anchor_state: Arc<BeaconState<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let store_config = StoreConfig::aggressive(&chain_config);
+        let tick = Tick::block_proposal(&anchor_block);
 
         Self::with_p2p_tx(
             chain_config,
             Arc::new(PubkeyCache::default()),
             anchor_block,
             anchor_state,
+            tick,
             Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
             futures::sink::drain(),
             futures::sink::drain(),
@@ -235,6 +242,7 @@ impl<P: Preset> TestController<P> {
         pubkey_cache: Arc<PubkeyCache>,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        tick: Tick,
         execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, WaitGroup>>,
@@ -248,6 +256,7 @@ impl<P: Preset> TestController<P> {
             store_config,
             anchor_block,
             anchor_state,
+            tick,
             Database::in_memory(),
             execution_engine,
             None,
