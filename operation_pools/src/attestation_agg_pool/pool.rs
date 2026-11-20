@@ -20,7 +20,8 @@ use types::{
 };
 
 use crate::attestation_agg_pool::types::{
-    Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet, PoolAttestation,
+    Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet,
+    PackableAttestation as _, PoolAttestation, PqAggregateMap, PqPoolAttestation,
 };
 
 // Attestations packed for proposals in one slot, keyed by the parent of the block.
@@ -35,6 +36,7 @@ pub struct Pool<P: Preset> {
     // The type of the inner map does not affect the result of attestation packing,
     // though that may change if the packers are redesigned again.
     singular_attestations: RwLock<BTreeMap<Epoch, AttestationMap<P>>>,
+    pq_aggregates: RwLock<BTreeMap<Epoch, PqAggregateMap<P>>>,
     best_proposable_attestations: Mutex<PreparedAttestations<P>>,
     committees_with_aggregators: RwLock<BTreeMap<Slot, BTreeSet<CommitteeIndex>>>,
     proposer_indices: RwLock<BTreeMap<Slot, ValidatorIndex>>,
@@ -48,6 +50,7 @@ impl<P: Preset> Pool<P> {
             aggregates: RwLock::default(),
             data_root_to_key_map: RwLock::default(),
             singular_attestations: RwLock::default(),
+            pq_aggregates: RwLock::default(),
             best_proposable_attestations: Mutex::default(),
             committees_with_aggregators: RwLock::default(),
             proposer_indices: RwLock::default(),
@@ -68,10 +71,54 @@ impl<P: Preset> Pool<P> {
 
             let mut singular_attestations = self.singular_attestations.write().await;
             *singular_attestations = singular_attestations.split_off(&previous_epoch);
+
+            let mut pq_aggregates = self.pq_aggregates.write().await;
+            *pq_aggregates = pq_aggregates.split_off(&previous_epoch);
         }
 
         let mut proposer_indices = self.proposer_indices.write().await;
         *proposer_indices = proposer_indices.split_off(&slot);
+    }
+
+    /// Keeps `aggregate` unless an aggregate already pooled has all of its attesters, and drops
+    /// the pooled aggregates whose attesters it has.
+    pub async fn insert_pq_aggregate(&self, aggregate: Arc<PqPoolAttestation<P>>) {
+        let mut pq_aggregates = self.pq_aggregates.write().await;
+
+        let aggregates = pq_aggregates
+            .entry(aggregate.data.target.epoch)
+            .or_default()
+            .entry(aggregate.key())
+            .or_default();
+
+        let is_covered = |covering: &PqPoolAttestation<P>, covered: &PqPoolAttestation<P>| {
+            covering.aggregation_bits.len() == covered.aggregation_bits.len()
+                && !covered
+                    .aggregation_bits
+                    .any_not_in(&covering.aggregation_bits)
+        };
+
+        if aggregates
+            .iter()
+            .any(|pooled| is_covered(pooled, &aggregate))
+        {
+            return;
+        }
+
+        aggregates.retain(|pooled| !is_covered(&aggregate, pooled));
+        aggregates.push(aggregate);
+    }
+
+    pub async fn pq_aggregates_by_epoch(&self, epoch: Epoch) -> Vec<Arc<PqPoolAttestation<P>>> {
+        self.pq_aggregates
+            .read()
+            .await
+            .get(&epoch)
+            .into_iter()
+            .flat_map(BTreeMap::values)
+            .flatten()
+            .cloned()
+            .collect()
     }
 
     pub async fn add_data_root_to_key_entry(&self, key: AttestationKey) {
@@ -449,7 +496,9 @@ impl<P: Preset> Pool<P> {
 mod tests {
     use bls::AggregateSignatureBytes;
     use ssz::BitList;
-    use types::{phase0::containers::AttestationData, preset::Minimal};
+    use types::{
+        phase0::containers::AttestationData, pq::primitives::AttestationProof, preset::Minimal,
+    };
 
     use super::*;
 
@@ -529,6 +578,56 @@ mod tests {
         assert_eq!(
             pool.best_proposable_attestations(4, head_root).await.len(),
             1
+        );
+    }
+
+    fn pq_aggregate(bits: &[bool]) -> Arc<PqPoolAttestation<Minimal>> {
+        let mut aggregation_bits = BitList::with_length(bits.len());
+
+        for (index, bit) in bits.iter().copied().enumerate() {
+            aggregation_bits.set(index, bit);
+        }
+
+        Arc::new(PqPoolAttestation {
+            aggregation_bits,
+            data: AttestationData::default(),
+            committee_index: 0,
+            proof: AttestationProof::<Minimal>::default(),
+        })
+    }
+
+    fn pooled_bits(aggregates: &[Arc<PqPoolAttestation<Minimal>>]) -> Vec<Vec<bool>> {
+        aggregates
+            .iter()
+            .map(|aggregate| aggregate.aggregation_bits.iter().map(|bit| *bit).collect())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn pq_aggregates_keep_only_those_not_covered_by_another() {
+        let pool = Pool::<Minimal>::new(Arc::new(ChainConfig::minimal()));
+
+        pool.insert_pq_aggregate(pq_aggregate(&[true, false, false, false]))
+            .await;
+        pool.insert_pq_aggregate(pq_aggregate(&[false, true, false, false]))
+            .await;
+
+        // Covers both aggregates above, so they are dropped.
+        pool.insert_pq_aggregate(pq_aggregate(&[true, true, false, false]))
+            .await;
+
+        // Covered by the aggregate above, and identical to it.
+        pool.insert_pq_aggregate(pq_aggregate(&[false, true, false, false]))
+            .await;
+        pool.insert_pq_aggregate(pq_aggregate(&[true, true, false, false]))
+            .await;
+
+        pool.insert_pq_aggregate(pq_aggregate(&[false, false, true, true]))
+            .await;
+
+        assert_eq!(
+            pooled_bits(&pool.pq_aggregates_by_epoch(0).await),
+            [[true, true, false, false], [false, false, true, true],],
         );
     }
 }

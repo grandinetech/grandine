@@ -477,6 +477,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 .send(validator_to_liveness_tx);
                         }
                     }
+                    ValidatorMessage::ValidPqAggregate(_wait_group, aggregate, proof) => {
+                        if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
+                            attestation_agg_pool.insert_pq_aggregate(
+                                (*aggregate).clone(),
+                                Arc::unwrap_or_clone(proof),
+                            );
+                        }
+
+                        if let Some(validator_to_liveness_tx) = self.channels.validator_to_liveness_tx() {
+                            ValidatorToLiveness::ValidAttestation(Arc::new(
+                                Attestation::Pq(Arc::unwrap_or_clone(aggregate)),
+                            ))
+                            .send(validator_to_liveness_tx);
+                        }
+                    }
                     ValidatorMessage::ValidPayloadAttestation(wait_group, payload_attestation) => {
                         let span = tracing::debug_span!(
                             "ValidatorMessage::ValidPayloadAttestation",

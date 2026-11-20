@@ -422,13 +422,20 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
     ) -> Result<()> {
         for aggregate_and_proof in aggregates_and_proofs {
-            let attestation = Arc::new(aggregate_and_proof.aggregate());
+            if let Some(aggregate_and_proof) = aggregate_and_proof.pq() {
+                self.context.chain.attestation_agg_pool.insert_pq_aggregate(
+                    aggregate_and_proof.message.aggregate.clone(),
+                    aggregate_and_proof.message.proof.clone(),
+                );
+            } else {
+                let attestation = Arc::new(aggregate_and_proof.aggregate());
 
-            self.context.chain.attestation_agg_pool.insert_attestation(
-                self.wait_group.clone(),
-                attestation,
-                None,
-            );
+                self.context.chain.attestation_agg_pool.insert_attestation(
+                    self.wait_group.clone(),
+                    attestation,
+                    None,
+                );
+            }
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof.clone_arc())
                 .send(&self.context.p2p_tx);

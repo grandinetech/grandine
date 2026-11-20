@@ -72,6 +72,7 @@ use types::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
+    pq::containers::AggregateAndProof,
     preset::Preset,
     traits::{self, BeaconState as _, SignedBeaconBlock as _},
 };
@@ -1405,12 +1406,24 @@ where
                 );
 
                 if origin.send_to_validator() {
-                    let attestation = Arc::new(aggregate_and_proof.message().aggregate());
+                    if let Some(aggregate_and_proof) = aggregate_and_proof.pq() {
+                        let AggregateAndProof {
+                            aggregate, proof, ..
+                        } = &aggregate_and_proof.message;
 
-                    self.send_to_validator(ValidatorMessage::ValidAttestation(
-                        wait_group.clone(),
-                        attestation,
-                    ));
+                        self.send_to_validator(ValidatorMessage::ValidPqAggregate(
+                            wait_group.clone(),
+                            Arc::new(aggregate.clone()),
+                            Arc::new(proof.clone()),
+                        ));
+                    } else {
+                        let attestation = Arc::new(aggregate_and_proof.message().aggregate());
+
+                        self.send_to_validator(ValidatorMessage::ValidAttestation(
+                            wait_group.clone(),
+                            attestation,
+                        ));
+                    }
                 }
 
                 let message = aggregate_and_proof.message();

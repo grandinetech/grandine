@@ -18,6 +18,7 @@ use types::{
     config::Config,
     gloas::containers::Attestation as GloasAttestation,
     phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
 };
 use validator_statistics::ValidatorStatistics;
@@ -27,7 +28,8 @@ use crate::{
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask,
-            GloasProposableAttestationsTask, InsertAttestationTask, PackProposableAttestationsTask,
+            GloasProposableAttestationsTask, InsertAttestationTask, InsertPqAggregateTask,
+            PackProposableAttestationsTask, PqProposableAttestationsTask,
             SetCommitteesWithAggregatorsTask, SetRegisteredValidatorsTask,
         },
         types::{AttestationKey, PoolAttestation},
@@ -161,6 +163,30 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             metrics: self.metrics.clone(),
         })
         .await
+    }
+
+    /// The attestations of a PQ block with the proofs of their committees, in committee order.
+    ///
+    /// The state must reflect parent processing for the final proposal bid.
+    pub async fn pq_proposable_attestations(
+        &self,
+        scoring_state: Arc<BeaconState<P>>,
+    ) -> Result<Vec<(PqAttestation<P>, Vec<AttestationProof<P>>)>> {
+        self.spawn_task(PqProposableAttestationsTask {
+            controller: self.controller.clone_arc(),
+            pool: self.pool.clone_arc(),
+            scoring_state,
+        })
+        .await
+    }
+
+    /// Pools a validated PQ aggregate with its proof.
+    pub fn insert_pq_aggregate(&self, attestation: PqAttestation<P>, proof: AttestationProof<P>) {
+        self.spawn_detached(InsertPqAggregateTask {
+            pool: self.pool.clone_arc(),
+            attestation,
+            proof,
+        });
     }
 
     pub fn insert_attestation(

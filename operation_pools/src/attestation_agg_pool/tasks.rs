@@ -17,7 +17,11 @@ use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
     gloas::containers::Attestation as GloasAttestation,
-    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+    phase0::{
+        containers::Checkpoint,
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+    },
+    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
     traits::BeaconState as _,
 };
@@ -26,7 +30,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     attestation_agg_pool::{
         attestation_packer::{AttestationPacker, PackOutcome},
-        conversion::convert_attestation_for_pool,
+        conversion::{convert_attestation_for_pool, convert_pq_aggregate_for_pool},
         pool::Pool,
         types::{Aggregate, AttestationKey, PoolAttestation},
     },
@@ -149,6 +153,80 @@ impl<P: Preset, W: Wait> PoolTask for GloasProposableAttestationsTask<P, W> {
             started_at.elapsed().as_micros()
         );
         Ok(outcome.attestations)
+    }
+}
+
+pub struct PqProposableAttestationsTask<P: Preset, W: Wait> {
+    pub pool: Arc<Pool<P>>,
+    pub controller: ApiController<P, W>,
+    pub scoring_state: Arc<BeaconState<P>>,
+}
+
+impl<P: Preset, W: Wait> PoolTask for PqProposableAttestationsTask<P, W> {
+    type Output = Vec<(PqAttestation<P>, Vec<AttestationProof<P>>)>;
+
+    async fn run(self) -> Result<Self::Output> {
+        let Self {
+            pool,
+            controller,
+            scoring_state,
+        } = self;
+
+        ensure!(scoring_state.is_post_pq(), "expected PQ scoring state");
+
+        let previous_epoch = accessors::get_previous_epoch(&scoring_state);
+        let current_epoch = accessors::get_current_epoch(&scoring_state);
+        let dependent_root = controller.dependent_root(&scoring_state, previous_epoch)?;
+
+        let candidates = pool
+            .pq_aggregates_by_epoch(current_epoch)
+            .await
+            .into_iter()
+            .chain(pool.pq_aggregates_by_epoch(previous_epoch).await)
+            .collect::<Vec<_>>();
+
+        let acceptable_targets = acceptable_attestation_targets_for_packing(
+            &controller,
+            dependent_root,
+            previous_epoch,
+            candidates.iter().map(|attestation| attestation.data.target),
+        );
+
+        let candidates = candidates
+            .iter()
+            .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root))
+            .map(AsRef::as_ref);
+
+        let packer =
+            AttestationPacker::new(controller.chain_config().clone_arc(), scoring_state, true)?;
+
+        Ok(packer
+            .pack_pq_attestations_greedily(candidates)
+            .attestations)
+    }
+}
+
+pub struct InsertPqAggregateTask<P: Preset> {
+    pub pool: Arc<Pool<P>>,
+    pub attestation: PqAttestation<P>,
+    pub proof: AttestationProof<P>,
+}
+
+impl<P: Preset> PoolTask for InsertPqAggregateTask<P> {
+    type Output = ();
+
+    async fn run(self) -> Result<Self::Output> {
+        let Self {
+            pool,
+            attestation,
+            proof,
+        } = self;
+
+        let aggregate = convert_pq_aggregate_for_pool(attestation, proof)?;
+
+        pool.insert_pq_aggregate(Arc::new(aggregate)).await;
+
+        Ok(())
     }
 }
 
@@ -481,7 +559,8 @@ async fn candidates_for_packing<P: Preset, W: Wait>(
         previous_epoch,
         previous_epoch_attestations
             .iter()
-            .chain(&current_epoch_attestations),
+            .chain(&current_epoch_attestations)
+            .map(|attestation| attestation.data.target),
     );
 
     Ok(current_epoch_attestations
@@ -491,17 +570,16 @@ async fn candidates_for_packing<P: Preset, W: Wait>(
         .collect())
 }
 
-fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
+fn acceptable_attestation_targets_for_packing<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     dependent_root: H256,
     dependent_root_epoch: Epoch,
-    attestations: impl IntoIterator<Item = &'a PoolAttestation<P>>,
+    targets: impl IntoIterator<Item = Checkpoint>,
 ) -> HashSet<H256> {
     let dependent_root_slot = misc::compute_start_slot_at_epoch::<P>(dependent_root_epoch);
 
-    attestations
+    targets
         .into_iter()
-        .map(|attestation| attestation.data.target)
         .collect::<HashSet<_>>()
         .into_iter()
         .filter_map(|target| {

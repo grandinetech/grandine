@@ -16,10 +16,11 @@ use types::{
         error::AttestationConversionError,
     },
     phase0::containers::{Attestation as Phase0Attestation, Checkpoint},
+    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
 };
 
-use crate::attestation_agg_pool::types::PoolAttestation;
+use crate::attestation_agg_pool::types::{PoolAttestation, PqPoolAttestation};
 
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
@@ -194,6 +195,92 @@ pub fn compute_on_chain_aggregate<P: Preset>(
     })
 }
 
+/// A PQ network aggregate covers one committee, like an Electra one.
+pub fn convert_pq_aggregate_for_pool<P: Preset>(
+    attestation: PqAttestation<P>,
+    proof: AttestationProof<P>,
+) -> Result<PqPoolAttestation<P>> {
+    let committee_index = helper_functions::pq::get_committee_indices(&attestation)
+        .exactly_one()
+        .map_err(|_| AttestationConversionError::InvalidCommitteeIndex)?;
+
+    let PqAttestation {
+        aggregation_bits,
+        data,
+        ..
+    } = attestation;
+
+    let aggregation_bits: Vec<u8> = BitList::from(aggregation_bits).into();
+
+    Ok(PqPoolAttestation {
+        aggregation_bits: aggregation_bits
+            .try_into()
+            .map_err(AttestationConversionError::InvalidAggregationBits)?,
+        data,
+        committee_index,
+        proof,
+    })
+}
+
+/// [`compute_on_chain_aggregate`] for PQ, which returns the proofs of `aggregates` in committee
+/// order instead of aggregating signatures.
+///
+/// [`compute_on_chain_aggregate`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/validator.md#attestations
+pub fn compute_pq_on_chain_aggregate<'aggregates, P: Preset>(
+    aggregates: impl IntoIterator<Item = &'aggregates PqPoolAttestation<P>>,
+) -> Result<(PqAttestation<P>, Vec<AttestationProof<P>>)> {
+    let aggregates = aggregates
+        .into_iter()
+        .sorted_by_key(|aggregate| aggregate.committee_index)
+        .collect_vec();
+
+    let data = aggregates
+        .first()
+        .ok_or_else(|| AnyhowError::msg("no attestations for block aggregate"))?
+        .data;
+
+    let mut committee_bits = BitVector::default();
+
+    for aggregate in &aggregates {
+        ensure!(
+            aggregate.data == data,
+            "different attestation data in aggregate"
+        );
+
+        let index = usize::try_from(aggregate.committee_index)?;
+
+        ensure!(
+            !committee_bits.get(index).unwrap_or(true),
+            "duplicate or out of range committee"
+        );
+
+        committee_bits.set(index, true);
+    }
+
+    let committee_bits_per_committee = aggregates
+        .iter()
+        .map(|aggregate| {
+            let bytes: Vec<u8> = aggregate.aggregation_bits.clone().into();
+            BitList::<P::MaxAttestersPerSlot>::try_from(bytes)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let aggregation_bits = BitList::concatenate(&committee_bits_per_committee)?;
+
+    let proofs = aggregates
+        .iter()
+        .map(|aggregate| aggregate.proof.clone())
+        .collect();
+
+    let attestation = PqAttestation {
+        aggregation_bits: aggregation_bits.into(),
+        data,
+        committee_bits,
+    };
+
+    Ok((attestation, proofs))
+}
+
 // TODO(feature/electra): properly refactor attestations
 pub fn try_convert_to_single_attestation<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
@@ -300,6 +387,63 @@ mod tests {
         let other = convert_to_electra_attestation(other)?;
         compute_on_chain_aggregate([first, other].into_iter()).expect_err("mixed attestation data");
         compute_on_chain_aggregate::<Minimal>(core::iter::empty()).expect_err("empty input");
+        Ok(())
+    }
+
+    #[test]
+    fn pq_on_chain_aggregate_orders_committees_and_their_proofs() -> anyhow::Result<()> {
+        use super::*;
+
+        let aggregate = |committee_index, bits: &[bool], proof: u8| -> Result<_> {
+            let mut aggregation_bits = BitList::with_length(bits.len());
+
+            for (index, bit) in bits.iter().copied().enumerate() {
+                aggregation_bits.set(index, bit);
+            }
+
+            Ok(PqPoolAttestation::<Minimal> {
+                aggregation_bits,
+                data: AttestationData::default(),
+                committee_index,
+                proof: AttestationProof::<Minimal>::try_from(vec![proof])?,
+            })
+        };
+
+        let committee_2 = aggregate(2, &[true, false, true], 2)?;
+        let committee_0 = aggregate(0, &[false, true], 0)?;
+
+        let (attestation, proofs) = compute_pq_on_chain_aggregate([&committee_2, &committee_0])?;
+
+        assert_eq!(
+            attestation
+                .aggregation_bits
+                .iter()
+                .map(|bit| *bit)
+                .collect_vec(),
+            [false, true, true, false, true],
+        );
+        assert_eq!(
+            attestation.committee_bits.into_iter().collect_vec(),
+            [true, false, true, false],
+        );
+        assert_eq!(
+            proofs
+                .iter()
+                .map(|proof| proof.as_bytes().to_vec())
+                .collect_vec(),
+            [vec![0], vec![2]],
+        );
+
+        compute_pq_on_chain_aggregate([&committee_0, &committee_0])
+            .expect_err("duplicate committee");
+
+        let mut other_data = committee_2;
+        other_data.data.slot = 1;
+        compute_pq_on_chain_aggregate([&committee_0, &other_data])
+            .expect_err("mixed attestation data");
+
+        compute_pq_on_chain_aggregate::<Minimal>([]).expect_err("empty input");
+
         Ok(())
     }
 

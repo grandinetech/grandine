@@ -22,13 +22,16 @@ use types::{
         containers::{AttestationData, PendingAttestation},
         primitives::ValidatorIndex,
     },
+    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
     traits::BeaconState as _,
 };
 
 use crate::attestation_agg_pool::{
-    conversion::{compute_on_chain_aggregate, convert_to_electra_attestation},
-    types::PoolAttestation,
+    conversion::{
+        compute_on_chain_aggregate, compute_pq_on_chain_aggregate, convert_to_electra_attestation,
+    },
+    types::{PackableAttestation, PoolAttestation, PqPoolAttestation},
 };
 
 pub struct PackOutcome<A> {
@@ -291,13 +294,144 @@ impl<P: Preset> AttestationPacker<P> {
         }
     }
 
-    fn is_valid_for_inclusion(&self, attestation: &PoolAttestation<P>) -> bool {
-        let low_slot = attestation
-            .data
-            .slot
-            .saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get());
+    /// Packs PQ aggregates like [`Self::pack_gloas_attestations_greedily`], keeping the proof of
+    /// every aggregate that goes into an on-chain attestation, in committee order.
+    pub fn pack_pq_attestations_greedily<'a>(
+        &self,
+        aggregates: impl IntoIterator<Item = &'a PqPoolAttestation<P>>,
+    ) -> PackOutcome<(PqAttestation<P>, Vec<AttestationProof<P>>)> {
+        let mut representatives = BTreeMap::new();
 
-        let high_slot = attestation.data.slot.saturating_add(P::SlotsPerEpoch::U64);
+        for attestation in aggregates
+            .into_iter()
+            .take_while(|_| !self.deadline_reached())
+            .filter(|attestation| self.is_valid_for_inclusion(*attestation))
+        {
+            let Ok(weight) = self.added_weight(
+                attestation,
+                &self.previous_epoch_participation,
+                &self.current_epoch_participation,
+            ) else {
+                continue;
+            };
+
+            if weight == 0 {
+                continue;
+            }
+
+            // Equal weights keep the first aggregate with the most attesters.
+            let candidate = (
+                weight,
+                attestation.aggregation_bits.count_ones(),
+                attestation,
+            );
+            let representative = representatives
+                .entry(attestation.key())
+                .or_insert(candidate);
+
+            if (candidate.0, candidate.1) > (representative.0, representative.1) {
+                *representative = candidate;
+            }
+        }
+
+        let mut groups: BTreeMap<AttestationData, Vec<&PqPoolAttestation<P>>> = BTreeMap::new();
+
+        for (_, _, attestation) in representatives.into_values() {
+            groups
+                .entry(attestation.data)
+                .or_default()
+                .push(attestation);
+        }
+
+        let mut previous_participation = self.previous_epoch_participation.clone();
+        let mut current_participation = self.current_epoch_participation.clone();
+        let mut attestations = Vec::new();
+
+        while attestations.len() < usize::try_from(P::MAX_ATTESTATIONS_PQ).unwrap_or(usize::MAX) {
+            let mut best_group = None;
+
+            for (data, members) in &groups {
+                if self.deadline_reached() {
+                    return PackOutcome {
+                        attestations,
+                        deadline_reached: true,
+                    };
+                }
+
+                let Ok(group_weight) = members
+                    .iter()
+                    .map(|attestation| {
+                        self.added_weight(
+                            *attestation,
+                            &previous_participation,
+                            &current_participation,
+                        )
+                    })
+                    .sum::<Result<u64>>()
+                else {
+                    continue;
+                };
+
+                if group_weight > 0
+                    && best_group
+                        .as_ref()
+                        .is_none_or(|(_, weight)| group_weight > *weight)
+                {
+                    best_group = Some((*data, group_weight));
+                }
+            }
+
+            let Some((data, _)) = best_group else {
+                break;
+            };
+
+            let members = groups.remove(&data).expect("selected group exists");
+
+            let aggregate = match compute_pq_on_chain_aggregate(members.iter().copied()) {
+                Ok(aggregate) => aggregate,
+                Err(error) => {
+                    warn_with_peers!("unable to construct PQ aggregate: {error:?}");
+                    continue;
+                }
+            };
+
+            let mut next_previous = previous_participation.clone();
+            let mut next_current = current_participation.clone();
+
+            if members
+                .iter()
+                .try_for_each(|attestation| {
+                    self.add_attestation(*attestation, &mut next_previous, &mut next_current)
+                        .map(|_| ())
+                })
+                .is_err()
+            {
+                continue;
+            }
+
+            previous_participation = next_previous;
+            current_participation = next_current;
+            attestations.push(aggregate);
+        }
+
+        PackOutcome {
+            attestations,
+            deadline_reached: self.deadline_reached(),
+        }
+    }
+
+    fn is_valid_for_inclusion(&self, attestation: &impl PackableAttestation<P>) -> bool {
+        let data = attestation.data();
+
+        let min_inclusion_delay = if self.state.is_post_pq() {
+            P::MIN_ATTESTATION_INCLUSION_DELAY_PQ
+        } else {
+            P::MIN_ATTESTATION_INCLUSION_DELAY
+        };
+
+        let low_slot = data.slot.saturating_add(min_inclusion_delay.get());
+
+        let high_slot = data.slot.saturating_add(P::SlotsPerEpoch::U64);
 
         if !(low_slot..=high_slot).contains(&self.state.slot()) {
             return false;
@@ -312,18 +446,17 @@ impl<P: Preset> AttestationPacker<P> {
         // Pre-Electra attestations must not be included in Electra blocks,
         // as this would result in an invalid block due to signature mismatches.
         if self.state.is_post_electra()
-            && misc::compute_epoch_at_slot::<P>(attestation.data.slot)
-                < self.config.electra_fork_epoch
+            && misc::compute_epoch_at_slot::<P>(data.slot) < self.config.electra_fork_epoch
         {
             return false;
         }
 
-        attestation.data.source.root == expected_justified_checkpoint.root
+        data.source.root == expected_justified_checkpoint.root
     }
 
     fn added_weight(
         &self,
-        attestation: &PoolAttestation<P>,
+        attestation: &impl PackableAttestation<P>,
         previous_epoch_participation: &[ParticipationFlags],
         current_epoch_participation: &[ParticipationFlags],
     ) -> Result<u64> {
@@ -365,7 +498,7 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn add_attestation(
         &self,
-        attestation: &PoolAttestation<P>,
+        attestation: &impl PackableAttestation<P>,
         previous_epoch_participation: &mut [ParticipationFlags],
         current_epoch_participation: &mut [ParticipationFlags],
     ) -> Result<bool> {
@@ -389,8 +522,11 @@ impl<P: Preset> AttestationPacker<P> {
         Ok(any_added_participation_flags)
     }
 
-    fn attestation_epoch(&self, attestation: &PoolAttestation<P>) -> Result<AttestationEpoch> {
-        accessors::attestation_epoch(&self.state, attestation.data.target.epoch)
+    fn attestation_epoch(
+        &self,
+        attestation: &impl PackableAttestation<P>,
+    ) -> Result<AttestationEpoch> {
+        accessors::attestation_epoch(&self.state, attestation.data().target.epoch)
     }
 
     fn deadline_reached(&self) -> bool {
@@ -407,7 +543,12 @@ impl<P: Preset> AttestationPacker<P> {
         tick.is_start_of_slot()
     }
 
-    fn participation_flags(&self, attestation: &PoolAttestation<P>) -> Result<ParticipationFlags> {
+    fn participation_flags(
+        &self,
+        attestation: &impl PackableAttestation<P>,
+    ) -> Result<ParticipationFlags> {
+        let data = attestation.data();
+
         // The bid in the state is still the parent block's bid, because the block being packed has
         // not been processed yet, so its slot is the parent block's slot.
         let parent_slot = self
@@ -417,22 +558,22 @@ impl<P: Preset> AttestationPacker<P> {
 
         accessors::get_attestation_participation_flags(
             &self.state,
-            attestation.data,
-            self.state.slot().saturating_sub(attestation.data.slot),
+            data,
+            self.state.slot().saturating_sub(data.slot),
             parent_slot,
         )
     }
 
     fn attesting_indices<'a>(
         &'a self,
-        attestation: &'a PoolAttestation<P>,
+        attestation: &'a impl PackableAttestation<P>,
     ) -> Result<impl Iterator<Item = ValidatorIndex> + 'a> {
         let data = AttestationData {
-            index: attestation.committee_index,
-            ..attestation.data
+            index: attestation.committee_index(),
+            ..attestation.data()
         };
 
-        phase0::get_attesting_indices(&self.state, data, &attestation.aggregation_bits)
+        phase0::get_attesting_indices(&self.state, data, attestation.aggregation_bits())
     }
 }
 

@@ -29,6 +29,7 @@ use types::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
+    pq::{containers::Attestation as PqAttestation, primitives::AttestationProof},
     preset::Preset,
 };
 
@@ -314,6 +315,8 @@ pub enum ValidatorMessage<P: Preset, W> {
     PayloadStatusUpdated(W, ChainLink<P>),
     FinalizedCheckpoint(Checkpoint),
     ValidAttestation(W, Arc<Attestation<P>>),
+    // A PQ aggregate carries the proof of its attesters' signatures outside the attestation.
+    ValidPqAggregate(W, Arc<PqAttestation<P>>, Arc<AttestationProof<P>>),
     ValidPayloadAttestation(W, Arc<PayloadAttestationMessage>),
     // The block to build on, its state at the slot, and the safe and finalized block hashes.
     PrepareExecutionPayload(
