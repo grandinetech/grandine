@@ -3,13 +3,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bitvec::vec::BitVec;
-use diff::{Error, Patch, PatchConfig, QueuePatch, Unlimited};
+use diff::{Error, Patch, PatchConfig, PositionSet, QueuePatch, Unlimited};
 use helper_functions::{accessors, predicates};
+use itertools::izip;
 use pubkey_cache::PubkeyCache;
 use ssz::{BitList, ContiguousList, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
 use std_ext::ArcExt as _;
-use transition_functions::combined;
+use transition_functions::{
+    altair::EpochRewardScalars,
+    combined::{self, Statistics},
+};
 use types::{
+    altair::{participation_patch::ParticipationPatch, primitives::ParticipationFlags},
     combined::BeaconState,
     config::Config,
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
@@ -96,6 +101,20 @@ impl DerivedFields {
     }
 
     #[must_use]
+    pub fn reward_inputs(&self) -> Option<EpochRewardInputs> {
+        match self {
+            Self::V1(fields) => fields.reward_inputs(),
+        }
+    }
+
+    #[must_use]
+    pub fn inactivity_scores(&self) -> Option<(PositionSet, ContiguousList<u64, Unlimited>)> {
+        match self {
+            Self::V1(fields) => fields.inactivity_scores(),
+        }
+    }
+
+    #[must_use]
     pub fn validator_patches(&self, count: usize) -> Option<Vec<ValidatorListPatch>> {
         match self {
             Self::V1(fields) => fields.validator_patches(count),
@@ -170,10 +189,10 @@ impl<C> SszRead<C> for DerivedFields {
 #[derive(Clone, Debug)]
 pub enum DerivedFieldsV1 {
     Phase0(Phase0DerivedFields),
-    Altair(Phase0DerivedFields),
-    Bellatrix(Phase0DerivedFields),
-    Capella(Phase0DerivedFields),
-    Deneb(Phase0DerivedFields),
+    Altair(AltairDerivedFields),
+    Bellatrix(AltairDerivedFields),
+    Capella(AltairDerivedFields),
+    Deneb(AltairDerivedFields),
     Electra(ElectraDerivedFields),
     Fulu(ElectraDerivedFields),
     Gloas(GloasDerivedFields),
@@ -197,7 +216,7 @@ impl DerivedFieldsV1 {
                 blocks,
                 end,
             )?),
-            Phase::Altair => Self::Altair(Phase0DerivedFields::new(
+            Phase::Altair => Self::Altair(AltairDerivedFields::new(
                 config,
                 pubkey_cache,
                 state,
@@ -205,7 +224,7 @@ impl DerivedFieldsV1 {
                 blocks,
                 end,
             )?),
-            Phase::Bellatrix => Self::Bellatrix(Phase0DerivedFields::new(
+            Phase::Bellatrix => Self::Bellatrix(AltairDerivedFields::new(
                 config,
                 pubkey_cache,
                 state,
@@ -213,7 +232,7 @@ impl DerivedFieldsV1 {
                 blocks,
                 end,
             )?),
-            Phase::Capella => Self::Capella(Phase0DerivedFields::new(
+            Phase::Capella => Self::Capella(AltairDerivedFields::new(
                 config,
                 pubkey_cache,
                 state,
@@ -221,7 +240,7 @@ impl DerivedFieldsV1 {
                 blocks,
                 end,
             )?),
-            Phase::Deneb => Self::Deneb(Phase0DerivedFields::new(
+            Phase::Deneb => Self::Deneb(AltairDerivedFields::new(
                 config,
                 pubkey_cache,
                 state,
@@ -261,8 +280,8 @@ impl DerivedFieldsV1 {
     #[must_use]
     pub fn rewards(&self, count: usize) -> Option<ProposerRewards> {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields.rewards(count),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.rewards(count),
@@ -274,8 +293,8 @@ impl DerivedFieldsV1 {
     #[must_use]
     pub fn randao_mix(&self, count: usize) -> Option<H256> {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields.randao_mix(count),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.randao_mix(count),
@@ -287,8 +306,8 @@ impl DerivedFieldsV1 {
     #[must_use]
     pub const fn total_active_balance(&self) -> Gwei {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields.total_active_balance,
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.total_active_balance,
@@ -300,8 +319,8 @@ impl DerivedFieldsV1 {
     #[must_use]
     pub const fn validator_snapshot(&self) -> Option<&ValidatorSnapshot> {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields.validator_snapshot.as_ref(),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.validator_snapshot.as_ref(),
@@ -312,8 +331,8 @@ impl DerivedFieldsV1 {
 
     fn active_changes(&self) -> &[ValidatorIndex] {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields.active_changes.as_ref(),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.active_changes.as_ref(),
@@ -323,10 +342,47 @@ impl DerivedFieldsV1 {
     }
 
     #[must_use]
+    pub fn reward_inputs(&self) -> Option<EpochRewardInputs> {
+        match self {
+            Self::Phase0(_) => None,
+            Self::Altair(fields)
+            | Self::Bellatrix(fields)
+            | Self::Capella(fields)
+            | Self::Deneb(fields) => Some(fields.reward_inputs.clone()),
+            Self::Electra(fields) | Self::Fulu(fields) => Some(fields.reward_inputs.clone()),
+            Self::Gloas(fields) => Some(fields.reward_inputs.clone()),
+        }
+    }
+
+    #[must_use]
+    pub fn inactivity_scores(&self) -> Option<(PositionSet, ContiguousList<u64, Unlimited>)> {
+        match self {
+            Self::Phase0(_) => None,
+            Self::Altair(fields)
+            | Self::Bellatrix(fields)
+            | Self::Capella(fields)
+            | Self::Deneb(fields) => Some((
+                fields.inactivity_score_positions.clone(),
+                fields.inactivity_scores.clone(),
+            )),
+            Self::Electra(fields) | Self::Fulu(fields) => Some((
+                fields.inactivity_score_positions.clone(),
+                fields.inactivity_scores.clone(),
+            )),
+            Self::Gloas(fields) => Some((
+                fields.inactivity_score_positions.clone(),
+                fields.inactivity_scores.clone(),
+            )),
+        }
+    }
+
+    #[must_use]
     pub fn validator_patches(&self, count: usize) -> Option<Vec<ValidatorListPatch>> {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields
+                .slots(count)
+                .map(|slots| slots.iter().map(|slot| slot.validators.clone()).collect()),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields
@@ -344,8 +400,10 @@ impl DerivedFieldsV1 {
     #[must_use]
     pub fn balance_patches(&self, count: usize) -> Option<Vec<BalancesPatch>> {
         match self {
-            Self::Phase0(fields)
-            | Self::Altair(fields)
+            Self::Phase0(fields) => fields
+                .slots(count)
+                .map(|slots| slots.iter().map(|slot| slot.balances.clone()).collect()),
+            Self::Altair(fields)
             | Self::Bellatrix(fields)
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields
@@ -585,12 +643,128 @@ impl Phase0SlotFields {
 
 #[derive(Clone, Debug, Ssz)]
 #[ssz(derive_hash = false)]
+pub struct AltairDerivedFields {
+    pub block_rewards: Option<ProposerRewards>,
+    pub randao_mix: H256,
+    pub total_active_balance: Gwei,
+    pub validator_snapshot: Option<ValidatorSnapshot>,
+    pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
+    pub reward_inputs: EpochRewardInputs,
+    pub inactivity_score_positions: PositionSet,
+    pub inactivity_scores: ContiguousList<u64, Unlimited>,
+    pub slots: ContiguousList<AltairSlotFields, Unlimited>,
+}
+
+impl AltairDerivedFields {
+    fn new<P: Preset>(
+        config: &Config,
+        pubkey_cache: &PubkeyCache,
+        state: &mut Arc<BeaconState<P>>,
+        block_rewards: Option<ProposerRewards>,
+        blocks: &mut Blocks<P>,
+        end: Slot,
+    ) -> Result<Self> {
+        let randao_mix =
+            accessors::get_randao_mix(&**state, accessors::get_current_epoch(&**state));
+
+        let total_active_balance = accessors::total_active_balance(&**state);
+
+        let (validator_snapshot, active_changes) =
+            validator_snapshot_and_active_changes(config, &**state)?;
+
+        let (inactivity_score_positions, inactivity_scores) = eligible_inactivity_scores(&**state)?;
+
+        let start = state.clone_arc();
+
+        let slots = (state.slot().saturating_add(1)..end)
+            .map(|slot| {
+                let block = blocks.next_if(|block| block.message().slot() == slot);
+
+                AltairSlotFields::new(config, pubkey_cache, state, block)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let reward_inputs = EpochRewardInputs::new(&start, &**state)?;
+
+        Ok(Self {
+            block_rewards,
+            randao_mix,
+            total_active_balance,
+            validator_snapshot,
+            active_changes,
+            reward_inputs,
+            inactivity_score_positions,
+            inactivity_scores,
+            slots: slots.try_into()?,
+        })
+    }
+
+    fn rewards(&self, count: usize) -> Option<ProposerRewards> {
+        match count.checked_sub(1) {
+            Some(index) => self.slots.get(index).map(|slot| slot.rewards),
+            None => self.block_rewards,
+        }
+    }
+
+    fn randao_mix(&self, count: usize) -> Option<H256> {
+        match count.checked_sub(1) {
+            Some(index) => self.slots.get(index).map(|slot| slot.randao_mix),
+            None => Some(self.randao_mix),
+        }
+    }
+
+    fn slots(&self, count: usize) -> Option<&[AltairSlotFields]> {
+        self.slots.as_ref().get(..count)
+    }
+}
+
+#[derive(Clone, Debug, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct AltairSlotFields {
+    pub randao_mix: H256,
+    pub rewards: ProposerRewards,
+    pub validators: ValidatorListPatch,
+    pub balances: BalancesPatch,
+}
+
+impl AltairSlotFields {
+    fn new<P: Preset>(
+        config: &Config,
+        pubkey_cache: &PubkeyCache,
+        state: &mut Arc<BeaconState<P>>,
+        block: Option<&StoredBlock<P>>,
+    ) -> Result<Self> {
+        let base = state.clone_arc();
+
+        let rewards = block
+            .map(|block| block_rewards(config, pubkey_cache, state.make_mut(), block))
+            .transpose()?
+            .unwrap_or_default();
+
+        let changed = &**state;
+        let randao_mix = accessors::get_randao_mix(changed, accessors::get_current_epoch(changed));
+        let config = PatchConfig::default();
+
+        Ok(Self {
+            randao_mix,
+            rewards,
+            validators: Patch::diff(config, base.validators(), changed.validators())?,
+            balances: Patch::diff(config, base.balances(), changed.balances())?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Ssz)]
+#[ssz(derive_hash = false)]
 pub struct ElectraDerivedFields {
     pub block_rewards: Option<ProposerRewards>,
     pub randao_mix: H256,
     pub total_active_balance: Gwei,
     pub validator_snapshot: Option<ValidatorSnapshot>,
     pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
+    pub reward_inputs: EpochRewardInputs,
+    pub inactivity_score_positions: PositionSet,
+    pub inactivity_scores: ContiguousList<u64, Unlimited>,
     pub slots: ContiguousList<ElectraSlotFields, Unlimited>,
 }
 
@@ -611,6 +785,10 @@ impl ElectraDerivedFields {
         let (validator_snapshot, active_changes) =
             validator_snapshot_and_active_changes(config, &**state)?;
 
+        let (inactivity_score_positions, inactivity_scores) = eligible_inactivity_scores(&**state)?;
+
+        let start = state.clone_arc();
+
         let slots = (state.slot().saturating_add(1)..end)
             .map(|slot| {
                 let block = blocks.next_if(|block| block.message().slot() == slot);
@@ -619,12 +797,17 @@ impl ElectraDerivedFields {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let reward_inputs = EpochRewardInputs::new(&start, &**state)?;
+
         Ok(Self {
             block_rewards,
             randao_mix,
             total_active_balance,
             validator_snapshot,
             active_changes,
+            reward_inputs,
+            inactivity_score_positions,
+            inactivity_scores,
             slots: slots.try_into()?,
         })
     }
@@ -716,6 +899,9 @@ pub struct GloasDerivedFields {
     pub total_active_balance: Gwei,
     pub validator_snapshot: Option<ValidatorSnapshot>,
     pub active_changes: ContiguousList<ValidatorIndex, Unlimited>,
+    pub reward_inputs: EpochRewardInputs,
+    pub inactivity_score_positions: PositionSet,
+    pub inactivity_scores: ContiguousList<u64, Unlimited>,
     pub slots: ContiguousList<GloasSlotFields, Unlimited>,
 }
 
@@ -736,6 +922,10 @@ impl GloasDerivedFields {
         let (validator_snapshot, active_changes) =
             validator_snapshot_and_active_changes(config, &**state)?;
 
+        let (inactivity_score_positions, inactivity_scores) = eligible_inactivity_scores(&**state)?;
+
+        let start = state.clone_arc();
+
         let slots = (state.slot().saturating_add(1)..end)
             .map(|slot| {
                 let block = blocks.next_if(|block| block.message().slot() == slot);
@@ -744,12 +934,17 @@ impl GloasDerivedFields {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let reward_inputs = EpochRewardInputs::new(&start, &**state)?;
+
         Ok(Self {
             block_rewards,
             randao_mix,
             total_active_balance,
             validator_snapshot,
             active_changes,
+            reward_inputs,
+            inactivity_score_positions,
+            inactivity_scores,
             slots: slots.try_into()?,
         })
     }
@@ -852,6 +1047,84 @@ pub fn block_rewards<P: Preset>(
     };
 
     Ok(rewards.into())
+}
+
+#[derive(Clone, Debug, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct EpochRewardInputs {
+    pub source_balance: Gwei,
+    pub target_balance: Gwei,
+    pub head_balance: Gwei,
+    pub late_participation: ParticipationPatch,
+    pub eligibility_edits: ContiguousList<ValidatorIndex, Unlimited>,
+}
+
+impl EpochRewardInputs {
+    fn new<P: Preset>(start: &BeaconState<P>, last: &BeaconState<P>) -> Result<Self> {
+        let (Statistics::Altair(statistics), Some(post_altair_start), Some(post_altair_last)) = (
+            combined::statistics(last)?,
+            start.post_altair(),
+            last.post_altair(),
+        ) else {
+            return Err(Error::CrossPhaseDiff.into());
+        };
+
+        let current_epoch = accessors::get_current_epoch(last);
+        let previous_epoch = accessors::get_previous_epoch(last);
+        let mut eligibility_edits = vec![];
+
+        for (index, validator) in (0..).zip(last.validators().partial_validators()) {
+            if predicates::is_eligible_for_penalties(validator, previous_epoch)?
+                != predicates::is_active_validator(validator, current_epoch)
+            {
+                eligibility_edits.push(index);
+            }
+        }
+
+        Ok(Self {
+            source_balance: statistics.previous_epoch_source_participating_balance,
+            target_balance: statistics.previous_epoch_target_participating_balance,
+            head_balance: statistics.previous_epoch_head_participating_balance,
+            late_participation: Patch::diff(
+                PatchConfig::default(),
+                post_altair_start.previous_epoch_participation(),
+                post_altair_last.previous_epoch_participation(),
+            )?,
+            eligibility_edits: eligibility_edits.try_into()?,
+        })
+    }
+}
+
+fn eligible_inactivity_scores<P: Preset>(
+    state: &BeaconState<P>,
+) -> Result<(PositionSet, ContiguousList<u64, Unlimited>)> {
+    let Some(post_altair) = state.post_altair() else {
+        return Err(Error::CrossPhaseDiff.into());
+    };
+
+    let rewarded_epoch = accessors::get_current_epoch(state).saturating_sub(2);
+    let mut positions = PositionSet::builder(state.validators().len_usize());
+    let mut scores = vec![];
+
+    for (index, validator, score) in izip!(
+        0..,
+        state.validators().partial_validators(),
+        post_altair.inactivity_scores().into_iter().copied(),
+    ) {
+        if score != 0 && predicates::is_eligible_for_penalties(validator, rewarded_epoch)? {
+            positions.record(index);
+            scores.push(score);
+        }
+    }
+
+    Ok((positions.finish(), scores.try_into()?))
+}
+
+pub struct AttestationRewardColumns {
+    pub scalars: EpochRewardScalars,
+    pub participation: Vec<ParticipationFlags>,
+    pub inactivity_scores: Vec<u64>,
+    pub eligibility_edits: ContiguousList<ValidatorIndex, Unlimited>,
 }
 
 #[derive(Clone, Debug, Ssz)]

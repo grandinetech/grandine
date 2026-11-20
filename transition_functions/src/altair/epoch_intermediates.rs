@@ -1,9 +1,11 @@
+use core::num::NonZeroU64;
+
 use anyhow::{Error, Result};
 use arithmetic::{NonZeroU64Ext as _, U64Ext as _};
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
-        combined_participation, compute_base_reward, get_base_reward_per_increment,
+        combined_participation, compute_base_reward, compute_base_reward_per_increment,
         get_current_epoch, get_previous_epoch, total_active_balance,
     },
     mutators::clamp_balance,
@@ -13,12 +15,12 @@ use itertools::izip;
 use serde::Serialize;
 use types::{
     altair::{
-        beacon_state::BeaconState,
         consts::{
             TIMELY_HEAD_FLAG_INDEX, TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_FLAG_INDEX,
             TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_FLAG_INDEX, TIMELY_TARGET_WEIGHT,
             WEIGHT_DENOMINATOR,
         },
+        primitives::ParticipationFlags,
     },
     config::Config,
     nonstandard::Participation,
@@ -326,34 +328,82 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Result<S
     Ok(statistics)
 }
 
+pub trait RewardSummary: Copy {
+    fn effective_balance(self) -> Gwei;
+    fn slashed(self) -> bool;
+    fn eligible_for_penalties(self) -> bool;
+}
+
+impl RewardSummary for AltairValidatorSummary {
+    fn effective_balance(self) -> Gwei {
+        self.effective_balance
+    }
+
+    fn slashed(self) -> bool {
+        self.slashed
+    }
+
+    fn eligible_for_penalties(self) -> bool {
+        self.eligible_for_penalties
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EpochRewardScalars {
+    pub in_inactivity_leak: bool,
+    pub total_active_balance: Gwei,
+    pub source_balance: Gwei,
+    pub target_balance: Gwei,
+    pub head_balance: Gwei,
+}
+
+impl EpochRewardScalars {
+    pub fn new<P: Preset>(
+        state: &impl PostAltairBeaconState<P>,
+        statistics: Statistics,
+    ) -> Result<Self> {
+        Ok(Self {
+            in_inactivity_leak: is_in_inactivity_leak(state)?,
+            total_active_balance: total_active_balance(state),
+            source_balance: statistics.previous_epoch_source_participating_balance,
+            target_balance: statistics.previous_epoch_target_participating_balance,
+            head_balance: statistics.previous_epoch_head_participating_balance,
+        })
+    }
+}
+
 pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
     config: &Config,
-    state: &BeaconState<P>,
-    statistics: Statistics,
-    summaries: impl IntoIterator<Item = AltairValidatorSummary>,
-    participation: impl IntoIterator<Item = Participation>,
+    inactivity_penalty_quotient: NonZeroU64,
+    scalars: EpochRewardScalars,
+    summaries: impl IntoIterator<Item = impl RewardSummary>,
+    participation: impl IntoIterator<Item = ParticipationFlags>,
+    inactivity_scores: impl IntoIterator<Item = u64>,
 ) -> Result<Vec<D>> {
-    let in_inactivity_leak = is_in_inactivity_leak(state)?;
-    let base_reward_per_increment = get_base_reward_per_increment(state)?;
+    let EpochRewardScalars {
+        in_inactivity_leak,
+        total_active_balance,
+        source_balance,
+        target_balance,
+        head_balance,
+    } = scalars;
+
+    let base_reward_per_increment = compute_base_reward_per_increment::<P>(total_active_balance)?;
 
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
-    let source_increments = statistics.previous_epoch_source_participating_balance / increment;
-    let target_increments = statistics.previous_epoch_target_participating_balance / increment;
-    let head_increments = statistics.previous_epoch_head_participating_balance / increment;
-    let active_increments = total_active_balance(state) / increment;
+    let source_increments = source_balance / increment;
+    let target_increments = target_balance / increment;
+    let head_increments = head_balance / increment;
+    let active_increments = total_active_balance / increment;
 
-    izip!(summaries, participation, &state.inactivity_scores)
+    izip!(summaries, participation, inactivity_scores)
         .map(|(summary, participation, inactivity_score)| -> Result<D> {
             let mut deltas = D::default();
 
-            let AltairValidatorSummary {
-                effective_balance,
-                slashed,
-                eligible_for_penalties,
-                ..
-            } = summary;
+            let effective_balance = summary.effective_balance();
+            let slashed = summary.slashed();
 
-            if !eligible_for_penalties {
+            if !summary.eligible_for_penalties() {
                 return Ok(deltas);
             }
 
@@ -376,7 +426,7 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
             let participation_component_penalty =
                 |weight| -> Result<Gwei> { Ok(base_reward.try_mul(weight)? / WEIGHT_DENOMINATOR) };
 
-            if !slashed && participation.previous_epoch_matching_source() {
+            if !slashed && participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
                 if !in_inactivity_leak {
                     deltas.add_source_reward(participation_component_reward(
                         TIMELY_SOURCE_WEIGHT,
@@ -388,7 +438,7 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
                     .add_source_penalty(participation_component_penalty(TIMELY_SOURCE_WEIGHT)?)?;
             }
 
-            if !slashed && participation.previous_epoch_matching_target() {
+            if !slashed && participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
                 if !in_inactivity_leak {
                     deltas.add_target_reward(participation_component_reward(
                         TIMELY_TARGET_WEIGHT,
@@ -399,15 +449,15 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
                 deltas
                     .add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT)?)?;
 
-                let penalty_numerator = effective_balance.try_mul(*inactivity_score)?;
+                let penalty_numerator = effective_balance.try_mul(inactivity_score)?;
                 let penalty_denominator = config
                     .inactivity_score_bias
-                    .try_mul(P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR)?;
+                    .try_mul(inactivity_penalty_quotient)?;
 
                 deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator)?;
             }
 
-            if !slashed && participation.previous_epoch_matching_head() && !in_inactivity_leak {
+            if !slashed && participation.get_bit(TIMELY_HEAD_FLAG_INDEX) && !in_inactivity_leak {
                 deltas.add_head_reward(participation_component_reward(
                     TIMELY_HEAD_WEIGHT,
                     head_increments,
@@ -421,38 +471,56 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
 
 #[cfg(test)]
 mod spec_tests {
+    use duplicate::duplicate_item;
     use spec_test_utils::Case;
     use test_generator::test_resources;
-    use types::{
-        altair::beacon_state::BeaconState,
-        preset::{Mainnet, Minimal},
-    };
+    use types::preset::{Mainnet, Minimal};
 
     use crate::unphased::TestDeltas;
 
     use super::*;
 
-    #[test_resources("consensus-spec-tests/tests/mainnet/altair/rewards/*/*/*")]
-    fn mainnet(case: Case) {
-        run_case::<Mainnet>(case).expect("altair rewards test should not return an error")
+    #[duplicate_item(
+        glob                                                           function_name       preset    state_type                                             quotient;
+        ["consensus-spec-tests/tests/mainnet/altair/rewards/*/*/*"]    [altair_mainnet]    [Mainnet] [types::altair::beacon_state::BeaconState<Mainnet>]    [INACTIVITY_PENALTY_QUOTIENT_ALTAIR];
+        ["consensus-spec-tests/tests/minimal/altair/rewards/*/*/*"]    [altair_minimal]    [Minimal] [types::altair::beacon_state::BeaconState<Minimal>]    [INACTIVITY_PENALTY_QUOTIENT_ALTAIR];
+        ["consensus-spec-tests/tests/mainnet/bellatrix/rewards/*/*/*"] [bellatrix_mainnet] [Mainnet] [types::bellatrix::beacon_state::BeaconState<Mainnet>] [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/bellatrix/rewards/*/*/*"] [bellatrix_minimal] [Minimal] [types::bellatrix::beacon_state::BeaconState<Minimal>] [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/mainnet/capella/rewards/*/*/*"]   [capella_mainnet]   [Mainnet] [types::capella::beacon_state::BeaconState<Mainnet>]   [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/capella/rewards/*/*/*"]   [capella_minimal]   [Minimal] [types::capella::beacon_state::BeaconState<Minimal>]   [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/mainnet/deneb/rewards/*/*/*"]     [deneb_mainnet]     [Mainnet] [types::deneb::beacon_state::BeaconState<Mainnet>]     [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/deneb/rewards/*/*/*"]     [deneb_minimal]     [Minimal] [types::deneb::beacon_state::BeaconState<Minimal>]     [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/mainnet/electra/rewards/*/*/*"]   [electra_mainnet]   [Mainnet] [types::electra::beacon_state::BeaconState<Mainnet>]   [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/electra/rewards/*/*/*"]   [electra_minimal]   [Minimal] [types::electra::beacon_state::BeaconState<Minimal>]   [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/mainnet/fulu/rewards/*/*/*"]      [fulu_mainnet]      [Mainnet] [types::fulu::beacon_state::BeaconState<Mainnet>]      [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/fulu/rewards/*/*/*"]      [fulu_minimal]      [Minimal] [types::fulu::beacon_state::BeaconState<Minimal>]      [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/mainnet/gloas/rewards/*/*/*"]     [gloas_mainnet]     [Mainnet] [types::gloas::beacon_state::BeaconState<Mainnet>]     [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+        ["consensus-spec-tests/tests/minimal/gloas/rewards/*/*/*"]     [gloas_minimal]     [Minimal] [types::gloas::beacon_state::BeaconState<Minimal>]     [INACTIVITY_PENALTY_QUOTIENT_BELLATRIX];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let state = case.ssz_default::<state_type>("pre");
+
+        run_case::<preset>(case, &state, preset::quotient)
+            .expect("rewards test should not return an error")
     }
 
-    #[test_resources("consensus-spec-tests/tests/minimal/altair/rewards/*/*/*")]
-    fn minimal(case: Case) {
-        run_case::<Minimal>(case).expect("altair rewards test should not return an error")
-    }
+    fn run_case<P: Preset>(
+        case: Case,
+        state: &impl PostAltairBeaconState<P>,
+        inactivity_penalty_quotient: NonZeroU64,
+    ) -> Result<()> {
+        let (statistics, summaries, participation) = statistics_and_summaries(state)?;
 
-    fn run_case<P: Preset>(case: Case) -> Result<()> {
-        let state = case.ssz_default::<BeaconState<P>>("pre");
-
-        let (statistics, summaries, participation) = statistics_and_summaries(&state)?;
-
-        let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas(
+        let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas::<P, _>(
             &P::default_config(),
-            &state,
-            statistics,
+            inactivity_penalty_quotient,
+            EpochRewardScalars::new(state, statistics)?,
             summaries,
-            participation,
+            participation
+                .iter()
+                .map(|participation| participation.previous),
+            state.inactivity_scores().into_iter().copied(),
         )?;
 
         TestDeltas::assert_equal(

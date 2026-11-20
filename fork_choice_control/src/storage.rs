@@ -3279,12 +3279,15 @@ mod tests {
     use bls::PublicKeyBytes;
     use bytesize::ByteSize;
     use database::DatabaseMode;
-    use diff::QueuePatch;
+    use diff::{PositionSet, QueuePatch};
     use ssz::{ContiguousList, PersistentList, PersistentVector, SszListMut};
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
         Balances, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, Validators,
+        altair::{
+            beacon_state::BeaconState as AltairBeaconState, participation_patch::ParticipationPatch,
+        },
         electra::{
             beacon_state::BeaconState as ElectraBeaconState,
             containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
@@ -3304,7 +3307,8 @@ mod tests {
     };
 
     use crate::derived_fields::{
-        DerivedFieldsV1, ElectraDerivedFields, ElectraSlotFields, ValidatorSnapshot,
+        DerivedFieldsV1, ElectraDerivedFields, ElectraSlotFields, EpochRewardInputs,
+        ValidatorSnapshot,
     };
 
     use super::*;
@@ -4655,6 +4659,154 @@ mod tests {
         Ok(())
     }
 
+    fn altair_state_for_rewards(
+        slot: Slot,
+        participation: &[u8],
+        inactivity_scores: &[u64],
+    ) -> Arc<BeaconState<Mainnet>> {
+        let validator = |pubkey_byte: u8,
+                         slashed: bool,
+                         activation_epoch: Epoch,
+                         exit_epoch: Epoch,
+                         withdrawable_epoch: Epoch| Validator {
+            pubkey: PublicKeyBytes::repeat_byte(pubkey_byte),
+            withdrawal_credentials: H256::repeat_byte(pubkey_byte),
+            effective_balance: 32_000_000_000,
+            slashed,
+            activation_eligibility_epoch: 0,
+            activation_epoch,
+            exit_epoch,
+            withdrawable_epoch,
+        };
+
+        let latest_block_header = BeaconBlockHeader {
+            state_root: H256::repeat_byte(0xff),
+            ..BeaconBlockHeader::default()
+        };
+
+        Arc::new(BeaconState::Altair(
+            AltairBeaconState {
+                slot,
+                block_roots: PersistentVector::repeat_element(latest_block_header.hash_tree_root()),
+                latest_block_header,
+                validators: Validators::<Mainnet>::try_from_iter([
+                    validator(1, false, 0, u64::MAX, u64::MAX),
+                    validator(2, false, 0, u64::MAX, u64::MAX),
+                    validator(3, true, 0, 10, 100),
+                    validator(4, false, 0, 16, 300),
+                    validator(5, false, 16, u64::MAX, u64::MAX),
+                    validator(6, false, 0, 10, 12),
+                ])
+                .expect("the registry limit is far above the test validator count"),
+                balances: PersistentList::try_from_iter([32_000_000_000_u64; 6])
+                    .expect("the registry limit is far above the test validator count"),
+                previous_epoch_participation: PersistentList::try_from_iter(
+                    participation.iter().copied(),
+                )
+                .expect("the registry limit is far above the test validator count"),
+                current_epoch_participation: PersistentList::try_from_iter([0; 6])
+                    .expect("the registry limit is far above the test validator count"),
+                inactivity_scores: PersistentList::try_from_iter(inactivity_scores.iter().copied())
+                    .expect("the registry limit is far above the test validator count"),
+                ..AltairBeaconState::default()
+            }
+            .into(),
+        ))
+    }
+
+    #[test]
+    fn reward_inputs_are_stored_in_the_rows_of_the_states_that_hold_them() -> Result<()> {
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet().start_and_stay_in(Phase::Altair)),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )?;
+
+        let states = [
+            altair_state_for_rewards(0, &[0; 6], &[0; 6]),
+            altair_state_for_rewards(512, &[7, 0, 7, 7, 0, 0], &[0; 6]),
+            altair_state_for_rewards(544, &[0; 6], &[0, 4, 8, 0, 0, 9]),
+            altair_state_for_rewards(576, &[0; 6], &[0; 6]),
+        ];
+
+        let root = |slot: Slot| H256::from_low_u64_be(slot.saturating_add(1));
+
+        storage.database.put_batch_raw(
+            states
+                .iter()
+                .map(|state| {
+                    serialize(
+                        BlockRootBySlot(state.slot()),
+                        BlockRootBySlotValue::Block(root(state.slot())),
+                    )
+                })
+                .collect::<Result<_>>()?,
+        )?;
+
+        storage.append_finalized_states(
+            states
+                .iter()
+                .map(|state| (state.slot(), Some(root(state.slot())), state.clone_arc())),
+            0,
+            states[0].validators(),
+        )?;
+
+        let reward_inputs = storage
+            .derived_fields(512)?
+            .and_then(|fields| fields.reward_inputs())
+            .expect("the row of a post-Altair epoch holds reward inputs");
+
+        assert_eq!(
+            reward_inputs
+                .eligibility_edits
+                .iter()
+                .copied()
+                .collect_vec(),
+            [2, 3, 4],
+        );
+
+        assert_eq!(reward_inputs.source_balance, 64_000_000_000);
+        assert_eq!(reward_inputs.target_balance, 64_000_000_000);
+        assert_eq!(reward_inputs.head_balance, 64_000_000_000);
+
+        let (positions, scores) = storage
+            .derived_fields(544)?
+            .and_then(|fields| fields.inactivity_scores())
+            .expect("the row of a post-Altair epoch holds inactivity scores");
+
+        let mut indices = vec![];
+
+        positions.apply_by_index(|index| {
+            indices.push(index);
+            Ok(())
+        })?;
+
+        assert_eq!(indices, [1, 2]);
+        assert_eq!(scores.iter().copied().collect_vec(), [4, 8]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reward_inputs_do_not_exist_in_phase_0() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        append_states_with_randao_reveals(&storage, &[1, 3, 32], &[32], false)?;
+
+        let fields = storage
+            .derived_fields(0)?
+            .expect("the row of the anchor state is stored");
+
+        assert!(fields.reward_inputs().is_none());
+        assert!(fields.inactivity_scores().is_none());
+
+        Ok(())
+    }
+
     #[test]
     fn validator_snapshots_restart_at_every_fork() {
         let config = Config {
@@ -5045,6 +5197,19 @@ mod tests {
                     total_active_balance: 0,
                     validator_snapshot: None,
                     active_changes: ContiguousList::default(),
+                    reward_inputs: EpochRewardInputs {
+                        source_balance: 0,
+                        target_balance: 0,
+                        head_balance: 0,
+                        late_participation: ParticipationPatch::diff(
+                            PatchConfig::default(),
+                            &AltairBeaconState::<Mainnet>::default().previous_epoch_participation,
+                            &AltairBeaconState::<Mainnet>::default().previous_epoch_participation,
+                        )?,
+                        eligibility_edits: ContiguousList::default(),
+                    },
+                    inactivity_score_positions: PositionSet::builder(0).finish(),
+                    inactivity_scores: ContiguousList::default(),
                     slots: slot_fields.try_into()?,
                 })),
                 DEFAULT_ZSTD_COMPRESSION_LEVEL,

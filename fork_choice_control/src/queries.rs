@@ -28,6 +28,7 @@ use std_ext::ArcExt;
 use thiserror::Error;
 use tokio::time::{sleep, timeout};
 use tracing::instrument;
+use transition_functions::altair::EpochRewardScalars;
 use typenum::Unsigned as _;
 use types::{
     ProposerLookahead, RandaoMixes,
@@ -60,7 +61,9 @@ use types::{
 
 use crate::{
     controller::Controller,
-    derived_fields::{DerivedFields, ValidatorRecords, ValidatorSnapshot},
+    derived_fields::{
+        AttestationRewardColumns, DerivedFields, ValidatorRecords, ValidatorSnapshot,
+    },
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
     storage::{StateRow, Storage, StoredBlock, StoredEnvelope},
@@ -1184,6 +1187,110 @@ where
             active,
             slashed,
         }))
+    }
+
+    pub fn attestation_reward_columns(
+        &self,
+        epoch: Epoch,
+    ) -> Result<Option<AttestationRewardColumns>> {
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1));
+        let next_start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(2));
+
+        if !self.store_snapshot().is_slot_finalized(next_start_slot) {
+            return Ok(None);
+        }
+
+        let storage = self.storage();
+
+        if storage.stored_slot_before_or_at(start_slot)? != Some(start_slot)
+            || storage.stored_slot_before_or_at(next_start_slot)? != Some(next_start_slot)
+        {
+            return Ok(None);
+        }
+
+        let Some(fields) = storage.derived_fields(start_slot)? else {
+            return Ok(None);
+        };
+
+        let Some(reward_inputs) = fields.reward_inputs() else {
+            return Ok(None);
+        };
+
+        let Some((nonzero_score_positions, nonzero_scores)) = storage
+            .derived_fields(next_start_slot)?
+            .and_then(|fields| fields.inactivity_scores())
+        else {
+            return Ok(None);
+        };
+
+        let Some(checkpoints) = self.finality_checkpoints_at_slot(next_start_slot)? else {
+            return Ok(None);
+        };
+
+        let mut patches = vec![];
+
+        let walker = storage.walk(start_slot)?;
+
+        for row in &walker {
+            let mut participation = match row? {
+                StateRow::Delta(delta) => {
+                    patches.push(
+                        delta
+                            .previous_epoch_participation()?
+                            .context(Error::FieldMissing)?,
+                    );
+                    continue;
+                }
+                StateRow::Frame(frame) => frame
+                    .previous_epoch_participation()?
+                    .context(Error::FieldMissing)?,
+                StateRow::State(state) => state
+                    .post_altair()
+                    .context(Error::FieldMissing)?
+                    .previous_epoch_participation()
+                    .clone_boxed_mut(),
+            };
+
+            for patch in patches.into_iter().rev() {
+                patch.apply(&mut *participation)?;
+            }
+
+            reward_inputs
+                .late_participation
+                .apply(&mut *participation)?;
+
+            let mut inactivity_scores = vec![0; participation.len_usize()];
+            let mut nonzero_scores = nonzero_scores.into_iter();
+
+            nonzero_score_positions.apply_by_index(|index| {
+                let score = usize::try_from(index)
+                    .ok()
+                    .and_then(|index| inactivity_scores.get_mut(index))
+                    .ok_or(diff::Error::PatchIndexOutOfBounds)?;
+
+                *score = nonzero_scores
+                    .next()
+                    .ok_or(diff::Error::InvalidPatchEncoding)?;
+
+                Ok(())
+            })?;
+
+            return Ok(Some(AttestationRewardColumns {
+                scalars: EpochRewardScalars {
+                    in_inactivity_leak: epoch.saturating_sub(checkpoints.value.finalized.epoch)
+                        > P::MIN_EPOCHS_TO_INACTIVITY_PENALTY,
+                    total_active_balance: fields.total_active_balance(),
+                    source_balance: reward_inputs.source_balance,
+                    target_balance: reward_inputs.target_balance,
+                    head_balance: reward_inputs.head_balance,
+                },
+                participation: participation.iter().copied().collect(),
+                inactivity_scores,
+                eligibility_edits: reward_inputs.eligibility_edits,
+            }));
+        }
+
+        Ok(None)
     }
 
     pub fn block_rewards(

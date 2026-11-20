@@ -34,7 +34,8 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
-    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
+    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StoredBlock, Topic,
+    ValidatorRecords, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -82,7 +83,8 @@ use tokio::time::{interval, timeout};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 use transition_functions::attestation_rewards::{
-    AttestationReward, AttestationRewards, ValidatorAttestationReward,
+    AttestationReward, AttestationRewards, PostAltairValidatorInputs, ValidatorAttestationReward,
+    post_altair_rewards_from_inputs,
 };
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -121,7 +123,7 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        BlockRewards, KzgProofs, PayloadStatus, Phase, RawValidatorList, RelativeEpoch,
+        BlockRewards, KzgProofs, PayloadStatus, Phase, PubkeyList, RawValidatorList, RelativeEpoch,
         ValidationOutcome, ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
@@ -2730,6 +2732,23 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
     }
 
     tokio::task::spawn_blocking(move || {
+        if let Some(response) = stored_attestation_rewards(
+            &chain_config,
+            &controller,
+            epoch,
+            last_slot,
+            &validator_ids,
+        )? && let Some(WithStatus {
+            status, finalized, ..
+        }) = controller.status_at_slot(last_slot)?
+        {
+            return Ok::<_, Error>(
+                EthResponse::json(response)
+                    .execution_optimistic(status.is_optimistic())
+                    .finalized(finalized),
+            );
+        }
+
         let WithStatus {
             value: state,
             status,
@@ -2739,7 +2758,11 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             .ok_or(Error::StateNotFound)?;
 
         // Reject unknown validators before computing rewards for the whole epoch.
-        let validator_indices = requested_validator_indices(&state, validator_ids)?;
+        let validator_indices = requested_validator_indices(
+            &validator_ids,
+            state.validators().pubkeys(),
+            state.validators().len_usize(),
+        )?;
 
         // The cached state is left intact. Its persistent parts are shared with the copy.
         let mut post_state = state.clone_arc();
@@ -2751,7 +2774,26 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             epoch,
         )?;
 
-        let response = attestation_rewards_response(&rewards, validator_indices)?;
+        let validators = rewards.validators();
+
+        // With no validators requested, respond with all that could have been rewarded or penalized.
+        let selected = if validator_indices.is_empty() {
+            izip!(0.., validators.iter().copied())
+                .filter(|(_, validator)| validator.eligible)
+                .collect_vec()
+        } else {
+            validator_indices
+                .into_iter()
+                .map(|validator_index| {
+                    Ok((
+                        validator_index,
+                        validators[usize::try_from(validator_index)?],
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?
+        };
+
+        let response = attestation_rewards_response(&rewards, selected)?;
 
         Ok::<_, Error>(
             EthResponse::json(response)
@@ -2762,23 +2804,92 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
     .await?
 }
 
+fn stored_attestation_rewards<P: Preset, W: Wait>(
+    chain_config: &ChainConfig,
+    controller: &ApiController<P, W>,
+    epoch: Epoch,
+    last_slot: Slot,
+    validator_ids: &[ValidatorId],
+) -> Result<Option<AttestationRewardsResponse>, Error> {
+    let Some(columns) = controller.attestation_reward_columns(epoch)? else {
+        return Ok(None);
+    };
+
+    let Some(ValidatorRecords {
+        effective_balances,
+        active: mut eligible_for_penalties,
+        slashed,
+    }) = controller.validator_records_at_slot(last_slot)?
+    else {
+        return Ok(None);
+    };
+
+    for validator_index in &columns.eligibility_edits {
+        let index = usize::try_from(*validator_index).map_err(AnyhowError::new)?;
+        let flipped = !eligible_for_penalties[index];
+
+        eligible_for_penalties.set(index, flipped);
+    }
+
+    let validator_indices = if validator_ids.is_empty() {
+        izip!(0.., &eligible_for_penalties)
+            .filter(|(_, eligible)| **eligible)
+            .map(|(validator_index, _)| validator_index)
+            .collect_vec()
+    } else {
+        requested_validator_indices(
+            validator_ids,
+            &controller.finalized_pubkeys(),
+            effective_balances.len(),
+        )?
+    };
+
+    let inputs = validator_indices
+        .iter()
+        .map(|validator_index| {
+            let index = usize::try_from(*validator_index)?;
+
+            Ok(PostAltairValidatorInputs {
+                effective_balance: effective_balances[index],
+                slashed: slashed[index],
+                eligible_for_penalties: eligible_for_penalties[index],
+                previous_epoch_participation: columns.participation[index],
+                inactivity_score: columns.inactivity_scores[index],
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let rewards = post_altair_rewards_from_inputs::<P>(
+        chain_config,
+        chain_config.phase_at_epoch(epoch.saturating_add(1)),
+        columns.scalars,
+        &inputs,
+    )?;
+
+    let selected = izip!(validator_indices, rewards.validators().iter().copied()).collect_vec();
+
+    Ok(Some(attestation_rewards_response(&rewards, selected)?))
+}
+
 // Unknown validators are rejected rather than skipped.
-fn requested_validator_indices<P: Preset>(
-    state: &BeaconState<P>,
-    validator_ids: Vec<ValidatorId>,
+fn requested_validator_indices(
+    validator_ids: &[ValidatorId],
+    pubkeys: &PubkeyList,
+    validator_count: usize,
 ) -> Result<Vec<ValidatorIndex>, Error> {
-    let validator_count = state.validators().len_u64();
+    let in_registry = |validator_index: &ValidatorIndex| {
+        usize::try_from(*validator_index).is_ok_and(|index| index < validator_count)
+    };
 
     validator_ids
-        .into_iter()
-        .map(|validator_id| match validator_id {
-            ValidatorId::ValidatorIndex(validator_index) if validator_index < validator_count => {
-                Ok(validator_index)
-            }
-            ValidatorId::ValidatorIndex(validator_index) => {
-                Err(Error::InvalidValidatorIndex(validator_index))
-            }
-            ValidatorId::PublicKey(pubkey) => accessors::index_of_public_key(state, &pubkey)
+        .iter()
+        .map(|validator_id| match *validator_id {
+            ValidatorId::ValidatorIndex(validator_index) => Some(validator_index)
+                .filter(in_registry)
+                .ok_or(Error::InvalidValidatorIndex(validator_index)),
+            ValidatorId::PublicKey(pubkey) => pubkeys
+                .index_of(&pubkey)
+                .filter(in_registry)
                 .ok_or(Error::UnknownValidatorPublicKey(pubkey)),
         })
         .collect()
@@ -2786,35 +2897,21 @@ fn requested_validator_indices<P: Preset>(
 
 fn attestation_rewards_response<P: Preset>(
     rewards: &AttestationRewards<P>,
-    validator_indices: Vec<ValidatorIndex>,
+    selected: Vec<(ValidatorIndex, ValidatorAttestationReward)>,
 ) -> Result<AttestationRewardsResponse> {
-    let validators = rewards.validators();
-
-    // With no validators requested, respond with all that could have been rewarded or penalized.
-    let validator_indices = if validator_indices.is_empty() {
-        izip!(0.., validators)
-            .filter(|(_, validator)| validator.eligible)
-            .map(|(validator_index, _)| validator_index)
-            .collect_vec()
-    } else {
-        validator_indices
-    };
-
     // Effective balances are multiples of `EFFECTIVE_BALANCE_INCREMENT`,
     // so a flag per increment count is enough to find the distinct ones.
     // That is far cheaper than a set when every validator is requested.
     let mut seen_increments = vec![];
 
-    let total_rewards = validator_indices
+    let total_rewards = selected
         .into_iter()
-        .map(|validator_index| {
+        .map(|(validator_index, validator)| {
             let ValidatorAttestationReward {
                 effective_balance,
                 eligible,
                 reward,
-            } = *validators
-                .get(usize::try_from(validator_index)?)
-                .ok_or_else(|| anyhow!("no attestation reward for validator {validator_index}"))?;
+            } = validator;
 
             if eligible {
                 let increments =

@@ -7,14 +7,12 @@
 // - inactivity score updates (the inactivity penalty uses the updated scores).
 // Everything else in `process_epoch` is skipped.
 
-use core::{iter::Copied, marker::PhantomData, slice};
+use core::marker::PhantomData;
 
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use helper_functions::{
-    accessors::{
-        compute_base_reward, get_base_reward_per_increment, get_current_epoch, total_active_balance,
-    },
+    accessors::{compute_base_reward, compute_base_reward_per_increment, get_current_epoch},
     misc,
     predicates::is_in_inactivity_leak,
 };
@@ -22,12 +20,15 @@ use itertools::izip;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use types::{
-    altair::consts::{
-        TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, WEIGHT_DENOMINATOR,
+    altair::{
+        consts::{
+            TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, WEIGHT_DENOMINATOR,
+        },
+        primitives::ParticipationFlags,
     },
     combined::BeaconState,
     config::Config,
-    nonstandard::Participation,
+    nonstandard::Phase,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::BASE_REWARDS_PER_EPOCH,
@@ -38,8 +39,10 @@ use types::{
 };
 
 use crate::{
-    altair::{self, EpochDeltasForReport as AltairEpochDeltasForReport, Statistics},
-    bellatrix, capella, combined, deneb, electra, fulu, gloas,
+    altair::{
+        self, EpochDeltasForReport as AltairEpochDeltasForReport, EpochRewardScalars, RewardSummary,
+    },
+    combined,
     phase0::{
         self, EpochDeltasForReport as Phase0EpochDeltasForReport, Statistics as _,
         StatisticsForTransition,
@@ -71,7 +74,6 @@ pub struct AttestationRewards<P: Preset> {
 }
 
 impl<P: Preset> AttestationRewards<P> {
-    // Indexed by validator index.
     #[must_use]
     pub fn validators(&self) -> &[ValidatorAttestationReward] {
         &self.validators
@@ -80,6 +82,29 @@ impl<P: Preset> AttestationRewards<P> {
     // The reward a validator with `effective_balance` would get for perfect participation.
     pub fn ideal_reward(&self, effective_balance: Gwei) -> Result<AttestationReward> {
         self.ideal.ideal_reward::<P>(effective_balance)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PostAltairValidatorInputs {
+    pub effective_balance: Gwei,
+    pub slashed: bool,
+    pub eligible_for_penalties: bool,
+    pub previous_epoch_participation: ParticipationFlags,
+    pub inactivity_score: u64,
+}
+
+impl RewardSummary for PostAltairValidatorInputs {
+    fn effective_balance(self) -> Gwei {
+        self.effective_balance
+    }
+
+    fn slashed(self) -> bool {
+        self.slashed
+    }
+
+    fn eligible_for_penalties(self) -> bool {
+        self.eligible_for_penalties
     }
 }
 
@@ -222,57 +247,17 @@ pub fn attestation_rewards<P: Preset>(
         combined::process_slots(config, pubkey_cache, state, last_slot)?;
     }
 
+    let phase = state.phase();
+
     match state {
         BeaconState::Phase0(state) => phase0_rewards(state),
-        BeaconState::Altair(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                altair::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Bellatrix(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                bellatrix::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Capella(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                capella::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Deneb(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                deneb::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Electra(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                electra::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Fulu(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                fulu::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
-        BeaconState::Gloas(state) => post_altair_rewards(
-            config,
-            state,
-            |state, statistics, summaries, participation| {
-                gloas::epoch_deltas(config, state, statistics, summaries, participation)
-            },
-        ),
+        BeaconState::Altair(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Bellatrix(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Capella(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Deneb(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Electra(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Fulu(state) => post_altair_rewards(config, phase, state),
+        BeaconState::Gloas(state) => post_altair_rewards(config, phase, state),
     }
 }
 
@@ -325,13 +310,8 @@ fn phase0_rewards<P: Preset>(state: &mut Phase0BeaconState<P>) -> Result<Attesta
 
 fn post_altair_rewards<P: Preset, S: PostAltairBeaconState<P>>(
     config: &Config,
+    phase: Phase,
     state: &mut S,
-    epoch_deltas: impl FnOnce(
-        &S,
-        Statistics,
-        Copied<slice::Iter<'_, altair::ValidatorSummary>>,
-        Vec<Participation>,
-    ) -> Result<Vec<AltairEpochDeltasForReport>>,
 ) -> Result<AttestationRewards<P>> {
     let (statistics, summaries, participation) = altair::statistics_and_summaries(state)?;
 
@@ -344,15 +324,56 @@ fn post_altair_rewards<P: Preset, S: PostAltairBeaconState<P>>(
         participation.iter().copied(),
     )?;
 
-    let in_inactivity_leak = is_in_inactivity_leak(state)?;
-
-    let deltas = epoch_deltas(state, statistics, summaries.iter().copied(), participation)?;
-
-    let validators = izip!(summaries, deltas)
-        .map(|(summary, deltas)| {
-            Ok(ValidatorAttestationReward {
+    let validators = izip!(&summaries, &participation, state.inactivity_scores())
+        .map(
+            |(summary, participation, inactivity_score)| PostAltairValidatorInputs {
                 effective_balance: summary.effective_balance,
-                eligible: summary.eligible_for_penalties,
+                slashed: summary.slashed,
+                eligible_for_penalties: summary.eligible_for_penalties,
+                previous_epoch_participation: participation.previous,
+                inactivity_score: *inactivity_score,
+            },
+        )
+        .collect::<Vec<_>>();
+
+    post_altair_rewards_from_inputs(
+        config,
+        phase,
+        EpochRewardScalars::new(state, statistics)?,
+        &validators,
+    )
+}
+
+pub fn post_altair_rewards_from_inputs<P: Preset>(
+    config: &Config,
+    phase: Phase,
+    scalars: EpochRewardScalars,
+    validators: &[PostAltairValidatorInputs],
+) -> Result<AttestationRewards<P>> {
+    let inactivity_penalty_quotient = if phase == Phase::Altair {
+        P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR
+    } else {
+        P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX
+    };
+
+    let deltas: Vec<AltairEpochDeltasForReport> = altair::epoch_deltas::<P, _>(
+        config,
+        inactivity_penalty_quotient,
+        scalars,
+        validators.iter().copied(),
+        validators
+            .iter()
+            .map(|validator| validator.previous_epoch_participation),
+        validators
+            .iter()
+            .map(|validator| validator.inactivity_score),
+    )?;
+
+    let validators = izip!(validators, deltas)
+        .map(|(validator, deltas)| {
+            Ok(ValidatorAttestationReward {
+                effective_balance: validator.effective_balance,
+                eligible: validator.eligible_for_penalties,
                 reward: AttestationReward {
                     head: signed(deltas.head_reward, 0)?,
                     target: signed(deltas.target_reward, deltas.target_penalty)?,
@@ -367,12 +388,14 @@ fn post_altair_rewards<P: Preset, S: PostAltairBeaconState<P>>(
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
 
     let ideal = IdealRewardParameters::PostAltair {
-        in_inactivity_leak,
-        base_reward_per_increment: get_base_reward_per_increment(state)?,
-        active_increments: total_active_balance(state) / increment,
-        source_increments: statistics.previous_epoch_source_participating_balance / increment,
-        target_increments: statistics.previous_epoch_target_participating_balance / increment,
-        head_increments: statistics.previous_epoch_head_participating_balance / increment,
+        in_inactivity_leak: scalars.in_inactivity_leak,
+        base_reward_per_increment: compute_base_reward_per_increment::<P>(
+            scalars.total_active_balance,
+        )?,
+        active_increments: scalars.total_active_balance / increment,
+        source_increments: scalars.source_balance / increment,
+        target_increments: scalars.target_balance / increment,
+        head_increments: scalars.head_balance / increment,
     };
 
     Ok(AttestationRewards {
@@ -394,11 +417,18 @@ fn signed(reward: Gwei, penalty: Gwei) -> Result<i64> {
 mod spec_tests {
     use std::collections::HashSet;
 
+    use bit_field::BitField as _;
     use duplicate::duplicate_item;
-    use helper_functions::accessors::get_previous_epoch;
+    use helper_functions::{
+        accessors::{get_previous_epoch, total_active_balance},
+        predicates::{is_active_validator, is_eligible_for_penalties},
+    };
     use spec_test_utils::Case;
     use test_generator::test_resources;
     use types::{
+        altair::consts::{
+            TIMELY_HEAD_FLAG_INDEX, TIMELY_SOURCE_FLAG_INDEX, TIMELY_TARGET_FLAG_INDEX,
+        },
         combined::SignedBeaconBlock,
         nonstandard::Phase,
         phase0::{consts::GENESIS_EPOCH, primitives::Slot},
@@ -489,6 +519,71 @@ mod spec_tests {
         }
     }
 
+    fn rewards_from_columns<P: Preset>(
+        config: &Config,
+        pre_state: &BeaconState<P>,
+        post_state: &BeaconState<P>,
+        epoch: Epoch,
+    ) -> Result<AttestationRewards<P>> {
+        let finality_delay = epoch.try_sub(post_state.finalized_checkpoint().epoch)?;
+
+        let state = pre_state
+            .post_altair()
+            .expect("the only state without participation flags is the Phase 0 one");
+
+        let inactivity_scores = post_state
+            .post_altair()
+            .expect("the state after a post-Altair state is post-Altair")
+            .inactivity_scores();
+
+        let mut source_balance = 0;
+        let mut target_balance = 0;
+        let mut head_balance = 0;
+
+        let inputs = izip!(
+            state.validators().partial_validators(),
+            state.validators().effective_balances().copied(),
+            state.previous_epoch_participation().into_iter().copied(),
+            inactivity_scores.into_iter().copied(),
+        )
+        .map(
+            |(validator, effective_balance, previous, inactivity_score)| {
+                if !validator.slashed && is_active_validator(validator, epoch) {
+                    if previous.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
+                        source_balance = source_balance.try_add(effective_balance)?;
+                    }
+
+                    if previous.get_bit(TIMELY_TARGET_FLAG_INDEX) {
+                        target_balance = target_balance.try_add(effective_balance)?;
+                    }
+
+                    if previous.get_bit(TIMELY_HEAD_FLAG_INDEX) {
+                        head_balance = head_balance.try_add(effective_balance)?;
+                    }
+                }
+
+                Ok(PostAltairValidatorInputs {
+                    effective_balance,
+                    slashed: validator.slashed,
+                    eligible_for_penalties: is_eligible_for_penalties(validator, epoch)?,
+                    previous_epoch_participation: previous,
+                    inactivity_score,
+                })
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
+
+        let scalars = EpochRewardScalars {
+            in_inactivity_leak: finality_delay > P::MIN_EPOCHS_TO_INACTIVITY_PENALTY,
+            total_active_balance: total_active_balance(pre_state),
+            source_balance: source_balance.max(P::EFFECTIVE_BALANCE_INCREMENT.get()),
+            target_balance: target_balance.max(P::EFFECTIVE_BALANCE_INCREMENT.get()),
+            head_balance: head_balance.max(P::EFFECTIVE_BALANCE_INCREMENT.get()),
+        };
+
+        post_altair_rewards_from_inputs(config, pre_state.phase(), scalars, &inputs)
+    }
+
     fn check_epoch<P: Preset>(
         config: &Config,
         pubkey_cache: &PubkeyCache,
@@ -497,6 +592,21 @@ mod spec_tests {
     ) -> Result<()> {
         let epoch = get_previous_epoch(pre_state);
         let rewards = attestation_rewards(config, pubkey_cache, &mut pre_state.clone(), epoch)?;
+        if pre_state.post_altair().is_some() {
+            let from_columns = rewards_from_columns(config, pre_state, post_state, epoch)?;
+
+            assert_eq!(rewards.validators().len(), from_columns.validators().len());
+
+            for (full, columns) in izip!(rewards.validators(), from_columns.validators()) {
+                assert_eq!(full.effective_balance, columns.effective_balance);
+                assert_eq!(full.eligible, columns.eligible);
+                assert_eq!(full.reward, columns.reward);
+                assert_eq!(
+                    rewards.ideal_reward(full.effective_balance)?,
+                    from_columns.ideal_reward(full.effective_balance)?,
+                );
+            }
+        }
 
         // These validators have balance changes other than attestation rewards:
         // - Phase 0 proposers get rewards for including attestations.

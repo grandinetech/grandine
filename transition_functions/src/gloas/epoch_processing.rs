@@ -24,7 +24,6 @@ use types::{
     traits::{BeaconState as _, PostElectraBeaconState, PostGloasBeaconState},
 };
 
-use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition},
     electra::{self, apply_pending_deposit},
@@ -62,12 +61,15 @@ pub fn process_epoch<P: Preset>(
     // `BeaconState.finalized_checkpoint` and `BeaconState.inactivity_scores`.
     //
     // Using `vec_of_default` in the genesis epoch does not improve performance.
-    let epoch_deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
+    let epoch_deltas: Vec<EpochDeltasForTransition> = altair::epoch_deltas::<P, _>(
         config,
-        state,
-        statistics,
+        P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX,
+        altair::EpochRewardScalars::new(state, statistics)?,
         summaries.iter().copied(),
-        participation,
+        participation
+            .iter()
+            .map(|participation| participation.previous),
+        state.inactivity_scores.into_iter().copied(),
     )?;
 
     unphased::process_rewards_and_penalties(state, epoch_deltas)?;
@@ -554,12 +556,15 @@ mod spec_tests {
         run_case::<P>(case, |_, state| {
             let (statistics, summaries, participation) = altair::statistics_and_summaries(state)?;
 
-            let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
+            let deltas: Vec<EpochDeltasForTransition> = altair::epoch_deltas::<P, _>(
                 &P::default_config(),
-                state,
-                statistics,
+                P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX,
+                altair::EpochRewardScalars::new(state, statistics)?,
                 summaries,
-                participation,
+                participation
+                    .iter()
+                    .map(|participation| participation.previous),
+                state.inactivity_scores.into_iter().copied(),
             )?;
 
             unphased::process_rewards_and_penalties(state, deltas)

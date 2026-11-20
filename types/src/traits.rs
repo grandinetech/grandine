@@ -547,8 +547,8 @@ impl<parameters> BeaconState<P> for implementor {
 }
 
 pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
-    fn previous_epoch_participation(&self) -> &dyn SszList<ParticipationFlags>;
-    fn current_epoch_participation(&self) -> &dyn SszList<ParticipationFlags>;
+    fn previous_epoch_participation(&self) -> &dyn SszListMut<ParticipationFlags>;
+    fn current_epoch_participation(&self) -> &dyn SszListMut<ParticipationFlags>;
     fn inactivity_scores(&self) -> &dyn SszList<u64>;
     fn current_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
     fn next_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
@@ -631,8 +631,8 @@ pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
 impl<parameters> PostAltairBeaconState<P> for implementor {
     #[duplicate_item(
         field                          return_type;
-        [previous_epoch_participation] [dyn SszList<ParticipationFlags>];
-        [current_epoch_participation]  [dyn SszList<ParticipationFlags>];
+        [previous_epoch_participation] [dyn SszListMut<ParticipationFlags>];
+        [current_epoch_participation]  [dyn SszListMut<ParticipationFlags>];
         [current_sync_committee]       [Arc<Hc<SyncCommittee<P>>>];
         [inactivity_scores]            [dyn SszList<u64>];
         [next_sync_committee]          [Arc<Hc<SyncCommittee<P>>>];

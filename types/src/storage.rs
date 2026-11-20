@@ -8,12 +8,15 @@ use ssz::{
 };
 
 use crate::{
-    altair::containers::SyncCommittee,
     altair::storage::{
         BeaconStateFrame as AltairBeaconStateFrame,
         BeaconStateFrameCursor as AltairBeaconStateFrameCursor,
         BeaconStatePatch as AltairBeaconStatePatch,
         BeaconStatePatchCursor as AltairBeaconStatePatchCursor,
+    },
+    altair::{
+        containers::SyncCommittee, participation_patch::ParticipationPatch,
+        primitives::ParticipationFlags,
     },
     bellatrix::storage::{
         BeaconStateFrame as BellatrixBeaconStateFrame,
@@ -470,6 +473,29 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
         Ok(value)
     }
 
+    pub fn previous_epoch_participation(
+        &self,
+    ) -> Result<Option<Box<dyn SszListMut<ParticipationFlags>>>, ReadError> {
+        let value: Box<dyn SszListMut<ParticipationFlags>> = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
+            Self::Bellatrix(frame) => {
+                Box::new(frame.get_previous_epoch_participation()?.into_inner())
+            }
+            Self::Capella(frame) => {
+                Box::new(frame.get_previous_epoch_participation()?.into_inner())
+            }
+            Self::Deneb(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
+            Self::Electra(frame) => {
+                Box::new(frame.get_previous_epoch_participation()?.into_inner())
+            }
+            Self::Fulu(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
+            Self::Gloas(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
+        };
+
+        Ok(Some(value))
+    }
+
     pub fn pending_deposits(
         &self,
     ) -> Result<Option<Box<dyn SszListMut<PendingDeposit>>>, ReadError> {
@@ -902,6 +928,23 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
         };
 
         Ok(value)
+    }
+
+    pub fn previous_epoch_participation(
+        &self,
+    ) -> Result<Option<Compressed<ParticipationPatch>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_) => return Ok(None),
+            Self::Altair(patch) => patch.get_previous_epoch_participation()?,
+            Self::Bellatrix(patch) => patch.get_previous_epoch_participation()?,
+            Self::Capella(patch) => patch.get_previous_epoch_participation()?,
+            Self::Deneb(patch) => patch.get_previous_epoch_participation()?,
+            Self::Electra(patch) => patch.get_previous_epoch_participation()?,
+            Self::Fulu(patch) => patch.get_previous_epoch_participation()?,
+            Self::Gloas(patch) => patch.get_previous_epoch_participation()?,
+        };
+
+        Ok(Some(value))
     }
 
     pub fn pending_deposits(
