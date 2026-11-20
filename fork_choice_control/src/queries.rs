@@ -31,7 +31,8 @@ use tracing::instrument;
 use transition_functions::altair::EpochRewardScalars;
 use typenum::Unsigned as _;
 use types::{
-    ProposerLookahead, Ptc, RandaoMixes,
+    BuilderPendingPayments, BuilderPendingWithdrawals, Builders, ProposerLookahead, Ptc,
+    RandaoMixes,
     altair::containers::SyncCommittee,
     combined::{
         BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock, UnblindError,
@@ -1022,6 +1023,254 @@ where
 
         Ok(Some(WithStatus {
             value: electra.pending_consolidations().clone_boxed_mut(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn builders_and_finalized_epoch_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<(Builders, Epoch)>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(gloas) = state.value.post_gloas() else {
+                bail!("Pre-Gloas states don't have builders")
+            };
+
+            return Ok(Some(WithStatus {
+                value: (gloas.builders().clone(), gloas.finalized_checkpoint().epoch),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+            bail!("Pre-Gloas states don't have builders");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && misc::compute_epoch_at_slot::<P>(stored_slot.value)
+                == misc::compute_epoch_at_slot::<P>(slot)
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::builder_patches,
+            )?
+        {
+            let mut patches = vec![];
+            let mut finalized_checkpoint = None;
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let (mut builders, checkpoint) = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(delta.builders()?.context(Error::FieldMissing)?);
+                        finalized_checkpoint =
+                            finalized_checkpoint.or(delta.finalized_checkpoint()?.into_changed());
+                        continue;
+                    }
+                    StateRow::Frame(frame) => (
+                        frame.builders()?.context(Error::FieldMissing)?,
+                        match finalized_checkpoint {
+                            Some(checkpoint) => checkpoint,
+                            None => frame.finalized_checkpoint()?,
+                        },
+                    ),
+                    StateRow::State(state) => (
+                        state
+                            .post_gloas()
+                            .context(Error::FieldMissing)?
+                            .builders()
+                            .clone(),
+                        finalized_checkpoint.unwrap_or_else(|| state.finalized_checkpoint()),
+                    ),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut builders)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut builders)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| (builders, checkpoint.epoch))));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(gloas) = state.value.post_gloas() else {
+            bail!("Pre-Gloas states don't have builders")
+        };
+
+        Ok(Some(WithStatus {
+            value: (gloas.builders().clone(), gloas.finalized_checkpoint().epoch),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn builder_pending_payments_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<BuilderPendingPayments<P>>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(gloas) = state.value.post_gloas() else {
+                bail!("Pre-Gloas states don't have builder pending payments")
+            };
+
+            return Ok(Some(WithStatus {
+                value: gloas.builder_pending_payments().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+            bail!("Pre-Gloas states don't have builder pending payments");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::builder_pending_payment_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut builder_pending_payments = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(
+                            delta
+                                .builder_pending_payments()?
+                                .context(Error::FieldMissing)?,
+                        );
+                        continue;
+                    }
+                    StateRow::Frame(frame) => frame
+                        .builder_pending_payments()?
+                        .context(Error::FieldMissing)?,
+                    StateRow::State(state) => state
+                        .post_gloas()
+                        .context(Error::FieldMissing)?
+                        .builder_pending_payments()
+                        .clone(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut builder_pending_payments)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut builder_pending_payments)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| builder_pending_payments)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(gloas) = state.value.post_gloas() else {
+            bail!("Pre-Gloas states don't have builder pending payments")
+        };
+
+        Ok(Some(WithStatus {
+            value: gloas.builder_pending_payments().clone(),
+            status: state.status,
+            finalized: state.finalized,
+        }))
+    }
+
+    pub fn builder_pending_withdrawals_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<BuilderPendingWithdrawals>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        if let Some(state) = self.state_in_memory(slot)? {
+            let Some(gloas) = state.value.post_gloas() else {
+                bail!("Pre-Gloas states don't have builder pending withdrawals")
+            };
+
+            return Ok(Some(WithStatus {
+                value: gloas.builder_pending_withdrawals().clone(),
+                status: state.status,
+                finalized: state.finalized,
+            }));
+        }
+
+        if self.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+            bail!("Pre-Gloas states don't have builder pending withdrawals");
+        }
+
+        if let Some(stored_slot) = self.slot_before_or_at(slot)?
+            && let Some(derived_patches) = self.storage().slot_patches(
+                stored_slot.value,
+                slot,
+                DerivedFields::builder_pending_withdrawal_patches,
+            )?
+        {
+            let mut patches = vec![];
+
+            let walker = self.storage().walk(stored_slot.value)?;
+
+            for row in &walker {
+                let mut builder_pending_withdrawals = match row? {
+                    StateRow::Delta(delta) => {
+                        patches.push(
+                            delta
+                                .builder_pending_withdrawals()?
+                                .context(Error::FieldMissing)?,
+                        );
+                        continue;
+                    }
+                    StateRow::Frame(frame) => frame
+                        .builder_pending_withdrawals()?
+                        .context(Error::FieldMissing)?,
+                    StateRow::State(state) => state
+                        .post_gloas()
+                        .context(Error::FieldMissing)?
+                        .builder_pending_withdrawals()
+                        .clone(),
+                };
+
+                for patch in patches.into_iter().rev() {
+                    patch.apply(&mut builder_pending_withdrawals)?;
+                }
+
+                for patch in derived_patches {
+                    patch.apply(&mut builder_pending_withdrawals)?;
+                }
+
+                return Ok(Some(stored_slot.map(|_| builder_pending_withdrawals)));
+            }
+        }
+
+        let Some(state) = self.state_at_slot_blocking(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(gloas) = state.value.post_gloas() else {
+            bail!("Pre-Gloas states don't have builder pending withdrawals")
+        };
+
+        Ok(Some(WithStatus {
+            value: gloas.builder_pending_withdrawals().clone(),
             status: state.status,
             finalized: state.finalized,
         }))

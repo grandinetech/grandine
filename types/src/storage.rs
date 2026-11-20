@@ -31,7 +31,10 @@ use crate::{
         BeaconStatePatch as CapellaBeaconStatePatch,
         BeaconStatePatchCursor as CapellaBeaconStatePatchCursor,
     },
-    collections::{ProposerLookahead, PtcWindow, RandaoMixes},
+    collections::{
+        BuilderPendingPayments, BuilderPendingWithdrawals, Builders, ProposerLookahead, PtcWindow,
+        RandaoMixes,
+    },
     combined::BeaconState,
     config::Config,
     deneb::storage::{
@@ -53,6 +56,8 @@ use crate::{
         BeaconStatePatch as FuluBeaconStatePatch,
         BeaconStatePatchCursor as FuluBeaconStatePatchCursor,
     },
+    gloas::builder_list_patch::BuilderListPatch,
+    gloas::containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
     gloas::ptc_patch::PtcPatch,
     gloas::storage::{
         BeaconStateFrame as GloasBeaconStateFrame,
@@ -344,6 +349,53 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(frame) => frame.get_ptc_window()?.into_inner(),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builders(&self) -> Result<Option<Builders>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(frame) => frame.get_builders()?.into_inner(),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builder_pending_payments(&self) -> Result<Option<BuilderPendingPayments<P>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(frame) => frame.get_builder_pending_payments()?.into_inner(),
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builder_pending_withdrawals(
+        &self,
+    ) -> Result<Option<BuilderPendingWithdrawals>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(frame) => frame.get_builder_pending_withdrawals()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -911,6 +963,55 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(patch) => patch.get_ptc_window()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builders(&self) -> Result<Option<Compressed<BuilderListPatch>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(patch) => patch.get_builders()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builder_pending_payments(
+        &self,
+    ) -> Result<Option<Compressed<VectorPatch<BuilderPendingPayment>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(patch) => patch.get_builder_pending_payments()?,
+        };
+
+        Ok(Some(value))
+    }
+
+    pub fn builder_pending_withdrawals(
+        &self,
+    ) -> Result<Option<Compressed<QueuePatch<BuilderPendingWithdrawal>>>, ReadError> {
+        let value = match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => return Ok(None),
+            Self::Gloas(patch) => patch.get_builder_pending_withdrawals()?,
         };
 
         Ok(Some(value))
