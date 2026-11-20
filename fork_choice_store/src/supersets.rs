@@ -3,11 +3,14 @@ use helper_functions::misc;
 use ssz::{BitList, H256, SszHash as _};
 use types::{
     combined::Attestation,
-    phase0::{containers::AttestationData, primitives::Epoch},
+    phase0::{
+        containers::AttestationData,
+        primitives::{CommitteeIndex, Epoch},
+    },
     preset::Preset,
 };
 
-type AggregateEpochSupersets<N> = SkipMap<H256, SkipSet<BitList<N>>>;
+type AggregateEpochSupersets<N> = SkipMap<(CommitteeIndex, H256), SkipSet<BitList<N>>>;
 
 #[derive(Default)]
 pub struct AggregateAndProofSets<N> {
@@ -15,14 +18,19 @@ pub struct AggregateAndProofSets<N> {
 }
 
 impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
-    pub fn is_known_subset(&self, data: &AttestationData, aggregation_bits: &BitList<N>) -> bool {
+    pub fn is_known_subset(
+        &self,
+        committee_index: CommitteeIndex,
+        data: &AttestationData,
+        aggregation_bits: &BitList<N>,
+    ) -> bool {
         let Some(supersets) = self.supersets.get(&data.target.epoch) else {
             return false;
         };
 
         supersets
             .value()
-            .get(&data.hash_tree_root())
+            .get(&(committee_index, data.hash_tree_root()))
             .is_some_and(|existing_sets| {
                 // Bits not yet validated may have the wrong length, which `any_not_in` asserts.
                 existing_sets.value().iter().any(|entry| {
@@ -32,8 +40,13 @@ impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
             })
     }
 
-    pub fn observe(&self, data: &AttestationData, aggregation_bits: &BitList<N>) {
-        if self.is_known_subset(data, aggregation_bits) {
+    pub fn observe(
+        &self,
+        committee_index: CommitteeIndex,
+        data: &AttestationData,
+        aggregation_bits: &BitList<N>,
+    ) {
+        if self.is_known_subset(committee_index, data, aggregation_bits) {
             return;
         }
 
@@ -43,7 +56,7 @@ impl<N: Send + Sync + 'static> AggregateAndProofSets<N> {
 
         let existing_sets = supersets
             .value()
-            .get_or_insert(data.hash_tree_root(), SkipSet::new());
+            .get_or_insert((committee_index, data.hash_tree_root()), SkipSet::new());
 
         let existing_sets = existing_sets.value();
 
@@ -99,27 +112,21 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
         let committee_index = misc::committee_index(attestation);
 
         match attestation {
-            Attestation::Phase0(attestation) => self
-                .phase0_supersets
-                .is_known_subset(&attestation.data, &attestation.aggregation_bits),
-            Attestation::Electra(attestation) => {
-                let data = AttestationData {
-                    index: committee_index,
-                    ..attestation.data
-                };
-
-                self.electra_supersets
-                    .is_known_subset(&data, &attestation.aggregation_bits)
-            }
-            Attestation::Gloas(attestation) => {
-                let data = AttestationData {
-                    index: committee_index,
-                    ..attestation.data
-                };
-
-                self.electra_supersets
-                    .is_known_subset(&data, &attestation.aggregation_bits)
-            }
+            Attestation::Phase0(attestation) => self.phase0_supersets.is_known_subset(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
+            Attestation::Electra(attestation) => self.electra_supersets.is_known_subset(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
+            Attestation::Gloas(attestation) => self.electra_supersets.is_known_subset(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
             Attestation::Single(_) => {
                 unreachable!(
                     "single attestations should not be validated with methods meant for aggregate and proofs only"
@@ -132,27 +139,21 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
         let committee_index = misc::committee_index(attestation);
 
         match attestation {
-            Attestation::Phase0(attestation) => self
-                .phase0_supersets
-                .observe(&attestation.data, &attestation.aggregation_bits),
-            Attestation::Electra(attestation) => {
-                let data = AttestationData {
-                    index: committee_index,
-                    ..attestation.data
-                };
-
-                self.electra_supersets
-                    .observe(&data, &attestation.aggregation_bits);
-            }
-            Attestation::Gloas(attestation) => {
-                let data = AttestationData {
-                    index: committee_index,
-                    ..attestation.data
-                };
-
-                self.electra_supersets
-                    .observe(&data, &attestation.aggregation_bits);
-            }
+            Attestation::Phase0(attestation) => self.phase0_supersets.observe(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
+            Attestation::Electra(attestation) => self.electra_supersets.observe(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
+            Attestation::Gloas(attestation) => self.electra_supersets.observe(
+                committee_index,
+                &attestation.data,
+                &attestation.aggregation_bits,
+            ),
             Attestation::Single(_) => {
                 unreachable!(
                     "single attestations should not be validated with methods meant for aggregate and proofs only"
@@ -173,8 +174,8 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
 mod tests {
     use ssz::BitVector;
     use types::{
-        electra::containers::Attestation as ElectraAttestation, phase0::primitives::CommitteeIndex,
-        preset::Minimal,
+        electra::containers::Attestation as ElectraAttestation,
+        gloas::containers::Attestation as GloasAttestation, preset::Minimal,
     };
 
     use super::*;
@@ -275,5 +276,31 @@ mod tests {
 
         assert!(!supersets.is_known_subset(&shorter));
         assert!(!supersets.is_known_subset(&longer));
+    }
+
+    #[test]
+    fn test_gloas_payload_votes_are_kept_apart() {
+        let gloas_aggregate = |payload_present| {
+            let Attestation::Electra(attestation) = aggregate(0, [1, 1, 1]) else {
+                unreachable!("aggregate should build an Electra attestation");
+            };
+
+            Attestation::Gloas(GloasAttestation {
+                aggregation_bits: attestation.aggregation_bits.into(),
+                data: AttestationData {
+                    index: payload_present,
+                    ..attestation.data
+                },
+                committee_bits: attestation.committee_bits,
+                ..GloasAttestation::default()
+            })
+        };
+
+        let supersets = MultiPhaseAggregateAndProofSets::<Minimal>::new();
+
+        supersets.observe(&gloas_aggregate(0));
+
+        assert!(supersets.is_known_subset(&gloas_aggregate(0)));
+        assert!(!supersets.is_known_subset(&gloas_aggregate(1)));
     }
 }
