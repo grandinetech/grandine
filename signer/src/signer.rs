@@ -1,3 +1,4 @@
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::Path,
@@ -18,7 +19,7 @@ use helper_functions::misc;
 use itertools::{Itertools as _, izip};
 use logging::{info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
@@ -74,6 +75,7 @@ pub struct Signer {
     keys_changed: Notify,
     // Keyed by the BLS public key of the local key the PQ key was derived from.
     pq_keys: RwLock<PqKeys>,
+    precomputing_vrf_proofs: AtomicBool,
 }
 
 impl Signer {
@@ -100,6 +102,7 @@ impl Signer {
             snapshot,
             keys_changed: Notify::new(),
             pq_keys: RwLock::default(),
+            precomputing_vrf_proofs: AtomicBool::new(false),
         }
     }
 
@@ -235,6 +238,31 @@ impl Signer {
         }
 
         Ok(())
+    }
+
+    /// Computes the RANDAO reveals of `proposals` (BLS public key and slot) ahead of time, in
+    /// parallel. Skipped while an earlier call is still running.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn precompute_vrf_proofs(&self, proposals: &[(PublicKeyBytes, Slot)], current_slot: Slot) {
+        if self.precomputing_vrf_proofs.swap(true, Ordering::Acquire) {
+            return;
+        }
+
+        proposals.par_iter().for_each(|(public_key, slot)| {
+            let Some(pq_key) = self.pq_key(*public_key) else {
+                return;
+            };
+
+            if let Err(error) = pq_key.precompute_vrf_proof(*slot, current_slot) {
+                warn_with_peers!(
+                    "failed to compute the RANDAO reveal of {public_key:?} for slot {slot}: \
+                     {error:?}",
+                );
+            }
+        });
+
+        self.precomputing_vrf_proofs.store(false, Ordering::Release);
     }
 
     /// The BLS public key of the local key whose PQ key a PQ state holds as `state_public_key`.

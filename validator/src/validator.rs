@@ -3895,6 +3895,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let proposals = self.upcoming_proposals(beacon_nodes).await;
 
+        // A RANDAO reveal takes about a second to compute, so it is not left to the proposal.
+        if slot_head.phase() == Phase::Pq {
+            let signer = self.signer.clone_arc();
+            let current_slot = slot_head.slot();
+            let upcoming = proposals
+                .iter()
+                .map(|(_, proposal_slot, _, pubkey)| (*pubkey, *proposal_slot))
+                .collect_vec();
+
+            tokio::task::spawn_blocking(move || {
+                signer.precompute_vrf_proofs(&upcoming, current_slot);
+            });
+        }
+
         let published = self.published_proposer_preferences.lock().await;
 
         let preferences = proposals

@@ -1,9 +1,9 @@
 //! PQ key material derived from the BLS secret keys the signer already holds.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 use anyhow::{Result, anyhow, ensure};
@@ -28,6 +28,8 @@ pub struct PqKey {
     // Building a tree takes minutes, so it is built after the key is in use. Only proposals need it.
     vrf_tree: OnceLock<VrfTree>,
     vrf_tree_path: Option<PathBuf>,
+    // Proofs of upcoming proposals, computed ahead because a proof takes about a second.
+    vrf_proofs: Mutex<BTreeMap<u64, VrfProof>>,
 }
 
 impl PqKey {
@@ -63,6 +65,7 @@ impl PqKey {
             vrf_tree_path: cache_directory.map(|directory| {
                 directory.join(format!("{}.vrf", hex::encode(public_key.as_bytes())))
             }),
+            vrf_proofs: Mutex::default(),
         };
 
         if let Some(path) = pq_key.vrf_tree_path.as_deref().filter(|path| path.exists()) {
@@ -161,10 +164,44 @@ impl PqKey {
         self.vrf_tree.get().map(VrfTree::root)
     }
 
-    /// The RANDAO reveal for `slot`. Rebuilds a subtree, which takes a fraction of a second.
+    /// The RANDAO reveal for `slot`: the one [`Self::precompute_vrf_proof`] computed, or else built
+    /// now, which takes about a second.
     ///
     /// Do not call on an async executor thread.
     pub fn vrf_proof(&self, slot: u64) -> Result<VrfProof> {
+        if let Some(proof) = self.vrf_proofs().remove(&slot) {
+            return Ok(proof);
+        }
+
+        self.compute_vrf_proof(slot)
+    }
+
+    /// Computes the RANDAO reveal for an upcoming proposal at `slot`, and drops the ones before
+    /// `current_slot`. Does nothing until the VRF tree is built.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn precompute_vrf_proof(&self, slot: u64, current_slot: u64) -> Result<()> {
+        self.vrf_proofs()
+            .retain(|proof_slot, _| *proof_slot >= current_slot);
+
+        if !self.has_vrf_tree() || self.vrf_proofs().contains_key(&slot) {
+            return Ok(());
+        }
+
+        let proof = self.compute_vrf_proof(slot)?;
+
+        self.vrf_proofs().insert(slot, proof);
+
+        Ok(())
+    }
+
+    fn vrf_proofs(&self) -> std::sync::MutexGuard<'_, BTreeMap<u64, VrfProof>> {
+        self.vrf_proofs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn compute_vrf_proof(&self, slot: u64) -> Result<VrfProof> {
         self.vrf_tree
             .get()
             .ok_or_else(|| {
