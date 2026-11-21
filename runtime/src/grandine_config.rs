@@ -106,6 +106,7 @@ pub struct BeaconNodeConfig {
     pub reconstruction_delay: Duration,
     pub slasher_config: Option<SlasherConfig>,
     pub state_slot: Option<Slot>,
+    pub pq_prover_socket: Option<PathBuf>,
     pub http_api_config: Option<HttpApiConfig>,
     pub max_events: usize,
     pub track_liveness: bool,

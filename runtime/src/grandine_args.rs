@@ -247,6 +247,11 @@ pub struct BeaconNodeOptions {
     #[clap(long)]
     state_slot: Option<Slot>,
 
+    /// Unix socket of the leanVM sidecar (`leanvm-sidecar --socket`), which proves and verifies
+    /// aggregate XMSS signatures. Required when a PQ fork is scheduled
+    #[clap(long, value_name = "PATH")]
+    pq_prover_socket: Option<PathBuf>,
+
     /// [DEPRECATED] Enable syncing historical data
     /// [default: disabled]
     #[clap(long = "back_sync")]
@@ -496,6 +501,7 @@ impl BeaconNodeOptions {
             disable_proposer_reorgs,
             force_checkpoint_sync,
             state_slot,
+            pq_prover_socket,
             back_sync,
             mut back_sync_enabled,
             force_reset_beacon_db,
@@ -723,6 +729,7 @@ impl BeaconNodeOptions {
                 slashing_history_limit,
             }),
             state_slot,
+            pq_prover_socket,
             http_api_config: Option::<HttpApiConfig>::from(http_api_options),
             max_events,
             track_liveness,

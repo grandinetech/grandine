@@ -53,6 +53,7 @@ num_cpus = { workspace = true }
 operation_pools = { workspace = true }
 panics = { workspace = true }
 p2p = { workspace = true }
+pq_prover = { workspace = true }
 predefined_chains = { workspace = true }
 prometheus_metrics = { workspace = true }
 prometheus-client = { workspace = true }

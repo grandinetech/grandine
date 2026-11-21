@@ -3,14 +3,18 @@
 //!
 //! Every method may block for seconds. Never call one on an async executor thread.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 use xmss::{MESSAGE_SIZE, XmssPublicKey, XmssSignature};
 
 pub use crate::reference::ReferenceBackend;
+#[cfg(unix)]
+pub use crate::sidecar::SidecarBackend;
 
 mod reference;
+#[cfg(unix)]
+mod sidecar;
 
 /// The spec's `XMSSAggregateStatement`: each of `pubkeys` signed `message` at `leaf_index`.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -32,6 +36,13 @@ pub enum Error {
     },
     #[error("signature {signature} of statement {statement} is invalid")]
     InvalidSignature { statement: usize, signature: usize },
+    #[error("child {child} has a proof but no claims, or claims but no proof")]
+    ProofDoesNotMatchClaims { child: usize },
+    #[error("the sidecar proved {actual} claims instead of the {expected} requested")]
+    ClaimsMismatch { expected: usize, actual: usize },
+    #[cfg(unix)]
+    #[error("leanVM sidecar: {0}")]
+    Sidecar(leanvm_sidecar::SidecarError),
 }
 
 /// The spec's `stark` module.
@@ -54,6 +65,28 @@ pub trait ProverBackend: Send + Sync {
     /// `VerifyAggregates`. `Ok(false)` means the proof is invalid. `Err` means the backend could
     /// not decide.
     fn verify(&self, statements: &[Statement], proof: &[u8]) -> Result<bool, Error>;
+}
+
+impl<B: ProverBackend + ?Sized> ProverBackend for Arc<B> {
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn prove(
+        &self,
+        statements: &[Statement],
+        signatures: &[Vec<XmssSignature>],
+    ) -> Result<Vec<u8>, Error> {
+        (**self).prove(statements, signatures)
+    }
+
+    fn merge(&self, children: &[(&[Statement], &[u8])]) -> Result<Vec<u8>, Error> {
+        (**self).merge(children)
+    }
+
+    fn verify(&self, statements: &[Statement], proof: &[u8]) -> Result<bool, Error> {
+        (**self).verify(statements, proof)
+    }
 }
 
 static AGGREGATE_BACKEND: OnceLock<Box<dyn ProverBackend>> = OnceLock::new();

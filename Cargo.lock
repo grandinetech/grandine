@@ -1468,6 +1468,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "claims"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764#c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764"
+dependencies = [
+ "lean_sphincs",
+ "lean_xmss",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5039,6 +5048,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lean_sphincs"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764#c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764"
+dependencies = [
+ "keccak256",
+]
+
+[[package]]
 name = "lean_xmss"
 version = "0.1.0"
 source = "git+https://github.com/leanEthereum/leanVM?rev=c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764#c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764"
@@ -6789,6 +6806,10 @@ dependencies = [
 name = "pq_prover"
 version = "0.0.0"
 dependencies = [
+ "claims",
+ "lean_xmss",
+ "parking_lot",
+ "sidecar",
  "thiserror 2.0.21",
  "xmss",
 ]
@@ -7756,6 +7777,7 @@ dependencies = [
  "operation_pools",
  "p2p",
  "panics",
+ "pq_prover",
  "predefined_chains",
  "prometheus-client",
  "prometheus_metrics",
@@ -8534,6 +8556,17 @@ dependencies = [
  "tap",
  "test-generator",
  "types",
+]
+
+[[package]]
+name = "sidecar"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764#c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764"
+dependencies = [
+ "claims",
+ "lean_sphincs",
+ "lean_xmss",
+ "verifier",
 ]
 
 [[package]]
@@ -10182,6 +10215,11 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "verifier"
+version = "0.1.0"
+source = "git+https://github.com/leanEthereum/leanVM?rev=c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764#c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764"
 
 [[package]]
 name = "version_check"

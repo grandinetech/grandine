@@ -8,12 +8,12 @@ use std::{
     collections::{HashMap, HashSet},
     io::ErrorKind,
     net::{TcpListener, UdpSocket},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
 use allocator as _;
-use anyhow::{Context as _, Result, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
@@ -838,6 +838,43 @@ async fn build_local_node<P: Preset>(
     Ok((chain, services))
 }
 
+// Other clients' aggregates and blocks carry STARK proofs, which only the sidecar verifies.
+async fn install_pq_prover(chain_config: &ChainConfig, socket: Option<PathBuf>) -> Result<()> {
+    if chain_config.pq_fork_epoch == FAR_FUTURE_EPOCH {
+        return Ok(());
+    }
+
+    let socket = socket.ok_or_else(|| anyhow!("a PQ network requires --pq-prover-socket"))?;
+
+    tokio::task::spawn_blocking(move || connect_pq_sidecar(&socket)).await?
+}
+
+#[cfg(unix)]
+fn connect_pq_sidecar(socket: &Path) -> Result<()> {
+    let (backend, prover) = pq_prover::SidecarBackend::connect(socket)
+        .map_err(|error| anyhow!("cannot connect to {}: {error}", socket.display()))?;
+
+    let backend = Arc::new(backend);
+
+    if pq_prover::install_aggregate_backend(Box::new(backend.clone_arc())).is_err()
+        || pq_prover::install_block_backend(Box::new(backend)).is_err()
+    {
+        bail!("PQ prover backends were already installed");
+    }
+
+    info_with_peers!(
+        "proving and verifying PQ aggregates with the {prover} leanVM sidecar at {}",
+        socket.display(),
+    );
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn connect_pq_sidecar(_socket: &Path) -> Result<()> {
+    bail!("PQ networks need the leanVM sidecar, which is reached over a Unix socket")
+}
+
 async fn load_xmss_caches<P: Preset>(
     chain: &Chain<P, ()>,
     client: &Client,
@@ -1476,6 +1513,8 @@ async fn run_beacon_node<P: Preset>(
     tracing_handle: Option<TracingHandle>,
 ) -> Result<()> {
     let validator_client = config.validator_client_config();
+
+    install_pq_prover(&config.chain_config, beacon_node.pq_prover_socket.clone()).await?;
 
     let (eth1_api_to_metrics_tx, eth1_api_to_metrics_rx) = config
         .metrics_config
