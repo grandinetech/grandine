@@ -1147,6 +1147,22 @@ async fn run_services<P: Preset>(
             }
         }
 
+        // Signing builds the trees of a leaf range first, which takes longer than a duty allows.
+        // TODO(PQ): Prepare the next trees before duties reach them.
+        //           Slot duties move to another tree about every 13,000 slots.
+        let current_slot = Tick::current::<P>(&chain_config, genesis.genesis_time)?.slot;
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+
+        tokio::task::spawn_blocking({
+            let signer = signer.clone_arc();
+
+            move || {
+                if let Err(error) = signer.prepare_pq_keys(current_epoch, current_slot) {
+                    warn_with_peers!("failed to prepare XMSS keys: {error:?}");
+                }
+            }
+        });
+
         // TODO(PQ): Load the PQ keys of keys added through the key manager API.
         let signer = signer.clone_arc();
 

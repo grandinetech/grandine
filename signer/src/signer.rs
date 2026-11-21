@@ -143,6 +143,30 @@ impl Signer {
         Ok(())
     }
 
+    /// Builds the trees the XMSS keys sign attestations of `epoch` and duties of `slot` at, which
+    /// signing would otherwise build first. Takes seconds per key.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn prepare_pq_keys(&self, epoch: Epoch, slot: Slot) -> Result<()> {
+        let leaves = [
+            helper_functions::pq::compute_xmss_attestation_leaf_index(epoch)?,
+            helper_functions::pq::compute_xmss_leaf_index(slot, 0)?,
+        ]
+        .into_iter()
+        .map(LeafIndex::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
+
+        let pq_keys = self.pq_keys_read().values().cloned().collect_vec();
+
+        pq_keys.into_par_iter().try_for_each(|pq_key| {
+            leaves
+                .iter()
+                .try_for_each(|leaf_index| pq_key.xmss().prepare(*leaf_index))
+        })?;
+
+        Ok(())
+    }
+
     /// The public parameters of the XMSS keys [`Self::load_pq_keys`] would derive, which find their
     /// XMSS cache records. Cheap.
     #[must_use]

@@ -589,6 +589,10 @@ opt-level = 3
 [profile.dev.package.keccak256]
 opt-level = 3
 
+# A RANDAO reveal rebuilds 2^20 leaves of a VRF tree, which takes over 20 seconds unoptimized.
+[profile.dev.package.tiny-keccak]
+opt-level = 3
+
 [profile.release]
 debug = 'full'
 overflow-checks = true

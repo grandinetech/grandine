@@ -17,7 +17,7 @@ use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
 use ssz::{ContiguousList, Size, Ssz, SszRead, SszSize, SszWrite};
 use std_ext::ArcExt;
 use typenum::U65536;
-use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
+use types::{combined::BeaconState, nonstandard::Phase, preset::Preset, traits::BeaconState as _};
 
 pub use crate::deposit_signature_cache::{DepositSignatureCache, DepositSignatureKey};
 
@@ -184,6 +184,11 @@ impl PubkeyCache {
     // - Inserts any missing pubkeys from anchor state into the cache
     // - Persists unpersisted pubkeys to disk, making persist task on finalization faster
     pub fn load_and_persist_state_keys<P: Preset>(&self, state: &BeaconState<P>) -> Result<()> {
+        // The keys of a PQ state are XMSS keys.
+        if state.phase() >= Phase::Pq {
+            return Ok(());
+        }
+
         info_with_peers!(
             "decompressing new validator keys for state at slot: {}",
             state.slot()
