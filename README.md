@@ -84,6 +84,56 @@ docker buildx build \
     target/aarch64-unknown-linux-gnu/compact/
 ```
 
+## PQ devnets
+
+On a network that schedules the PQ fork, validators sign with XMSS keys, and aggregates of their
+signatures are STARK proofs. Grandine does not build a prover. It proves and verifies through the
+leanVM sidecar, a separate process reached over a Unix socket. On such a network, the beacon node
+does not start without one (`grandine vc` needs none).
+
+The sidecar must come from the leanVM revision pinned in `Cargo.toml` (`lean_xmss`). The client
+refuses a sidecar that speaks another protocol version or proves for another verifier:
+
+```shell
+git clone https://github.com/leanEthereum/leanVM
+cd leanVM
+git checkout c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764
+cargo build --release -p leanvm-sidecar --features experimental_prover
+mkdir -p -m 700 ~/.leanvm
+target/release/leanvm-sidecar --socket ~/.leanvm/sidecar.sock
+```
+
+Without `--features experimental_prover` the sidecar runs the stable prover, which makes the same
+proofs more slowly. It warms up before it listens, so the socket appears once it is ready. Keep the
+socket in a directory only its user can write: any client that connects can keep it proving.
+
+Then point Grandine at the socket:
+
+```shell
+grandine \
+    --configuration-directory <devnet config> \
+    --pq-prover-socket ~/.leanvm/sidecar.sock \
+    ...
+```
+
+The validator keys of a PQ network are the usual EIP-2335 keystores. Grandine derives the XMSS key
+and the VRF tree of each validator from its BLS secret key, as the devnet genesis does. Both are
+slow to build: about a second per XMSS key, and minutes per VRF tree, without which a validator
+cannot propose. Two optional artifacts of the devnet save that work for genesis validators. Each is
+a URL or a local path, and both are checked against the keys, so neither needs to be trusted:
+
+- `--xmss-cache-url`: the XMSS cache, the trees of each devnet key. It needs the built-in beacon
+  node, and is ignored under `grandine vc`.
+- `--vrf-state-url`: the VRF state, the branch of slot 0 in each VRF tree. A tree loaded from it
+  covers the first `2^20` slots.
+
+Keys without a matching record are built as before, and VRF trees are saved under the validator
+directory once built.
+
+By default, Grandine proves aggregates only for committees in which one of its validators is an
+aggregator. `--features AggregateAllAttestations` proves every committee it collects signatures
+for, which is useful on a small devnet but costs much more sidecar time.
+
 ## Team
 
 Grandine is built by [Grandine core team](https://grandine.io/) led by [Saulius Grigaitis](https://twitter.com/sauliuseth).
