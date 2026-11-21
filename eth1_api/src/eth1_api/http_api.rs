@@ -365,6 +365,36 @@ impl Eth1Api {
                 .await
                 .map(WithClientVersions::result)
             }
+            // PQ keeps the Gloas payload and changes only the execution requests.
+            (
+                ExecutionPayload::Gloas(payload),
+                Some(ExecutionPayloadParams::Pq {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                    execution_requests,
+                }),
+            ) => {
+                let payload_v4 = ExecutionPayloadV4::try_from(payload)
+                    .context("PQ execution payload exceeds engine API limits")?;
+                let raw_execution_requests = RawExecutionRequests::try_from(execution_requests)
+                    .context("PQ execution requests exceed engine API limits")?;
+
+                let params = vec![
+                    serde_json::to_value(payload_v4)?,
+                    serde_json::to_value(versioned_hashes)?,
+                    serde_json::to_value(parent_beacon_block_root)?,
+                    serde_json::to_value(raw_execution_requests)?,
+                ];
+
+                self.execute(
+                    ENGINE_NEW_PAYLOAD_V5,
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(WithClientVersions::result)
+            }
             _ => bail!(Error::InvalidParameters),
         }
     }
