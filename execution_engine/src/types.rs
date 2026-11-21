@@ -987,6 +987,8 @@ pub enum PayloadAttributes<P: Preset> {
     Electra(PayloadAttributesV3<P>),
     Fulu(PayloadAttributesV3<P>),
     Gloas(PayloadAttributesV4<P>),
+    // The same as Gloas. Its own variant so that the payload it starts is a PQ one.
+    Pq(PayloadAttributesV4<P>),
 }
 
 impl<P: Preset> PayloadAttributes<P> {
@@ -999,6 +1001,7 @@ impl<P: Preset> PayloadAttributes<P> {
             Self::Electra(_) => Phase::Electra,
             Self::Fulu(_) => Phase::Fulu,
             Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
         }
     }
 }

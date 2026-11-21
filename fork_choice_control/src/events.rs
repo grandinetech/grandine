@@ -1377,7 +1377,8 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             PayloadAttributes::Fulu(payload_attributes_v3) => {
                 Self::Fulu(payload_attributes_v3.into())
             }
-            PayloadAttributes::Gloas(payload_attributes_v4) => {
+            PayloadAttributes::Gloas(payload_attributes_v4)
+            | PayloadAttributes::Pq(payload_attributes_v4) => {
                 Self::Gloas(payload_attributes_v4.into())
             }
         }

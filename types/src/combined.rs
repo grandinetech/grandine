@@ -1996,6 +1996,14 @@ impl<'requests, P: Preset> EnvelopeExecutionRequests<'requests, P> {
     }
 
     #[must_use]
+    pub const fn pq(self) -> Option<&'requests PqExecutionRequests<P>> {
+        match self {
+            Self::Gloas(_) => None,
+            Self::Pq(execution_requests) => Some(execution_requests),
+        }
+    }
+
+    #[must_use]
     pub fn payload_params(
         self,
         versioned_hashes: Vec<VersionedHash>,

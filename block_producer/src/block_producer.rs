@@ -2596,9 +2596,53 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     parent_beacon_block_root,
                 })
             }
-            // TODO(PQ): Prepare payload attributes for PQ.
-            BeaconState::Pq(_) => {
-                return Err(anyhow!("PQ payload attributes are not implemented yet"));
+            BeaconState::Pq(state) => {
+                let head_root = self.head_block_root;
+                let target_gas_limit = self.gas_limit()?;
+                let snapshot = self.producer_context.controller.snapshot();
+
+                // As for Gloas, the parent's requests are applied before the withdrawals.
+                let withdrawals = if snapshot.should_build_on_full_for(head_root, state.slot())
+                    && let Some(envelope) = snapshot.stored_envelope_by_root(head_root)?
+                {
+                    let mut state_copy = state.clone();
+
+                    transition_functions::pq::apply_parent_execution_payload(
+                        chain_config,
+                        &mut state_copy,
+                        envelope
+                            .execution_requests()
+                            .pq()
+                            .ok_or_else(|| anyhow!("Gloas envelope after a PQ block"))?,
+                    )?;
+
+                    gloas::get_expected_withdrawals(&state_copy)?.0
+                } else if state.latest_execution_payload_bid().block_hash
+                    == state.latest_block_hash()
+                {
+                    gloas::get_expected_withdrawals(state)?.0
+                } else {
+                    state
+                        .payload_expected_withdrawals()
+                        .into_iter()
+                        .copied()
+                        .collect()
+                };
+
+                let withdrawals = withdrawals
+                    .into_iter()
+                    .map_into()
+                    .pipe(ContiguousList::try_from_iter)?;
+
+                PayloadAttributes::Pq(PayloadAttributesV4 {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root: state.latest_block_header().hash_tree_root(),
+                    slot_number: state.slot(),
+                    target_gas_limit,
+                })
             }
             BeaconState::Gloas(state) => {
                 let head_root = self.head_block_root;

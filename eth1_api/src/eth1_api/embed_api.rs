@@ -632,7 +632,9 @@ impl Eth1Api {
 
                 let payload_attributes = payload_attributes
                     .map(|value| {
-                        if let PayloadAttributes::Gloas(value) = value {
+                        if let PayloadAttributes::Gloas(value) | PayloadAttributes::Pq(value) =
+                            value
+                        {
                             Ok(value)
                         } else {
                             Err(Error::InvalidParameters)
