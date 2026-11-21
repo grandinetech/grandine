@@ -187,3 +187,45 @@ fn derive_seeds(secret_key: &SecretKey) -> (Zeroizing<[u8; 32]>, H256) {
 
     (xmss_seed, vrf_seed)
 }
+
+#[cfg(test)]
+mod tests {
+    use bls::SecretKeyBytes;
+    use hex_literal::hex;
+
+    use super::*;
+
+    // Keys `m/12381/3600/i/0/0` of the mnemonic the pq-devnet-0 genesis tool tests with
+    // ("rare observe fox ..."), derived with EIP-2333. The tool (`ethpandaops/eth-beacon-genesis@ff42fce`,
+    // `validators/mnemonic_test.go`) pins the BLS key of index 0 and the XMSS key of index 5. It uses
+    // a separate XMSS implementation, so matching it checks the seed derivation and the key
+    // generation together.
+    const SECRET_KEY_0: [u8; 32] =
+        hex!("5eb078c8fa64fffb66e17ea3ca4a6b2d5ea55ca44423895b2b38f53ea82b36d9");
+    const SECRET_KEY_5: [u8; 32] =
+        hex!("2892f3ba475c3640a67fe730798ad9c4eed3a6d934db85f91c41cfc837ce8834");
+
+    #[test]
+    fn keys_match_the_genesis_tool() -> Result<()> {
+        let secret_key_0 = SecretKey::try_from(SecretKeyBytes::from(SECRET_KEY_0))?;
+
+        assert_eq!(
+            PublicKeyBytes::from(secret_key_0.to_public_key()),
+            PublicKeyBytes(hex!(
+                "a72ce460a5ab6bea347e59b17ee349bebf6adfa0a240993ed70a5be0da9638b6e2dc7bbdd19e24a8292c1c7b30f23c9e"
+            )),
+        );
+
+        let secret_key_5 = SecretKey::try_from(SecretKeyBytes::from(SECRET_KEY_5))?;
+        let (xmss_seed, _) = derive_seeds(&secret_key_5);
+
+        assert_eq!(
+            H256::from(XmssSecretKey::from_seed(&xmss_seed).public_key()),
+            H256(hex!(
+                "155a29b971da2b771fdf52c768af63fa03f78f25487e3e0ed03d012b7039d88b"
+            )),
+        );
+
+        Ok(())
+    }
+}
