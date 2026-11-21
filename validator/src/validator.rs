@@ -3500,11 +3500,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
     async fn register_validators(&mut self, slot: Slot, current_epoch: Epoch) {
-        // TODO(PQ): Register PQ validators with builders.
-        if self.chain_source.chain_config.phase_at_epoch(current_epoch) == Phase::Pq {
-            return;
-        }
-
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch = last_registration_epoch
                 .saturating_add(EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION);
@@ -3541,12 +3536,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let pubkeys = signer_snapshot.keys().copied().collect_vec();
 
             if let Some(subnet_service_tx) = subnet_service_tx {
+                // The pool finds the keys in the state, and a PQ state holds the XMSS keys.
+                let state_pubkeys = if chain_config.phase_at_epoch(current_epoch) == Phase::Pq {
+                    pubkeys
+                        .iter()
+                        .filter_map(|pubkey| signer.pq_key(*pubkey))
+                        .map(|pq_key| pq_key.state_public_key())
+                        .collect_vec()
+                } else {
+                    pubkeys.clone()
+                };
+
                 ToSubnetService::SetRegisteredValidators(
                     registered_validators
                         .values()
                         .flat_map(BTreeMap::keys)
                         .copied()
-                        .chain(pubkeys.iter().copied())
+                        .chain(state_pubkeys)
                         .collect(),
                     prepared_proposer_indices,
                 )
