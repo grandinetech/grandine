@@ -76,7 +76,8 @@ use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder, redirect::Policy};
 use scc::HashMap as SccHashMap;
 use signer::{
-    KeyOrigin, Signer, Web3SignerClientOptions, Web3SignerConfig, build_web3signer_client,
+    KeyOrigin, Signer, VrfStateSource, Web3SignerClientOptions, Web3SignerConfig,
+    build_web3signer_client,
 };
 use slasher::{Databases, Slasher};
 use slashing_protection::{
@@ -155,6 +156,7 @@ struct SharedConfig {
     dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     tracing_handle: Option<TracingHandle>,
+    client: Client,
 }
 
 /// What the clock drives: fork choice when the built-in node runs, otherwise the validator.
@@ -842,6 +844,7 @@ fn shared_config(
     signer: Arc<Signer>,
     genesis: Genesis,
     tracing_handle: Option<TracingHandle>,
+    client: &Client,
 ) -> SharedConfig {
     let metrics_config = config.metrics_config.clone();
     let metrics = &metrics_config.metrics;
@@ -897,6 +900,7 @@ fn shared_config(
         dedicated_executor_normal_priority,
         dedicated_executor_low_priority,
         tracing_handle,
+        client: client.clone(),
     }
 }
 
@@ -920,6 +924,7 @@ async fn run_services<P: Preset>(
         dedicated_executor_normal_priority,
         dedicated_executor_low_priority,
         tracing_handle,
+        client,
     } = shared;
 
     let MetricsConfig {
@@ -1032,6 +1037,28 @@ async fn run_services<P: Preset>(
 
             tokio::task::spawn_blocking(move || signer.load_pq_keys(vrf_tree_directory.as_deref()))
                 .await??;
+        }
+
+        if let Some(vrf_state_url) =
+            validator_client.and_then(|validator_client| validator_client.vrf_state_url.as_deref())
+        {
+            let source = VrfStateSource::new(vrf_state_url)?;
+
+            match source.load(&client).await {
+                Ok(artifact) => {
+                    let signer = signer.clone_arc();
+
+                    let loaded = tokio::task::spawn_blocking(move || {
+                        signer.load_vrf_trees_from_artifact(&artifact)
+                    })
+                    .await?;
+
+                    info_with_peers!("loaded {loaded} VRF trees from {source}");
+                }
+                Err(error) => {
+                    warn_with_peers!("failed to load VRF state from {source}: {error:?}");
+                }
+            }
         }
 
         // TODO(PQ): Load the PQ keys of keys added through the key manager API.
@@ -1388,7 +1415,7 @@ impl Context {
     }
 }
 
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn run_beacon_node<P: Preset>(
     config: &GrandineConfig,
     client: Client,
@@ -1491,7 +1518,14 @@ async fn run_beacon_node<P: Preset>(
     let anchor_checkpoint_provider = load_anchor_checkpoint_provider().await?;
     let genesis = anchor_genesis(&config.chain_config, &anchor_checkpoint_provider);
 
-    let shared = shared_config(config, validator_config, signer, genesis, tracing_handle);
+    let shared = shared_config(
+        config,
+        validator_config,
+        signer,
+        genesis,
+        tracing_handle,
+        &client,
+    );
 
     let (chain, services) = build_local_node(
         LocalNodeConfig {
@@ -1591,7 +1625,14 @@ async fn run_remote_validator<P: Preset>(
     // Nodes unreachable now are held to the agreed root on their first poll.
     remote_beacon_nodes.seed_genesis_validators_root(genesis.genesis_validators_root);
 
-    let shared = shared_config(config, validator_config, signer, genesis, tracing_handle);
+    let shared = shared_config(
+        config,
+        validator_config,
+        signer,
+        genesis,
+        tracing_handle,
+        &client,
+    );
 
     // Without the built-in node's fork choice the validator receives ticks straight from the clock.
     let (runtime_tx, runtime_rx) = mpsc::unbounded();

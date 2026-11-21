@@ -9,11 +9,13 @@ use std::{
 use anyhow::{Result, anyhow, ensure};
 use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use fs_err as fs;
-use helper_functions::vrf_tree::VrfTree;
+use helper_functions::vrf_tree::{VrfTree, compute_vrf_leaf};
 use sha2::{Digest as _, Sha256};
 use ssz::H256;
 use types::pq::{primitives::VrfProof, validator_list::padded_pubkey};
 use xmss::{XmssPublicKey, XmssSecretKey};
+
+use crate::vrf_state::VrfStateArtifact;
 use zeroize::Zeroizing;
 
 pub type PqKeys = HashMap<PublicKeyBytes, Arc<PqKey>>;
@@ -79,13 +81,14 @@ impl PqKey {
 
         let vrf_tree = VrfTree::build(self.vrf_seed);
 
-        if let Some(path) = self.vrf_tree_path.as_deref() {
+        if let Some((path, cached_nodes)) =
+            self.vrf_tree_path.as_deref().zip(vrf_tree.cached_nodes())
+        {
             if let Some(directory) = path.parent() {
                 fs::create_dir_all(directory)?;
             }
 
-            let bytes = vrf_tree
-                .cached_nodes()
+            let bytes = cached_nodes
                 .iter()
                 .flat_map(H256::as_bytes)
                 .copied()
@@ -93,6 +96,23 @@ impl PqKey {
 
             fs::write(path, bytes)?;
         }
+
+        self.vrf_tree.get_or_init(|| vrf_tree);
+
+        Ok(())
+    }
+
+    /// Takes the VRF tree from the slot 0 branch in `artifact`. Builds a subtree, which takes
+    /// seconds. The artifact is not saved: loading it again is as fast.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn load_vrf_tree_from_artifact(&self, artifact: &VrfStateArtifact) -> Result<()> {
+        if self.has_vrf_tree() {
+            return Ok(());
+        }
+
+        let (root, branch) = artifact.record(compute_vrf_leaf(self.vrf_seed, 1))?;
+        let vrf_tree = VrfTree::from_slot_zero_branch(self.vrf_seed, root, branch)?;
 
         self.vrf_tree.get_or_init(|| vrf_tree);
 

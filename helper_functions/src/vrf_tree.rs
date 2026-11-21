@@ -32,8 +32,19 @@ pub struct VrfTree {
     vrf_seed: H256,
     depth: u32,
     cache_height: u32,
+    upper: Upper,
+}
+
+// What a tree keeps above `cache_height`. Below it, nodes are rebuilt from the seed.
+enum Upper {
     // The nodes at `cache_height`, left to right.
-    cached_nodes: Vec<H256>,
+    Full(Vec<H256>),
+    // The leftmost node at `cache_height` and the siblings above it on the path of slot 0, from a
+    // VRF state artifact. Proofs cover the slots under that node.
+    SlotZero {
+        subtree_root: H256,
+        siblings: Vec<H256>,
+    },
 }
 
 impl VrfTree {
@@ -49,6 +60,64 @@ impl VrfTree {
         Self::from_cached_nodes_with_depth(vrf_seed, depth(), CACHE_HEIGHT, cached_nodes)
     }
 
+    /// A tree from the branch of slot 0 in a VRF state artifact, checked against the seed and
+    /// `root`. Builds the leftmost `2^CACHE_HEIGHT` leaves, which takes seconds, and proves only
+    /// slots among them.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn from_slot_zero_branch(vrf_seed: H256, root: H256, branch: &[H256]) -> Result<Self> {
+        Self::from_slot_zero_branch_with_depth(vrf_seed, depth(), CACHE_HEIGHT, root, branch)
+    }
+
+    fn from_slot_zero_branch_with_depth(
+        vrf_seed: H256,
+        depth: u32,
+        cache_height: u32,
+        root: H256,
+        branch: &[H256],
+    ) -> Result<Self> {
+        let cache_height = cache_height.min(depth);
+
+        ensure!(
+            branch.len() == usize::try_from(depth)?,
+            "a VRF branch of {} nodes for a tree of depth {depth}",
+            branch.len(),
+        );
+
+        let (lower_branch, siblings) = branch.split_at(usize::try_from(cache_height)?);
+        let mut computed_lower_branch = vec![H256::zero(); lower_branch.len()];
+
+        let subtree_root = compute_node(
+            vrf_seed,
+            cache_height,
+            0,
+            Some(0),
+            &mut computed_lower_branch,
+        );
+
+        ensure!(
+            computed_lower_branch == lower_branch,
+            "the VRF branch of slot 0 does not match the seed",
+        );
+
+        let tree = Self {
+            vrf_seed,
+            depth,
+            cache_height,
+            upper: Upper::SlotZero {
+                subtree_root,
+                siblings: siblings.to_vec(),
+            },
+        };
+
+        ensure!(
+            tree.root() == root,
+            "the VRF branch of slot 0 does not lead to root {root:?}",
+        );
+
+        Ok(tree)
+    }
+
     fn build_with_depth(vrf_seed: H256, depth: u32, cache_height: u32) -> Self {
         let cache_height = cache_height.min(depth);
         let cached_node_count = 1_u64 << depth.saturating_sub(cache_height);
@@ -62,7 +131,7 @@ impl VrfTree {
             vrf_seed,
             depth,
             cache_height,
-            cached_nodes,
+            upper: Upper::Full(cached_nodes),
         }
     }
 
@@ -85,25 +154,40 @@ impl VrfTree {
             vrf_seed,
             depth,
             cache_height,
-            cached_nodes,
+            upper: Upper::Full(cached_nodes),
         })
     }
 
+    /// The nodes a built tree keeps, to be saved and loaded with [`Self::from_cached_nodes`].
     #[must_use]
-    pub fn cached_nodes(&self) -> &[H256] {
-        &self.cached_nodes
+    pub fn cached_nodes(&self) -> Option<&[H256]> {
+        match &self.upper {
+            Upper::Full(cached_nodes) => Some(cached_nodes),
+            Upper::SlotZero { .. } => None,
+        }
     }
 
     /// [`compute_vrf_root`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_root)
     #[must_use]
     pub fn root(&self) -> H256 {
-        let mut level = self.cached_nodes.clone();
+        match &self.upper {
+            Upper::Full(cached_nodes) => {
+                let mut level = cached_nodes.clone();
 
-        while level.len() > 1 {
-            level = parents(&level);
+                while level.len() > 1 {
+                    level = parents(&level);
+                }
+
+                level.first().copied().unwrap_or_default()
+            }
+            // Slot 0 is the leftmost leaf, so every sibling on its path is a right child.
+            Upper::SlotZero {
+                subtree_root,
+                siblings,
+            } => siblings.iter().fold(*subtree_root, |node, sibling| {
+                keccak256(&[node.as_bytes(), sibling.as_bytes()])
+            }),
         }
-
-        level.first().copied().unwrap_or_default()
     }
 
     /// [`compute_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_proof)
@@ -128,18 +212,32 @@ impl VrfTree {
             &mut lower_branch,
         );
 
-        let mut upper_branch = vec![];
-        let mut level = self.cached_nodes.clone();
-        let mut index = usize::try_from(slot >> self.cache_height)?;
+        let upper_branch = match &self.upper {
+            Upper::Full(cached_nodes) => {
+                let mut upper_branch = vec![];
+                let mut level = cached_nodes.clone();
+                let mut index = usize::try_from(slot >> self.cache_height)?;
 
-        while level.len() > 1 {
-            if let Some(sibling) = level.get(index ^ 1) {
-                upper_branch.push(*sibling);
+                while level.len() > 1 {
+                    if let Some(sibling) = level.get(index ^ 1) {
+                        upper_branch.push(*sibling);
+                    }
+
+                    level = parents(&level);
+                    index >>= 1;
+                }
+
+                upper_branch
             }
+            Upper::SlotZero { siblings, .. } => {
+                ensure!(
+                    slot >> self.cache_height == 0,
+                    "slot {slot} is past the slots a VRF state artifact covers",
+                );
 
-            level = parents(&level);
-            index >>= 1;
-        }
+                siblings.clone()
+            }
+        };
 
         Ok(core::iter::once(compute_vrf_leaf(self.vrf_seed, slot))
             .chain(lower_branch)
@@ -241,7 +339,9 @@ mod tests {
                 vrf_seed,
                 depth,
                 cache_height,
-                tree.cached_nodes().to_vec(),
+                tree.cached_nodes()
+                    .expect("a built tree keeps its nodes")
+                    .to_vec(),
             )?;
 
             assert_eq!(reloaded.root(), root);
@@ -264,6 +364,54 @@ mod tests {
                 "a8e932e0dd6ec363635fdb0b30ea60d24cc1a861904c879e236c0e77f9efa562"
             )),
         );
+    }
+
+    #[test]
+    fn trees_from_the_slot_zero_branch_prove_the_slots_under_it() -> Result<()> {
+        let vrf_seed = H256::repeat_byte(9);
+        let (depth, cache_height) = (6, 3);
+        let full = VrfTree::build_with_depth(vrf_seed, depth, cache_height);
+        let branch = full.leaf_and_branch(0)?[1..].to_vec();
+
+        let tree = VrfTree::from_slot_zero_branch_with_depth(
+            vrf_seed,
+            depth,
+            cache_height,
+            full.root(),
+            &branch,
+        )?;
+
+        assert_eq!(tree.root(), full.root());
+        assert!(tree.cached_nodes().is_none());
+
+        for slot in 0..1 << cache_height {
+            assert_eq!(tree.leaf_and_branch(slot)?, full.leaf_and_branch(slot)?);
+        }
+
+        tree.leaf_and_branch(1 << cache_height)
+            .expect_err("the artifact covers only the leftmost subtree");
+
+        VrfTree::from_slot_zero_branch_with_depth(
+            vrf_seed,
+            depth,
+            cache_height,
+            H256::zero(),
+            &branch,
+        )
+        .err()
+        .expect("a branch must lead to the registered root");
+
+        VrfTree::from_slot_zero_branch_with_depth(
+            H256::repeat_byte(8),
+            depth,
+            cache_height,
+            full.root(),
+            &branch,
+        )
+        .err()
+        .expect("a branch must match the seed");
+
+        Ok(())
     }
 
     #[test]

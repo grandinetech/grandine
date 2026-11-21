@@ -34,7 +34,7 @@ use types::{
 use xmss::{LeafIndex, XmssSignature};
 
 use crate::{
-    Web3SignerConfig,
+    VrfStateArtifact, Web3SignerConfig,
     pq::{PqKey, PqKeys},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::{FetchedKeys, Web3Signer},
@@ -132,6 +132,35 @@ impl Signer {
         }
 
         Ok(())
+    }
+
+    /// Takes the VRF trees the loaded PQ keys do not have yet from `artifact`, in parallel.
+    /// Returns how many it loaded. Keys it has no valid record for are left to
+    /// [`Self::build_missing_vrf_trees`].
+    ///
+    /// Do not call on an async executor thread.
+    pub fn load_vrf_trees_from_artifact(&self, artifact: &VrfStateArtifact) -> usize {
+        let missing = self
+            .pq_keys_read()
+            .iter()
+            .filter(|(_, pq_key)| !pq_key.has_vrf_tree())
+            .map(|(public_key, pq_key)| (*public_key, pq_key.clone_arc()))
+            .collect_vec();
+
+        missing
+            .into_par_iter()
+            .filter(
+                |(public_key, pq_key)| match pq_key.load_vrf_tree_from_artifact(artifact) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        warn_with_peers!(
+                            "no usable VRF state for validator {public_key:?}: {error:?}",
+                        );
+                        false
+                    }
+                },
+            )
+            .count()
     }
 
     /// Builds the VRF trees the loaded PQ keys do not have yet, one at a time. Takes minutes per

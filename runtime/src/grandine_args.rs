@@ -1412,6 +1412,11 @@ struct ValidatorOptions {
     #[clap(help_heading = "Validator keys", long)]
     keystore_storage_password_file: Option<PathBuf>,
 
+    /// URL or path of a PQ VRF state artifact, which saves building the VRF trees of genesis
+    /// validators. Trees it has no valid record for are still built
+    #[clap(help_heading = "Validator keys", long, value_name = "URL_OR_PATH")]
+    vrf_state_url: Option<String>,
+
     /// List of public keys to use from Web3Signer
     #[clap(help_heading = "Validator keys", long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
@@ -1452,6 +1457,7 @@ impl ValidatorOptions {
             keystore_password_dir,
             keystore_password_file,
             keystore_storage_password_file,
+            vrf_state_url,
             web3signer_public_keys,
             web3signer_refresh_keys_every_epoch,
             web3signer_api_urls,
@@ -1525,6 +1531,7 @@ impl ValidatorOptions {
             slashing_protection_history_limit,
             validator_api_config,
             report_validator_performance,
+            vrf_state_url,
         })
     }
 }
