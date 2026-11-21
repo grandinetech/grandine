@@ -10,12 +10,13 @@ use anyhow::{Result, anyhow, ensure};
 use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use fs_err as fs;
 use helper_functions::vrf_tree::{VrfTree, compute_vrf_leaf};
+use logging::warn_with_peers;
 use sha2::{Digest as _, Sha256};
 use ssz::H256;
 use types::pq::{primitives::VrfProof, validator_list::padded_pubkey};
-use xmss::{XmssPublicKey, XmssSecretKey};
+use xmss::{PUBLIC_PARAMETER_SIZE, XmssPublicKey, XmssSecretKey};
 
-use crate::vrf_state::VrfStateArtifact;
+use crate::{vrf_state::VrfStateArtifact, xmss_cache::XmssCacheRecord};
 use zeroize::Zeroizing;
 
 pub type PqKeys = HashMap<PublicKeyBytes, Arc<PqKey>>;
@@ -30,19 +31,33 @@ pub struct PqKey {
 }
 
 impl PqKey {
-    /// Derives the XMSS key from `secret_key`, and loads the VRF tree if it was saved in
-    /// `cache_directory`. Takes about a second.
+    /// Derives the XMSS key from `secret_key`, from `xmss_cache` if it matches, and loads the VRF
+    /// tree if it was saved in `cache_directory`. Takes about a second.
     ///
     /// Do not call on an async executor thread.
     pub fn load(
         public_key: PublicKeyBytes,
         secret_key: &SecretKey,
         cache_directory: Option<&Path>,
+        xmss_cache: Option<&XmssCacheRecord>,
     ) -> Result<Self> {
         let (xmss_seed, vrf_seed) = derive_seeds(secret_key);
 
+        let cached_xmss = xmss_cache.and_then(|record| {
+            let xmss =
+                XmssSecretKey::from_cache_bytes(&xmss_seed, record.public_key, &record.bytes);
+
+            if xmss.is_none() {
+                warn_with_peers!(
+                    "the XMSS cache record for validator {public_key:?} does not match its key",
+                );
+            }
+
+            xmss
+        });
+
         let pq_key = Self {
-            xmss: XmssSecretKey::from_seed(&xmss_seed),
+            xmss: cached_xmss.unwrap_or_else(|| XmssSecretKey::from_seed(&xmss_seed)),
             vrf_seed,
             vrf_tree: OnceLock::new(),
             vrf_tree_path: cache_directory.map(|directory| {
@@ -160,6 +175,13 @@ impl PqKey {
             })?
             .proof(slot)
     }
+}
+
+/// The public parameter of the XMSS key derived from `secret_key`. Cheap.
+#[must_use]
+pub fn xmss_public_parameter(secret_key: &SecretKey) -> [u8; PUBLIC_PARAMETER_SIZE] {
+    let (xmss_seed, _) = derive_seeds(secret_key);
+    XmssSecretKey::public_parameter(&xmss_seed)
 }
 
 // The spec leaves the XMSS key seed and the VRF seed to the validator. These match the pq-devnet-0

@@ -41,4 +41,5 @@ hex-literal = { workspace = true }
 httpmock = { workspace = true }
 serde-aux = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }

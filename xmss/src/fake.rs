@@ -8,7 +8,8 @@
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    Error, LEAF_INDEX_SIZE, LeafIndex, MESSAGE_SIZE, PUBLIC_KEY_SIZE, SEED_SIZE, SIGNATURE_SIZE,
+    Error, LEAF_INDEX_SIZE, LeafIndex, MESSAGE_SIZE, PUBLIC_KEY_SIZE, PUBLIC_PARAMETER_SIZE,
+    SEED_SIZE, SIGNATURE_SIZE,
 };
 
 const PUBLIC_KEY_DOMAIN: &[u8] = b"fake-xmss-pk";
@@ -22,6 +23,25 @@ pub fn key_gen(seed: &[u8; SEED_SIZE]) -> (ExpandedKey, [u8; PUBLIC_KEY_SIZE]) {
         .finalize();
 
     (ExpandedKey, public_key.into())
+}
+
+pub fn public_parameter(seed: &[u8; SEED_SIZE]) -> [u8; PUBLIC_PARAMETER_SIZE] {
+    let (_, public_key) = key_gen(seed);
+    let (_, public_parameter) = public_key.split_last_chunk().unwrap_or((&[], &[0; _]));
+    *public_parameter
+}
+
+pub fn from_cache_bytes(
+    seed: &[u8; SEED_SIZE],
+    public_key: &[u8; PUBLIC_KEY_SIZE],
+    _bytes: &[u8],
+) -> Option<ExpandedKey> {
+    let (expanded, derived) = key_gen(seed);
+    (derived == *public_key).then_some(expanded)
+}
+
+pub const fn cache_to_bytes(_key: &ExpandedKey) -> Vec<u8> {
+    vec![]
 }
 
 #[expect(clippy::unnecessary_wraps)]

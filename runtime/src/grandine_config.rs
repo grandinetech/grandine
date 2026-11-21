@@ -128,6 +128,7 @@ pub struct ValidatorClientConfig {
     pub validator_api_config: Option<ValidatorApiConfig>,
     pub report_validator_performance: bool,
     pub vrf_state_url: Option<String>,
+    pub xmss_cache_url: Option<String>,
 }
 
 impl ValidatorClientConfig {

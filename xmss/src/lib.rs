@@ -29,6 +29,8 @@ mod fake;
 mod lean;
 
 pub const PUBLIC_KEY_SIZE: usize = 32;
+/// The public parameter ends the public key.
+pub const PUBLIC_PARAMETER_SIZE: usize = 16;
 pub const SIGNATURE_SIZE: usize = 2404;
 pub const SEED_SIZE: usize = 32;
 pub const MESSAGE_SIZE: usize = 32;
@@ -77,6 +79,12 @@ impl XmssPublicKey {
     #[must_use]
     pub const fn as_array(&self) -> &[u8; PUBLIC_KEY_SIZE] {
         &self.0
+    }
+
+    #[must_use]
+    pub fn public_parameter(&self) -> [u8; PUBLIC_PARAMETER_SIZE] {
+        let (_, public_parameter) = self.0.split_last_chunk().unwrap_or((&[], &[0; _]));
+        *public_parameter
     }
 
     #[must_use]
@@ -258,6 +266,37 @@ impl XmssSecretKey {
         }
     }
 
+    /// The key `public_key` from the cache of its trees (leanVM `cache_to_bytes`), which saves
+    /// building them. The cache is checked against `public_key`, so it needs no trust. `None` if
+    /// it does not match.
+    ///
+    /// Recomputes part of each tree, which takes a fraction of a second. Do not call on an async
+    /// executor thread.
+    #[must_use]
+    pub fn from_cache_bytes(
+        seed: &[u8; SEED_SIZE],
+        public_key: XmssPublicKey,
+        bytes: &[u8],
+    ) -> Option<Self> {
+        backend::from_cache_bytes(seed, &public_key.0, bytes).map(|expanded| Self {
+            public_key,
+            expanded,
+        })
+    }
+
+    /// The trees the key has built, for [`Self::from_cache_bytes`].
+    #[must_use]
+    pub fn cache_to_bytes(&self) -> Vec<u8> {
+        backend::cache_to_bytes(&self.expanded)
+    }
+
+    /// The public parameter of the key `seed` generates. Cheap, unlike generating the key, so it
+    /// can find a key's entry among public keys.
+    #[must_use]
+    pub fn public_parameter(seed: &[u8; SEED_SIZE]) -> [u8; PUBLIC_PARAMETER_SIZE] {
+        backend::public_parameter(seed)
+    }
+
     pub fn from_seed_slice(seed: &[u8]) -> Result<Self, Error> {
         let seed = Zeroizing::new(<[u8; SEED_SIZE]>::try_from(seed).map_err(|_| {
             Error::InvalidLength {
@@ -359,6 +398,37 @@ mod tests {
 
         assert_eq!(json, format!("\"0x{}\"", "ab".repeat(32)));
         assert_eq!(serde_json::from_str::<XmssPublicKey>(&json)?, public_key);
+
+        Ok(())
+    }
+
+    #[test]
+    fn keys_load_from_their_cache_only() -> Result<(), Error> {
+        let seed = [3; SEED_SIZE];
+        let key = XmssSecretKey::from_seed(&seed);
+        let public_key = key.public_key();
+
+        assert_eq!(
+            XmssSecretKey::public_parameter(&seed),
+            public_key.public_parameter(),
+        );
+
+        key.prepare(LEAF)?;
+
+        let cache = key.cache_to_bytes();
+        let loaded = XmssSecretKey::from_cache_bytes(&seed, public_key, &cache)
+            .expect("a key loads from its own cache");
+        let message = [5; MESSAGE_SIZE];
+
+        assert_eq!(loaded.sign(&message, LEAF)?, key.sign(&message, LEAF)?);
+
+        let other_public_key = XmssSecretKey::from_seed(&[4; SEED_SIZE]).public_key();
+
+        assert!(XmssSecretKey::from_cache_bytes(&seed, other_public_key, &cache).is_none());
+
+        if !FAKE_CRYPTO {
+            assert!(XmssSecretKey::from_cache_bytes(&seed, public_key, &cache[1..]).is_none());
+        }
 
         Ok(())
     }

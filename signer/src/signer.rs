@@ -31,11 +31,11 @@ use types::{
     redacting_url::RedactingUrl,
 };
 
-use xmss::{LeafIndex, XmssSignature};
+use xmss::{LeafIndex, PUBLIC_PARAMETER_SIZE, XmssSignature};
 
 use crate::{
-    VrfStateArtifact, Web3SignerConfig,
-    pq::{PqKey, PqKeys},
+    VrfStateArtifact, Web3SignerConfig, XmssCacheRecord,
+    pq::{self, PqKey, PqKeys},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::{FetchedKeys, Web3Signer},
 };
@@ -107,7 +107,11 @@ impl Signer {
     /// in `cache_directory`. Building a VRF tree takes minutes.
     ///
     /// Do not call on an async executor thread.
-    pub fn load_pq_keys(&self, cache_directory: Option<&Path>) -> Result<()> {
+    pub fn load_pq_keys(
+        &self,
+        cache_directory: Option<&Path>,
+        xmss_caches: &HashMap<PublicKeyBytes, XmssCacheRecord>,
+    ) -> Result<()> {
         let local_keys = self
             .load()
             .sign_methods
@@ -121,7 +125,12 @@ impl Signer {
             .collect_vec();
 
         for (public_key, secret_key) in local_keys {
-            let pq_key = PqKey::load(public_key, &secret_key, cache_directory)?;
+            let pq_key = PqKey::load(
+                public_key,
+                &secret_key,
+                cache_directory,
+                xmss_caches.get(&public_key),
+            )?;
 
             info_with_peers!(
                 "loaded PQ key for validator {public_key:?} (XMSS public key: {:?})",
@@ -132,6 +141,22 @@ impl Signer {
         }
 
         Ok(())
+    }
+
+    /// The public parameters of the XMSS keys [`Self::load_pq_keys`] would derive, which find their
+    /// XMSS cache records. Cheap.
+    #[must_use]
+    pub fn pq_public_parameters(&self) -> Vec<(PublicKeyBytes, [u8; PUBLIC_PARAMETER_SIZE])> {
+        self.load()
+            .sign_methods
+            .iter()
+            .filter_map(|(public_key, sign_method)| match sign_method {
+                SignMethod::SecretKey(secret_key, _) => Some((*public_key, secret_key)),
+                SignMethod::Web3Signer(_) => None,
+            })
+            .filter(|(public_key, _)| !self.pq_keys_read().contains_key(public_key))
+            .map(|(public_key, secret_key)| (public_key, pq::xmss_public_parameter(secret_key)))
+            .collect()
     }
 
     /// Takes the VRF trees the loaded PQ keys do not have yet from `artifact`, in parallel.

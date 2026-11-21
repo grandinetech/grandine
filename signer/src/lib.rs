@@ -7,12 +7,14 @@ pub use crate::{
         Config as Web3SignerConfig, UrlPolicy as Web3SignerUrlPolicy, Web3SignerClientOptions,
         build_web3signer_client,
     },
+    xmss_cache::{XmssCacheRecord, XmssCacheSource},
 };
 
 mod pq;
 mod signer;
 mod types;
 mod vrf_state;
+mod xmss_cache;
 mod web3signer {
     pub use api::{
         ClientOptions as Web3SignerClientOptions, Config, FetchedKeys, UrlPolicy, Web3Signer,

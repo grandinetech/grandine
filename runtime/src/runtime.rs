@@ -5,7 +5,7 @@ use core::{
 #[cfg(feature = "embed")]
 use std::sync::LazyLock;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     net::{TcpListener, UdpSocket},
     path::Path,
@@ -76,8 +76,8 @@ use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder, redirect::Policy};
 use scc::HashMap as SccHashMap;
 use signer::{
-    KeyOrigin, Signer, VrfStateSource, Web3SignerClientOptions, Web3SignerConfig,
-    build_web3signer_client,
+    KeyOrigin, Signer, VrfStateSource, Web3SignerClientOptions, Web3SignerConfig, XmssCacheRecord,
+    XmssCacheSource, build_web3signer_client,
 };
 use slasher::{Databases, Slasher};
 use slashing_protection::{
@@ -93,7 +93,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use types::{
     config::Config as ChainConfig,
-    nonstandard::PublishedDuty,
+    nonstandard::{Phase, PublishedDuty},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         primitives::H256,
@@ -838,6 +838,44 @@ async fn build_local_node<P: Preset>(
     Ok((chain, services))
 }
 
+async fn load_xmss_caches<P: Preset>(
+    chain: &Chain<P, ()>,
+    client: &Client,
+    signer: &Signer,
+    xmss_cache_url: &str,
+) -> Result<HashMap<PublicKeyBytes, XmssCacheRecord>> {
+    let source = XmssCacheSource::new(xmss_cache_url)?;
+
+    // TODO(PQ): Take the public keys from the beacon nodes under `vc`.
+    let Chain::Local(local_chain) = chain else {
+        warn_with_peers!("--xmss-cache-url is not supported with remote beacon nodes yet");
+        return Ok(HashMap::new());
+    };
+
+    let state = local_chain.controller.head_state().value;
+
+    if state.phase() < Phase::Pq {
+        info_with_peers!("not loading XMSS caches: the state is from before the PQ fork");
+        return Ok(HashMap::new());
+    }
+
+    let (records, errors) = source
+        .records(
+            client,
+            state.validators().pubkeys(),
+            signer.pq_public_parameters(),
+        )
+        .await;
+
+    for error in errors {
+        warn_with_peers!("XMSS cache {source}: {error:?}");
+    }
+
+    info_with_peers!("fetched {} XMSS cache records from {source}", records.len());
+
+    Ok(records)
+}
+
 fn shared_config(
     config: &GrandineConfig,
     validator_config: Arc<ValidatorConfig>,
@@ -1029,14 +1067,25 @@ async fn run_services<P: Preset>(
             .flatten()
             .map(|validator_dir| validator_dir.join("pq_vrf_trees"));
 
+        let xmss_caches = match validator_client
+            .and_then(|validator_client| validator_client.xmss_cache_url.as_deref())
+        {
+            Some(xmss_cache_url) => {
+                load_xmss_caches(&chain, &client, &signer, xmss_cache_url).await?
+            }
+            None => HashMap::new(),
+        };
+
         info_with_peers!("deriving PQ keys of the validators");
 
         {
             let signer = signer.clone_arc();
             let vrf_tree_directory = vrf_tree_directory.clone();
 
-            tokio::task::spawn_blocking(move || signer.load_pq_keys(vrf_tree_directory.as_deref()))
-                .await??;
+            tokio::task::spawn_blocking(move || {
+                signer.load_pq_keys(vrf_tree_directory.as_deref(), &xmss_caches)
+            })
+            .await??;
         }
 
         if let Some(vrf_state_url) =
