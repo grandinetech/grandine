@@ -210,7 +210,12 @@ impl OwnBeaconCommitteeMembers {
 
         if let BeaconState::Pq(state) = state {
             return self
-                .init_pq_from_duties::<P>(state, dependent_root, slot, duties)
+                .init_pq_from_duties::<P>(
+                    state,
+                    dependent_root,
+                    slot..slot.saturating_add(1),
+                    duties,
+                )
                 .await;
         }
 
@@ -229,14 +234,34 @@ impl OwnBeaconCommitteeMembers {
         &self,
         state: &PqBeaconState<P>,
         dependent_root: H256,
-        slot: Slot,
+        slots: Range<Slot>,
         duties: Vec<ValidatorAttesterDutyResponse>,
     ) -> Result<()> {
-        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        if slots.is_empty() {
+            return Ok(());
+        }
 
-        let mut members = vec![];
+        let epoch = misc::compute_epoch_at_slot::<P>(slots.start);
 
-        for duty in duties.into_iter().unique_by(|duty| duty.validator_index) {
+        let mut members_by_slot = BTreeMap::<Slot, Vec<BeaconCommitteeMember>>::new();
+
+        for slot in slots {
+            if self
+                .needs_to_compute_members_at_slot::<P>(dependent_root, slot)
+                .await
+            {
+                // Cached as empty, as in `init_from_duties`.
+                members_by_slot.insert(slot, vec![]);
+            }
+        }
+
+        let duties = duties
+            .into_iter()
+            .filter(|duty| members_by_slot.contains_key(&duty.slot))
+            .unique_by(|duty| duty.validator_index)
+            .collect_vec();
+
+        for duty in duties {
             let ValidatorAttesterDutyResponse {
                 committee_index,
                 committee_length,
@@ -251,23 +276,37 @@ impl OwnBeaconCommitteeMembers {
                 continue;
             };
 
-            members.push(BeaconCommitteeMember {
-                public_key,
-                validator_index,
-                committee_index,
-                committee_size: committee_length,
-                committees_at_slot,
-                position_in_committee: validator_committee_index,
-                slot,
-                is_aggregator: pq::is_aggregator(state, slot, committee_index, validator_index)?,
-                selection_proof: SignatureBytes::empty(),
-            });
+            members_by_slot
+                .entry(slot)
+                .or_default()
+                .push(BeaconCommitteeMember {
+                    public_key,
+                    validator_index,
+                    committee_index,
+                    committee_size: committee_length,
+                    committees_at_slot,
+                    position_in_committee: validator_committee_index,
+                    slot,
+                    is_aggregator: pq::is_aggregator(
+                        state,
+                        slot,
+                        committee_index,
+                        validator_index,
+                    )?,
+                    selection_proof: SignatureBytes::empty(),
+                });
         }
 
-        members
-            .sort_unstable_by_key(|member| (member.committee_index, member.position_in_committee));
+        let members_by_slot = members_by_slot
+            .into_iter()
+            .map(|(slot, mut members)| {
+                members.sort_unstable_by_key(|member| {
+                    (member.committee_index, member.position_in_committee)
+                });
 
-        let members_by_slot = BTreeMap::from([(slot, members.into())]);
+                (slot, members.into())
+            })
+            .collect::<BTreeMap<_, Arc<[_]>>>();
 
         match self.members.entry_async(epoch).await {
             Entry::Occupied(mut occupied) => {
@@ -334,8 +373,15 @@ impl OwnBeaconCommitteeMembers {
                 continue;
             }
 
-            self.init_from_duties::<P>(fork_info, dependent_root, slots, duties)
-                .await?;
+            // A PQ state holds the XMSS keys of the duties, and aggregators are drawn from it.
+            // TODO(PQ): Compute PQ duties under `vc` too.
+            if let Some(BeaconState::Pq(state)) = beacon_nodes.state().map(AsRef::as_ref) {
+                self.init_pq_from_duties::<P>(state, dependent_root, slots, duties)
+                    .await?;
+            } else {
+                self.init_from_duties::<P>(fork_info, dependent_root, slots, duties)
+                    .await?;
+            }
         }
 
         Ok(())
