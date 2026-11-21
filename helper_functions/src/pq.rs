@@ -21,9 +21,8 @@ use types::{
         beacon_state::BeaconState as PqBeaconState,
         consts::{
             AGGREGATORS_PER_COMMITTEE, LEAF_OFFSET_AGGREGATE_AND_PROOF, LEGACY_VRF_ROOT_DOMAIN,
-            LEGACY_XMSS_PUBKEY_DOMAIN, VRF_LEAF_DOMAIN, XMSS_ATTESTATION_LEAVES,
-            XMSS_BUILDER_BID_LEAVES, XMSS_DEPOSIT_PREFIX, XMSS_LEAVES_PER_SLOT,
-            XMSS_RESERVED_LEAVES,
+            LEGACY_XMSS_PUBKEY_DOMAIN, XMSS_ATTESTATION_LEAVES, XMSS_BUILDER_BID_LEAVES,
+            XMSS_DEPOSIT_PREFIX, XMSS_LEAVES_PER_SLOT, XMSS_RESERVED_LEAVES,
         },
         containers::{Attestation, AttesterSlashing, SignedAggregateAndProof, SingleAttestation},
         primitives::{AggregationCommittee, AggregationCommittees, VrfProof},
@@ -130,34 +129,28 @@ pub(crate) fn keccak256(parts: &[&[u8]]) -> H256 {
     H256(output)
 }
 
-/// [`compute_vrf_leaf`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-compute_vrf_leaf)
-#[must_use]
-pub fn compute_vrf_leaf(secret: H256, index: u64) -> H256 {
-    keccak256(&[VRF_LEAF_DOMAIN, secret.as_bytes(), &index.to_le_bytes()])
-}
-
-/// [`is_valid_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/beacon-chain.md#new-is_valid_vrf_proof)
+/// [`is_valid_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/beacon-chain.md#new-is_valid_vrf_proof)
 #[must_use]
 pub fn is_valid_vrf_proof(vrf_root: H256, slot: Slot, proof: &VrfProof) -> bool {
-    let (secret, branch) = proof
+    let (leaf, branch) = proof
         .split_first()
         .expect("a VRF proof always has VRF_TREE_DEPTH + 1 entries");
 
-    vrf_root_from_branch(*secret, slot, branch) == vrf_root
+    vrf_root_from_branch(*leaf, slot, branch) == vrf_root
 }
 
-/// The root of a VRF tree whose leaf at `index` commits to `secret`, given the leaf's branch.
-pub(crate) fn vrf_root_from_branch(secret: H256, index: u64, branch: &[H256]) -> H256 {
-    branch.iter().zip(0..).fold(
-        compute_vrf_leaf(secret, index),
-        |value, (sibling, height)| {
+/// The root of a VRF tree with `leaf` at `index`, given the leaf's branch.
+pub(crate) fn vrf_root_from_branch(leaf: H256, index: u64, branch: &[H256]) -> H256 {
+    branch
+        .iter()
+        .zip(0..)
+        .fold(leaf, |value, (sibling, height)| {
             if index >> height & 1 == 1 {
                 keccak256(&[sibling.as_bytes(), value.as_bytes()])
             } else {
                 keccak256(&[value.as_bytes(), sibling.as_bytes()])
             }
-        },
-    )
+        })
 }
 
 /// `xmss.Verify` with the public key of the validator at `validator_index`.

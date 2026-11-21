@@ -142,10 +142,9 @@ impl PqKey {
     }
 }
 
-// The spec leaves the XMSS key seed and the VRF seed to the validator. These match the genesis
-// tooling, which derives both from the BLS secret key.
-//
-// TODO(PQ): Confirm the derivation against the pq-devnet-0 genesis tool.
+// The spec leaves the XMSS key seed and the VRF seed to the validator. These match the pq-devnet-0
+// genesis tool (`ethpandaops/eth-beacon-genesis@ff42fce`), which derives both from the BLS secret
+// key.
 fn derive_seeds(secret_key: &SecretKey) -> (Zeroizing<[u8; 32]>, H256) {
     // Zeroized on drop.
     let secret_key_bytes = secret_key.to_bytes();
