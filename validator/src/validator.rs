@@ -864,6 +864,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 payload_attributes,
             )
             .await;
+
+        if beacon_state.phase() == Phase::Pq {
+            tokio::spawn(async move {
+                if let Err(error) = block_build_context.precompute_pq_block_proof().await {
+                    warn_with_peers!(
+                        "failed to merge the PQ block proof ahead of slot {slot}: {error:?}"
+                    );
+                }
+            });
+        }
     }
 
     fn handle_pool_addition_outcome_for_p2p(

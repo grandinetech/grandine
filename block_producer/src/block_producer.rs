@@ -193,6 +193,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             payload_id_cache: Mutex::new(SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE)),
             cached_payload_roots: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             self_built_block_parents: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
+            pq_block_proof: Mutex::new(None),
             metrics,
             fake_execution_payloads,
         });
@@ -1003,8 +1004,18 @@ struct ProducerContext<P: Preset, W: Wait> {
     // Parent (head) block root by self-built `beacon_block_root`, used to locate the payload root
     // in `cached_payload_roots` when rebuilding envelope contents for the envelope endpoints.
     self_built_block_parents: Mutex<SizedCache<H256, H256>>,
+    // Merged before the proposal, because merging takes about a second.
+    pq_block_proof: Mutex<Option<PrecomputedPqBlockProof<P>>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
+}
+
+struct PrecomputedPqBlockProof<P: Preset> {
+    parent_root: H256,
+    slot: Slot,
+    attestations_root: H256,
+    attestations: ProgressiveList<PqAttestation<P>>,
+    proof: AttestationProof<P>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -2131,12 +2142,34 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return Ok(());
         }
 
-        let merged = tokio::task::spawn_blocking(move || {
-            merge_pq_proofs(&config, &scoring_state, attestations)
-        })
-        .await
-        .map_err(AnyhowError::new)
-        .and_then(core::convert::identity);
+        let attestations_root = pq_attestations_root(&attestations)?;
+
+        let precomputed =
+            self.producer_context
+                .pq_block_proof
+                .lock()
+                .await
+                .take_if(|precomputed| {
+                    precomputed.parent_root == block.parent_root
+                        && precomputed.slot == block.slot
+                        && precomputed.attestations_root == attestations_root
+                });
+
+        let merged = match precomputed {
+            Some(precomputed) => {
+                debug_with_peers!(
+                    "using the PQ block proof merged ahead of slot {}",
+                    block.slot
+                );
+                Ok((precomputed.attestations, precomputed.proof))
+            }
+            None => tokio::task::spawn_blocking(move || {
+                merge_pq_proofs(&config, &scoring_state, attestations)
+            })
+            .await
+            .map_err(AnyhowError::new)
+            .and_then(core::convert::identity),
+        };
 
         match merged {
             Ok((attestations, proof)) => {
@@ -2156,6 +2189,61 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             "PQ proposal parent processing, packing and merging elapsed {} us",
             started_at.elapsed().as_micros()
         );
+
+        Ok(())
+    }
+
+    /// Merges the proofs of the attestations a PQ proposal on this context's state would pack, for
+    /// [`Self::add_pq_attestations`] to reuse when it packs the same ones.
+    pub async fn precompute_pq_block_proof(&self) -> Result<()> {
+        let BeaconState::Pq(state) = self.beacon_state.as_ref() else {
+            return Ok(());
+        };
+
+        // Held while merging, so that a merge for a newer head waits instead of racing this one.
+        let mut precomputed = self.producer_context.pq_block_proof.lock().await;
+
+        let attestations = self
+            .producer_context
+            .attestation_agg_pool
+            .pq_proposable_attestations(self.beacon_state.clone_arc())
+            .await?;
+
+        if attestations.is_empty() {
+            return Ok(());
+        }
+
+        let parent_root = self.head_block_root;
+        let slot = state.slot;
+        let attestations_root = pq_attestations_root(&attestations)?;
+
+        if precomputed.as_ref().is_some_and(|precomputed| {
+            precomputed.parent_root == parent_root
+                && precomputed.slot == slot
+                && precomputed.attestations_root == attestations_root
+        }) {
+            return Ok(());
+        }
+
+        let config = self.producer_context.chain_config.clone_arc();
+        let beacon_state = self.beacon_state.clone_arc();
+
+        let (attestations, proof) = tokio::task::spawn_blocking(move || {
+            let BeaconState::Pq(state) = beacon_state.as_ref() else {
+                return Err(anyhow!("the state of a PQ proposal is not a PQ state"));
+            };
+
+            merge_pq_proofs(&config, state, attestations)
+        })
+        .await??;
+
+        *precomputed = Some(PrecomputedPqBlockProof {
+            parent_root,
+            slot,
+            attestations_root,
+            attestations,
+            proof,
+        });
 
         Ok(())
     }
@@ -3496,6 +3584,18 @@ fn prepare_gloas_scoring_state<P: Preset>(
 /// `process_stark` checks: by attestation, and within each by committee.
 ///
 /// [`stark.MergeProofs`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/validator.md#proof
+fn pq_attestations_root<P: Preset>(
+    attestations: &[(PqAttestation<P>, Vec<AttestationProof<P>>)],
+) -> Result<H256> {
+    let attestations = ProgressiveList::<PqAttestation<P>>::try_from_iter(
+        attestations
+            .iter()
+            .map(|(attestation, _)| attestation.clone()),
+    )?;
+
+    Ok(attestations.hash_tree_root())
+}
+
 fn merge_pq_proofs<P: Preset>(
     config: &ChainConfig,
     state: &PqBeaconState<P>,
