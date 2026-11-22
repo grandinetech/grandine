@@ -3289,6 +3289,7 @@ dependencies = [
  "once_cell",
  "panics",
  "parking_lot",
+ "pq_prover",
  "prometheus_metrics",
  "pubkey_cache",
  "reqwest 0.13.5",
