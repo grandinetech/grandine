@@ -1,0 +1,76 @@
+#!/bin/bash
+# Grandine on a PQ network: starts the leanVM sidecar Grandine proves and verifies attestation
+# proofs with, then Grandine on its socket. Grandine's arguments are passed on.
+#
+# A sidecar that exits is restarted, and Grandine reconnects to it. When Grandine exits, so does
+# the sidecar, and this exits with Grandine's status. LEANVM_THREADS sets the sidecar's threads (0,
+# the default, is one per core).
+set -eu
+
+socket_dir=$(mktemp -d "${TMPDIR:-/tmp}/leanvm.XXXXXXXX")
+socket="$socket_dir/sidecar.sock"
+supervisor_pid=
+grandine_pid=
+
+# Restarts the sidecar with a delay that doubles up to 30 seconds and resets after a minute of
+# running. Stops its sidecar on TERM.
+supervise_sidecar() {
+    local sidecar_pid= delay=1 started status
+
+    trap 'if [[ -n "$sidecar_pid" ]]; then kill "$sidecar_pid" 2>/dev/null; wait "$sidecar_pid" 2>/dev/null; fi; exit 0' TERM
+
+    while true; do
+        started=$SECONDS
+        leanvm-sidecar --socket "$socket" --threads "${LEANVM_THREADS:-0}" &
+        sidecar_pid=$!
+        status=0
+        wait "$sidecar_pid" || status=$?
+        sidecar_pid=
+
+        if ((SECONDS - started >= 60)); then
+            delay=1
+        fi
+
+        echo "leanvm-sidecar exited with status $status, restarting in $delay s" >&2
+        sleep "$delay"
+        delay=$((delay * 2 > 30 ? 30 : delay * 2))
+    done
+}
+
+cleanup() {
+    if [[ -n "$grandine_pid" ]]; then
+        kill "$grandine_pid" 2>/dev/null || true
+        wait "$grandine_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$supervisor_pid" ]]; then
+        kill "$supervisor_pid" 2>/dev/null || true
+        wait "$supervisor_pid" 2>/dev/null || true
+    fi
+    rm -f -- "$socket" "$socket.lock"
+    rmdir -- "$socket_dir"
+}
+
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+supervise_sidecar &
+supervisor_pid=$!
+
+# The sidecar warms up with two proofs before it listens.
+ready_deadline=$((SECONDS + 120))
+until [[ -S "$socket" ]]; do
+    if ((SECONDS >= ready_deadline)); then
+        echo 'leanvm-sidecar did not listen within 120 seconds' >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+grandine --pq-prover-socket "$socket" "$@" &
+grandine_pid=$!
+
+status=0
+wait "$grandine_pid" || status=$?
+grandine_pid=
+exit "$status"
