@@ -48,7 +48,9 @@ use keymanager::ProposerConfigs;
 use liveness_tracker::{ApiToLiveness, ValidatorToLiveness};
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
-use operation_pools::{AttestationKey, Origin, PoolAdditionOutcome, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, AttestationKey, Origin, PoolAdditionOutcome, SyncCommitteeAggPool,
+};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
@@ -349,7 +351,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         )
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         if let Some(remote_beacon_nodes) = self.chain_source.remote_beacon_nodes() {
             remote_beacon_nodes
                 .check_on_startup(self.chain_source.slot()?)
@@ -364,7 +366,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .sync_keys(&self.chain_source)
             .await;
 
+        self.spawn_valid_attestation_intake();
         self.run_internal().await
+    }
+
+    /// Takes accepted attestations off the fork choice channel as they arrive, so that duties
+    /// holding up the main loop cannot keep them from the pool past the aggregation cutoff.
+    fn spawn_valid_attestation_intake(&mut self) {
+        let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool().cloned() else {
+            return;
+        };
+
+        let validator_to_liveness_tx = self.channels.validator_to_liveness_tx().cloned();
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        let mut fork_choice_rx = core::mem::replace(&mut self.channels.validator_rx, rx);
+
+        tokio::spawn(async move {
+            while let Some(message) = fork_choice_rx.next().await {
+                let Some(message) = handle_valid_attestation(
+                    Some(&attestation_agg_pool),
+                    validator_to_liveness_tx.as_ref(),
+                    message,
+                ) else {
+                    continue;
+                };
+
+                if tx.unbounded_send(message).is_err() {
+                    break;
+                }
+            }
+        });
     }
 
     fn spawn_own_validator_index_resolution<F, Fut>(&self, resolve: F)
@@ -465,34 +496,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         InternalMessage::FinalizedCheckpoint(finalized_checkpoint.epoch)
                             .send(&self.internal_tx);
                     }
-                    ValidatorMessage::ValidAttestation(wait_group, attestation) => {
-                        if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
-                            attestation_agg_pool.insert_attestation(
-                                wait_group,
-                                attestation.clone_arc(),
-                                None,
-                            );
-                        }
-
-                        if let Some(validator_to_liveness_tx) = self.channels.validator_to_liveness_tx() {
-                            ValidatorToLiveness::ValidAttestation(attestation)
-                                .send(validator_to_liveness_tx);
-                        }
-                    }
-                    ValidatorMessage::ValidPqAggregate(_wait_group, aggregate, proof) => {
-                        if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
-                            attestation_agg_pool.insert_pq_aggregate(
-                                (*aggregate).clone(),
-                                Arc::unwrap_or_clone(proof),
-                            );
-                        }
-
-                        if let Some(validator_to_liveness_tx) = self.channels.validator_to_liveness_tx() {
-                            ValidatorToLiveness::ValidAttestation(Arc::new(
-                                Attestation::Pq(Arc::unwrap_or_clone(aggregate)),
-                            ))
-                            .send(validator_to_liveness_tx);
-                        }
+                    message @ (ValidatorMessage::ValidAttestation(..)
+                    | ValidatorMessage::ValidPqAggregate(..)) => {
+                        handle_valid_attestation(
+                            self.chain_source.attestation_agg_pool().map(Arc::as_ref),
+                            self.channels.validator_to_liveness_tx(),
+                            message,
+                        );
                     }
                     ValidatorMessage::ValidPayloadAttestation(wait_group, payload_attestation) => {
                         let span = tracing::debug_span!(
@@ -4432,6 +4442,39 @@ fn doppelganger_protection_permits<P: Preset>(
     );
 
     false
+}
+
+/// Feeds an attestation accepted by the built-in node to the pool and the liveness tracker,
+/// handing any other message back.
+fn handle_valid_attestation<P: Preset, W: Wait>(
+    attestation_agg_pool: Option<&AttestationAggPool<P, W>>,
+    validator_to_liveness_tx: Option<&UnboundedSender<ValidatorToLiveness<P>>>,
+    message: ValidatorMessage<P, W>,
+) -> Option<ValidatorMessage<P, W>> {
+    let attestation = match message {
+        ValidatorMessage::ValidAttestation(wait_group, attestation) => {
+            if let Some(attestation_agg_pool) = attestation_agg_pool {
+                attestation_agg_pool.insert_attestation(wait_group, attestation.clone_arc(), None);
+            }
+
+            attestation
+        }
+        ValidatorMessage::ValidPqAggregate(_wait_group, aggregate, proof) => {
+            if let Some(attestation_agg_pool) = attestation_agg_pool {
+                attestation_agg_pool
+                    .insert_pq_aggregate((*aggregate).clone(), Arc::unwrap_or_clone(proof));
+            }
+
+            Arc::new(Attestation::Pq(Arc::unwrap_or_clone(aggregate)))
+        }
+        message => return Some(message),
+    };
+
+    if let Some(validator_to_liveness_tx) = validator_to_liveness_tx {
+        ValidatorToLiveness::ValidAttestation(attestation).send(validator_to_liveness_tx);
+    }
+
+    None
 }
 
 fn aggregated_by<P: Preset>(
