@@ -9,6 +9,8 @@ use bls::{
 use derive_more::Constructor;
 use enumset::{EnumSet, EnumSetType};
 #[cfg(not(target_os = "zkvm"))]
+use itertools::Itertools as _;
+#[cfg(not(target_os = "zkvm"))]
 use rayon::iter::{ParallelBridge as _, ParallelIterator as _};
 use static_assertions::assert_not_impl_any;
 use tap::TryConv as _;
@@ -415,15 +417,19 @@ impl Verifier for Triple {
         public_keys: impl IntoIterator<IntoIter = impl Iterator<Item = Arc<PublicKey>> + Send>,
         _signature_kind: SignatureKind,
     ) -> Result<()> {
-        // TODO(Grandine Team): This may no longer be true as of Rayon 1.6.1. Benchmark again.
-        // The `ParallelBridge::par_bridge` here outperforms "native" parallel iterators.
         #[cfg(not(target_os = "zkvm"))]
-        let public_key = public_keys
-            .into_iter()
-            .par_bridge()
-            .fold(AggregatePublicKey::default, |a, b| a.add_public_key(&b))
-            .reduce(AggregatePublicKey::default, |a, b| a.add_aggregate(&b))
-            .to_public_key();
+        let public_key = match public_keys.into_iter().exactly_one() {
+            // A single attestation has one key, and aggregating one key yields the key itself,
+            // so there is nothing to parallelize.
+            Ok(public_key) => *public_key,
+            // TODO(Grandine Team): This may no longer be true as of Rayon 1.6.1. Benchmark again.
+            // The `ParallelBridge::par_bridge` here outperforms "native" parallel iterators.
+            Err(public_keys) => public_keys
+                .par_bridge()
+                .fold(AggregatePublicKey::default, |a, b| a.add_public_key(&b))
+                .reduce(AggregatePublicKey::default, |a, b| a.add_aggregate(&b))
+                .to_public_key(),
+        };
 
         #[cfg(target_os = "zkvm")]
         let public_key = public_keys
