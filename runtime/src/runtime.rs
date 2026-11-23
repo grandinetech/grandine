@@ -1008,6 +1008,33 @@ async fn run_services<P: Preset>(
         metrics_service_config,
     } = metrics_config;
 
+    let NodeServices {
+        validator_channels,
+        clock_target,
+        metrics_registry,
+        node_metrics,
+        metrics_channels,
+        validator_statistics,
+        run_node,
+        network_globals,
+    } = services;
+
+    let metrics_server = metrics_server_config
+        .map(|config| -> Result<_> {
+            let metrics = metrics
+                .clone()
+                .context("the metrics server needs --metrics")?;
+
+            Ok(tokio::spawn(run_metrics_server(
+                config,
+                metrics_registry,
+                metrics,
+            )))
+        })
+        .transpose()?;
+
+    let run_node = tokio::spawn(run_node);
+
     let in_memory = config.in_memory;
     let directories = config.directories.clone_arc();
     let genesis_validators_root = genesis.genesis_validators_root;
@@ -1183,17 +1210,6 @@ async fn run_services<P: Preset>(
         chain,
     });
 
-    let NodeServices {
-        validator_channels,
-        clock_target,
-        metrics_registry,
-        node_metrics,
-        metrics_channels,
-        validator_statistics,
-        run_node,
-        network_globals,
-    } = services;
-
     let validator = Validator::new(
         validator_config,
         chain_source.clone_arc(),
@@ -1231,15 +1247,11 @@ async fn run_services<P: Preset>(
         stop_clock_rx,
     );
 
-    let run_metrics_server = match metrics_server_config {
-        Some(config) => Either::Left(run_metrics_server(
-            config,
-            metrics_registry,
-            metrics
-                .clone()
-                .context("the metrics server needs --metrics")?,
-        )),
-        None => Either::Right(core::future::pending()),
+    let run_metrics_server = async move {
+        match metrics_server {
+            Some(metrics_server) => metrics_server.await?,
+            None => core::future::pending().await,
+        }
     };
 
     let run_metrics_service = match metrics_service_config {
@@ -1260,9 +1272,9 @@ async fn run_services<P: Preset>(
         result = spawn_fallible(validator.run()) => result,
         result = spawn_fallible(run_clock) => result,
         result = spawn_fallible(run_validator_api) => result,
-        result = spawn_fallible(run_metrics_server) => result,
+        result = run_metrics_server => result,
         result = spawn_fallible(run_metrics_service) => result,
-        result = spawn_fallible(run_node) => result,
+        result = run_node => result?,
         result = wait_for_signal() => result,
     }?;
 
