@@ -4237,6 +4237,14 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
     epoch: Epoch,
     post_fulu_check: bool,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
+    let current_epoch = current_epoch_with_clock_disparity(&controller)?;
+
+    if epoch > current_epoch.saturating_add(1) {
+        return Err(Error::InvalidEpoch(anyhow!(
+            "epoch {epoch} is after the next epoch"
+        )));
+    }
+
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let head = controller.head();
 
