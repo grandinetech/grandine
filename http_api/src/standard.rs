@@ -4074,7 +4074,8 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
     };
 
     let indices = validator_indices
-        .into_iter()
+        .iter()
+        .copied()
         .collect::<HashSet<ValidatorIndex>>();
 
     let response = if indices.is_empty() {
@@ -4109,7 +4110,7 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
             )?
         };
 
-        misc::slots_in_epoch::<P>(epoch)?
+        let duties = misc::slots_in_epoch::<P>(epoch)?
             .map(|slot| {
                 attester_duties_from_shuffling::<P>(
                     head_state.value.validators(),
@@ -4119,8 +4120,14 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
                 )
             })
             .flatten_ok()
-            .try_collect()
-            .map_err(Error::Internal)?
+            .map_ok(|duty| (duty.validator_index, duty))
+            .collect::<Result<HashMap<_, _>>>()
+            .map_err(Error::Internal)?;
+
+        validator_indices
+            .iter()
+            .filter_map(|validator_index| duties.get(validator_index).copied())
+            .collect()
     };
 
     Ok(EthResponse::json(response)
