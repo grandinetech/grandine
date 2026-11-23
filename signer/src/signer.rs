@@ -19,7 +19,10 @@ use helper_functions::misc;
 use itertools::{Itertools as _, izip};
 use logging::{info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
-use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
+use rayon::{
+    ThreadPoolBuilder,
+    iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _},
+};
 use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
@@ -127,21 +130,26 @@ impl Signer {
             .filter(|(public_key, _)| !self.pq_keys_read().contains_key(public_key))
             .collect_vec();
 
-        for (public_key, secret_key) in local_keys {
-            let pq_key = PqKey::load(
-                public_key,
-                &secret_key,
-                cache_directory,
-                xmss_caches.get(&public_key),
-            )?;
+        let pq_keys = local_keys
+            .into_par_iter()
+            .map(|(public_key, secret_key)| {
+                let pq_key = PqKey::load(
+                    public_key,
+                    &secret_key,
+                    cache_directory,
+                    xmss_caches.get(&public_key),
+                )?;
 
-            info_with_peers!(
-                "loaded PQ key for validator {public_key:?} (XMSS public key: {:?})",
-                pq_key.xmss_public_key(),
-            );
+                info_with_peers!(
+                    "loaded PQ key for validator {public_key:?} (XMSS public key: {:?})",
+                    pq_key.xmss_public_key(),
+                );
 
-            self.pq_keys_write().insert(public_key, Arc::new(pq_key));
-        }
+                Ok((public_key, Arc::new(pq_key)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.pq_keys_write().extend(pq_keys);
 
         Ok(())
     }
@@ -164,16 +172,21 @@ impl Signer {
         pq_keys.into_par_iter().try_for_each(|pq_key| {
             leaves
                 .iter()
-                .try_for_each(|leaf_index| pq_key.xmss().prepare(*leaf_index))
+                .try_for_each(|leaf_index| pq_key.xmss().prepare(*leaf_index))?;
+
+            pq_key.save_xmss_cache()
         })?;
 
         Ok(())
     }
 
-    /// The public parameters of the XMSS keys [`Self::load_pq_keys`] would derive, which find their
-    /// XMSS cache records. Cheap.
+    /// The public parameters of the XMSS keys [`Self::load_pq_keys`] would derive and has no saved
+    /// XMSS cache for in `cache_directory`, which find their XMSS cache records. Cheap.
     #[must_use]
-    pub fn pq_public_parameters(&self) -> Vec<(PublicKeyBytes, [u8; PUBLIC_PARAMETER_SIZE])> {
+    pub fn pq_public_parameters(
+        &self,
+        cache_directory: Option<&Path>,
+    ) -> Vec<(PublicKeyBytes, [u8; PUBLIC_PARAMETER_SIZE])> {
         self.load()
             .sign_methods
             .iter()
@@ -182,16 +195,22 @@ impl Signer {
                 SignMethod::Web3Signer(_) => None,
             })
             .filter(|(public_key, _)| !self.pq_keys_read().contains_key(public_key))
+            .filter(|(public_key, _)| {
+                cache_directory
+                    .is_none_or(|directory| !pq::xmss_cache_path(directory, *public_key).exists())
+            })
             .map(|(public_key, secret_key)| (public_key, pq::xmss_public_parameter(secret_key)))
             .collect()
     }
 
-    /// Takes the VRF trees the loaded PQ keys do not have yet from `artifact`, in parallel.
-    /// Returns how many it loaded. Keys it has no valid record for are left to
-    /// [`Self::build_missing_vrf_trees`].
-    ///
-    /// Do not call on an async executor thread.
-    pub fn load_vrf_trees_from_artifact(&self, artifact: &VrfStateArtifact) -> usize {
+    /// Takes the VRF trees the loaded PQ keys do not have yet from `artifact`, checked against
+    /// `state_vrf_roots`, the VRF roots in the state by state public key. Returns how many it
+    /// loaded. Keys it has no valid record for are left to [`Self::build_missing_vrf_trees`].
+    pub fn load_vrf_trees_from_artifact(
+        &self,
+        artifact: &VrfStateArtifact,
+        state_vrf_roots: &HashMap<PublicKeyBytes, H256>,
+    ) -> usize {
         let missing = self
             .pq_keys_read()
             .iter()
@@ -200,9 +219,11 @@ impl Signer {
             .collect_vec();
 
         missing
-            .into_par_iter()
-            .filter(
-                |(public_key, pq_key)| match pq_key.load_vrf_tree_from_artifact(artifact) {
+            .into_iter()
+            .filter(|(public_key, pq_key)| {
+                let state_vrf_root = state_vrf_roots.get(&pq_key.state_public_key()).copied();
+
+                match pq_key.load_vrf_tree_from_artifact(artifact, state_vrf_root) {
                     Ok(()) => true,
                     Err(error) => {
                         warn_with_peers!(
@@ -210,8 +231,8 @@ impl Signer {
                         );
                         false
                     }
-                },
-            )
+                }
+            })
             .count()
     }
 
@@ -220,6 +241,14 @@ impl Signer {
     ///
     /// Do not call on an async executor thread.
     pub fn build_missing_vrf_trees(&self) -> Result<()> {
+        // Building a tree on the global pool would stall every other task on it until it is done.
+        let threads = std::thread::available_parallelism().map_or(1, |threads| threads.get() / 4);
+
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(threads.max(1))
+            .thread_name(|index| format!("vrf-tree-{index}"))
+            .build()?;
+
         let missing = self
             .pq_keys_read()
             .iter()
@@ -234,7 +263,7 @@ impl Signer {
                 missing.len(),
             );
 
-            pq_key.build_vrf_tree()?;
+            pool.install(|| pq_key.build_vrf_tree())?;
         }
 
         Ok(())

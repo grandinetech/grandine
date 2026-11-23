@@ -14,7 +14,7 @@ use logging::warn_with_peers;
 use sha2::{Digest as _, Sha256};
 use ssz::H256;
 use types::pq::{primitives::VrfProof, validator_list::padded_pubkey};
-use xmss::{PUBLIC_PARAMETER_SIZE, XmssPublicKey, XmssSecretKey};
+use xmss::{PUBLIC_KEY_SIZE, PUBLIC_PARAMETER_SIZE, XmssPublicKey, XmssSecretKey};
 
 use crate::{vrf_state::VrfStateArtifact, xmss_cache::XmssCacheRecord};
 use zeroize::Zeroizing;
@@ -24,6 +24,7 @@ pub type PqKeys = HashMap<PublicKeyBytes, Arc<PqKey>>;
 /// The XMSS key and the VRF tree of a validator.
 pub struct PqKey {
     xmss: XmssSecretKey,
+    xmss_cache_path: Option<PathBuf>,
     vrf_seed: H256,
     // Building a tree takes minutes, so it is built after the key is in use. Only proposals need it.
     vrf_tree: OnceLock<VrfTree>,
@@ -33,8 +34,9 @@ pub struct PqKey {
 }
 
 impl PqKey {
-    /// Derives the XMSS key from `secret_key`, from `xmss_cache` if it matches, and loads the VRF
-    /// tree if it was saved in `cache_directory`. Takes about a second.
+    /// Loads the XMSS key from `cache_directory` or `xmss_cache` if either matches, deriving it
+    /// from `secret_key` otherwise, and loads the VRF tree if it was saved in `cache_directory`.
+    /// Takes about a second without a cache.
     ///
     /// Do not call on an async executor thread.
     pub fn load(
@@ -45,21 +47,45 @@ impl PqKey {
     ) -> Result<Self> {
         let (xmss_seed, vrf_seed) = derive_seeds(secret_key);
 
-        let cached_xmss = xmss_cache.and_then(|record| {
-            let xmss =
-                XmssSecretKey::from_cache_bytes(&xmss_seed, record.public_key, &record.bytes);
+        let xmss_cache_path =
+            cache_directory.map(|directory| xmss_cache_path(directory, public_key));
 
-            if xmss.is_none() {
-                warn_with_peers!(
-                    "the XMSS cache record for validator {public_key:?} does not match its key",
-                );
-            }
+        let saved_xmss = xmss_cache_path
+            .as_deref()
+            .filter(|path| path.exists())
+            .and_then(|path| {
+                let xmss = read_xmss_cache(path, &xmss_seed);
 
-            xmss
+                if xmss.is_none() {
+                    warn_with_peers!(
+                        "XMSS cache {} does not match the key of validator {public_key:?}",
+                        path.display(),
+                    );
+                }
+
+                xmss
+            });
+
+        let loaded_from_disk = saved_xmss.is_some();
+
+        let cached_xmss = saved_xmss.or_else(|| {
+            xmss_cache.and_then(|record| {
+                let xmss =
+                    XmssSecretKey::from_cache_bytes(&xmss_seed, record.public_key, &record.bytes);
+
+                if xmss.is_none() {
+                    warn_with_peers!(
+                        "the XMSS cache record for validator {public_key:?} does not match its key",
+                    );
+                }
+
+                xmss
+            })
         });
 
         let pq_key = Self {
             xmss: cached_xmss.unwrap_or_else(|| XmssSecretKey::from_seed(&xmss_seed)),
+            xmss_cache_path,
             vrf_seed,
             vrf_tree: OnceLock::new(),
             vrf_tree_path: cache_directory.map(|directory| {
@@ -67,6 +93,10 @@ impl PqKey {
             }),
             vrf_proofs: Mutex::default(),
         };
+
+        if !loaded_from_disk {
+            pq_key.save_xmss_cache()?;
+        }
 
         if let Some(path) = pq_key.vrf_tree_path.as_deref().filter(|path| path.exists()) {
             let bytes = fs::read(path)?;
@@ -120,19 +150,41 @@ impl PqKey {
         Ok(())
     }
 
-    /// Takes the VRF tree from the slot 0 branch in `artifact`. Builds a subtree, which takes
-    /// seconds. The artifact is not saved: loading it again is as fast.
-    ///
-    /// Do not call on an async executor thread.
-    pub fn load_vrf_tree_from_artifact(&self, artifact: &VrfStateArtifact) -> Result<()> {
+    /// Takes the VRF tree from the slot 0 branch in `artifact`, checked against `state_vrf_root`,
+    /// the validator's VRF root in the state, or else against the artifact's own root. Cheap.
+    pub fn load_vrf_tree_from_artifact(
+        &self,
+        artifact: &VrfStateArtifact,
+        state_vrf_root: Option<H256>,
+    ) -> Result<()> {
         if self.has_vrf_tree() {
             return Ok(());
         }
 
-        let (root, branch) = artifact.record(compute_vrf_leaf(self.vrf_seed, 1))?;
+        let (artifact_root, branch) = artifact.record(compute_vrf_leaf(self.vrf_seed, 1))?;
+        let root = state_vrf_root.unwrap_or(artifact_root);
         let vrf_tree = VrfTree::from_slot_zero_branch(self.vrf_seed, root, branch)?;
 
         self.vrf_tree.get_or_init(|| vrf_tree);
+
+        Ok(())
+    }
+
+    /// Saves the XMSS public key and the trees the key has built in the cache directory, for
+    /// [`Self::load`] to skip building them.
+    pub fn save_xmss_cache(&self) -> Result<()> {
+        let Some(path) = self.xmss_cache_path.as_deref() else {
+            return Ok(());
+        };
+
+        if let Some(directory) = path.parent() {
+            fs::create_dir_all(directory)?;
+        }
+
+        let mut bytes = self.xmss_public_key().as_ref().to_vec();
+        bytes.extend(self.xmss.cache_to_bytes());
+
+        fs::write(path, bytes)?;
 
         Ok(())
     }
@@ -212,6 +264,21 @@ impl PqKey {
             })?
             .proof(slot)
     }
+}
+
+/// Where [`PqKey::save_xmss_cache`] saves the XMSS cache of `public_key` in `cache_directory`.
+#[must_use]
+pub fn xmss_cache_path(cache_directory: &Path, public_key: PublicKeyBytes) -> PathBuf {
+    cache_directory.join(format!("{}.xmss", hex::encode(public_key.as_bytes())))
+}
+
+// The XMSS public key, then the trees as leanVM's `cache_to_bytes` writes them.
+fn read_xmss_cache(path: &Path, xmss_seed: &[u8; 32]) -> Option<XmssSecretKey> {
+    let bytes = fs::read(path).ok()?;
+    let (public_key, cache) = bytes.split_at_checked(PUBLIC_KEY_SIZE)?;
+    let public_key = XmssPublicKey::from_slice(public_key).ok()?;
+
+    XmssSecretKey::from_cache_bytes(xmss_seed, public_key, cache)
 }
 
 /// The public parameter of the XMSS key derived from `secret_key`. Cheap.

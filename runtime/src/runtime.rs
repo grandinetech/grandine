@@ -92,12 +92,14 @@ use tokio::{runtime::Builder, select, time::sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use types::{
+    combined::BeaconState as CombinedBeaconState,
     config::Config as ChainConfig,
     nonstandard::{Phase, PublishedDuty},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         primitives::H256,
     },
+    pq::validator_list::padded_pubkey,
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -875,13 +877,38 @@ fn connect_pq_sidecar(_socket: &Path) -> Result<()> {
     bail!("PQ networks need the leanVM sidecar, which is reached over a Unix socket")
 }
 
+// The VRF roots in the head state by state public key. Empty before the PQ fork.
+fn state_vrf_roots<P: Preset>(chain: &Chain<P, ()>) -> HashMap<PublicKeyBytes, H256> {
+    // TODO(PQ): Take the VRF roots from the beacon nodes under `vc`.
+    let Chain::Local(local_chain) = chain else {
+        return HashMap::new();
+    };
+
+    let CombinedBeaconState::Pq(state) = &*local_chain.controller.head_state().value else {
+        return HashMap::new();
+    };
+
+    state
+        .validators
+        .iter_pq()
+        .map(|validator| (padded_pubkey(validator.pubkey), validator.vrf_root))
+        .collect()
+}
+
 async fn load_xmss_caches<P: Preset>(
     chain: &Chain<P, ()>,
     client: &Client,
     signer: &Signer,
+    cache_directory: Option<&Path>,
     xmss_cache_url: &str,
 ) -> Result<HashMap<PublicKeyBytes, XmssCacheRecord>> {
     let source = XmssCacheSource::new(xmss_cache_url)?;
+    let public_parameters = signer.pq_public_parameters(cache_directory);
+
+    if public_parameters.is_empty() {
+        info_with_peers!("not fetching XMSS caches: every validator has one saved");
+        return Ok(HashMap::new());
+    }
 
     // TODO(PQ): Take the public keys from the beacon nodes under `vc`.
     let Chain::Local(local_chain) = chain else {
@@ -897,11 +924,7 @@ async fn load_xmss_caches<P: Preset>(
     }
 
     let (records, errors) = source
-        .records(
-            client,
-            state.validators().pubkeys(),
-            signer.pq_public_parameters(),
-        )
+        .records(client, state.validators().pubkeys(), public_parameters)
         .await;
 
     for error in errors {
@@ -1135,7 +1158,14 @@ async fn run_services<P: Preset>(
             .and_then(|validator_client| validator_client.xmss_cache_url.as_deref())
         {
             Some(xmss_cache_url) => {
-                load_xmss_caches(&chain, &client, &signer, xmss_cache_url).await?
+                load_xmss_caches(
+                    &chain,
+                    &client,
+                    &signer,
+                    vrf_tree_directory.as_deref(),
+                    xmss_cache_url,
+                )
+                .await?
             }
             None => HashMap::new(),
         };
@@ -1150,28 +1180,6 @@ async fn run_services<P: Preset>(
                 signer.load_pq_keys(vrf_tree_directory.as_deref(), &xmss_caches)
             })
             .await??;
-        }
-
-        if let Some(vrf_state_url) =
-            validator_client.and_then(|validator_client| validator_client.vrf_state_url.as_deref())
-        {
-            let source = VrfStateSource::new(vrf_state_url)?;
-
-            match source.load(&client).await {
-                Ok(artifact) => {
-                    let signer = signer.clone_arc();
-
-                    let loaded = tokio::task::spawn_blocking(move || {
-                        signer.load_vrf_trees_from_artifact(&artifact)
-                    })
-                    .await?;
-
-                    info_with_peers!("loaded {loaded} VRF trees from {source}");
-                }
-                Err(error) => {
-                    warn_with_peers!("failed to load VRF state from {source}: {error:?}");
-                }
-            }
         }
 
         // Signing builds the trees of a leaf range first, which takes longer than a duty allows.
@@ -1191,11 +1199,38 @@ async fn run_services<P: Preset>(
         });
 
         // TODO(PQ): Load the PQ keys of keys added through the key manager API.
-        let signer = signer.clone_arc();
+        let vrf_state_source = validator_client
+            .and_then(|validator_client| validator_client.vrf_state_url.as_deref())
+            .map(VrfStateSource::new)
+            .transpose()?;
 
-        tokio::task::spawn_blocking(move || {
-            if let Err(error) = signer.build_missing_vrf_trees() {
-                warn_with_peers!("failed to build VRF trees: {error:?}");
+        let state_vrf_roots = state_vrf_roots(&chain);
+        let signer = signer.clone_arc();
+        let client = client.clone();
+
+        // Until its VRF tree is loaded, a validator cannot propose.
+        tokio::spawn(async move {
+            if let Some(source) = vrf_state_source {
+                info_with_peers!("loading VRF trees from {source}");
+
+                match source.load(&client).await {
+                    Ok(artifact) => {
+                        let loaded =
+                            signer.load_vrf_trees_from_artifact(&artifact, &state_vrf_roots);
+                        info_with_peers!("loaded {loaded} VRF trees from {source}");
+                    }
+                    Err(error) => {
+                        warn_with_peers!("failed to load VRF state from {source}: {error:?}");
+                    }
+                }
+            }
+
+            let build = tokio::task::spawn_blocking(move || signer.build_missing_vrf_trees());
+
+            match build.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => warn_with_peers!("failed to build VRF trees: {error:?}"),
+                Err(error) => warn_with_peers!("failed to build VRF trees: {error:?}"),
             }
         });
     }

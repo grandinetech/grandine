@@ -61,10 +61,7 @@ impl VrfTree {
     }
 
     /// A tree from the branch of slot 0 in a VRF state artifact, checked against the seed and
-    /// `root`. Builds the leftmost `2^CACHE_HEIGHT` leaves, which takes seconds, and proves only
-    /// slots among them.
-    ///
-    /// Do not call on an async executor thread.
+    /// `root`. Cheap. Proves only slots among the leftmost `2^CACHE_HEIGHT` leaves.
     pub fn from_slot_zero_branch(vrf_seed: H256, root: H256, branch: &[H256]) -> Result<Self> {
         Self::from_slot_zero_branch_with_depth(vrf_seed, depth(), CACHE_HEIGHT, root, branch)
     }
@@ -85,20 +82,9 @@ impl VrfTree {
         );
 
         let (lower_branch, siblings) = branch.split_at(usize::try_from(cache_height)?);
-        let mut computed_lower_branch = vec![H256::zero(); lower_branch.len()];
 
-        let subtree_root = compute_node(
-            vrf_seed,
-            cache_height,
-            0,
-            Some(0),
-            &mut computed_lower_branch,
-        );
-
-        ensure!(
-            computed_lower_branch == lower_branch,
-            "the VRF branch of slot 0 does not match the seed",
-        );
+        // Proofs rebuild the lower branch from the seed, so it only has to lead to `root`.
+        let subtree_root = fold_slot_zero_branch(compute_vrf_leaf(vrf_seed, 0), lower_branch);
 
         let tree = Self {
             vrf_seed,
@@ -180,13 +166,10 @@ impl VrfTree {
 
                 level.first().copied().unwrap_or_default()
             }
-            // Slot 0 is the leftmost leaf, so every sibling on its path is a right child.
             Upper::SlotZero {
                 subtree_root,
                 siblings,
-            } => siblings.iter().fold(*subtree_root, |node, sibling| {
-                keccak256(&[node.as_bytes(), sibling.as_bytes()])
-            }),
+            } => fold_slot_zero_branch(*subtree_root, siblings),
         }
     }
 
@@ -248,6 +231,13 @@ impl VrfTree {
 
 fn depth() -> u32 {
     u32::try_from(VRF_TREE_DEPTH).expect("VRF_TREE_DEPTH fits in u32")
+}
+
+// Slot 0 is the leftmost leaf, so every sibling on its path is a right child.
+fn fold_slot_zero_branch(node: H256, siblings: &[H256]) -> H256 {
+    siblings.iter().fold(node, |node, sibling| {
+        keccak256(&[node.as_bytes(), sibling.as_bytes()])
+    })
 }
 
 fn parents(level: &[H256]) -> Vec<H256> {
@@ -410,6 +400,19 @@ mod tests {
         )
         .err()
         .expect("a branch must match the seed");
+
+        let mut tampered = branch;
+        tampered[0] = H256::repeat_byte(7);
+
+        VrfTree::from_slot_zero_branch_with_depth(
+            vrf_seed,
+            depth,
+            cache_height,
+            full.root(),
+            &tampered,
+        )
+        .err()
+        .expect("a branch with a wrong node below the cached level must not lead to the root");
 
         Ok(())
     }

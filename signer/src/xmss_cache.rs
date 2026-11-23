@@ -30,7 +30,7 @@ const RECORD_SIZE: usize = 4096 + 2 * 5300;
 const RECORD_SIZE_U64: u64 = RECORD_SIZE as u64;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const CONCURRENT_REQUESTS: usize = 16;
+const CONCURRENT_REQUESTS: usize = 64;
 
 /// The cached trees of a key, unchecked.
 pub struct XmssCacheRecord {
