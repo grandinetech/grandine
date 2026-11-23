@@ -141,7 +141,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                 match self.api.get_blobs_v1::<P>(versioned_hashes).await {
                     Ok(blobs_and_proofs) => {
-                        let block_header = block.to_header();
+                        // Blob sidecars predate PQ.
+                        let Some(block_header) = block.to_header().pre_pq() else {
+                            return;
+                        };
 
                         for (blob_and_proof, kzg_commitment, index) in blobs_and_proofs
                             .into_iter()

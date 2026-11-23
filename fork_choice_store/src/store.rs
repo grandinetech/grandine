@@ -88,8 +88,8 @@ use types::{
     },
     pq::{
         consts::{
-            LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE, LEAF_OFFSET_PROPOSER_PREFERENCES,
-            LEAF_OFFSET_PTC_ATTESTER,
+            LEAF_OFFSET_BEACON_PROPOSER, LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE,
+            LEAF_OFFSET_PROPOSER_PREFERENCES, LEAF_OFFSET_PTC_ATTESTER,
         },
         validator_list::{padded_pubkey, unpadded_pubkey},
     },
@@ -2425,45 +2425,75 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if !block.base_signature_status.is_verified() {
             let state = state_for_signature().unwrap_or_else(|| self.head().state(self));
+            let proposer_index = block.item.message().proposer_index();
 
-            let pubkey = accessors::public_key(&state, block.item.message().proposer_index())
-                 .inspect_err(|error| {
-                     debug_with_peers!(
-                         "unable to verify block {block_root:?} signature for gossip validation: {error:?}"
-                     )})
-                 .ok()
-                 .and_then(|pubkey| self.pubkey_cache.get(pubkey));
+            // # [REJECT] The proposer signature is valid
+            // Slots are not preprocessed here, so manual signing_root calculation is required
+            // to correctly handle hard-forks
+            let epoch = misc::compute_epoch_at_slot::<P>(block.item.message().slot());
+            let fork_version = self.chain_config.version_at_epoch(epoch);
 
-            if let Some(pubkey) = pubkey {
-                // # [REJECT] The proposer signature is valid
-                // Slots are not preprocessed here, so manual signing_root calculation is required
-                // to correctly handle hard-forks
-                let epoch = misc::compute_epoch_at_slot::<P>(block.item.message().slot());
-                let fork_version = self.chain_config.version_at_epoch(epoch);
+            let domain = misc::compute_domain(
+                &self.chain_config,
+                DOMAIN_BEACON_PROPOSER,
+                Some(fork_version),
+                Some(state.genesis_validators_root()),
+            );
 
-                let domain = misc::compute_domain(
-                    &self.chain_config,
-                    DOMAIN_BEACON_PROPOSER,
-                    Some(fork_version),
-                    Some(state.genesis_validators_root()),
-                );
+            let signing_root = misc::compute_signing_root(block.item.message(), domain);
 
-                let signing_root = misc::compute_signing_root(block.item.message(), domain);
+            let verified = match block.item.signature() {
+                SignatureRef::Bls(signature) => {
+                    let pubkey = accessors::public_key(&state, proposer_index)
+                        .inspect_err(|error| {
+                            debug_with_peers!(
+                                "unable to verify block {block_root:?} signature for gossip validation: {error:?}"
+                            )
+                        })
+                        .ok()
+                        .and_then(|pubkey| self.pubkey_cache.get(pubkey));
 
-                SingleVerifier
-                    .verify_singular(
-                        signing_root,
-                        block.item.signature(),
-                        pubkey,
-                        SignatureKind::Block,
-                    )
-                    .context(Error::<P>::BlockWithoutValidProposerSignature { block_root })?;
+                    if let Some(pubkey) = pubkey {
+                        SingleVerifier
+                            .verify_singular(signing_root, signature, pubkey, SignatureKind::Block)
+                            .context(Error::<P>::BlockWithoutValidProposerSignature {
+                                block_root,
+                            })?;
 
+                        true
+                    } else {
+                        debug_with_peers!(
+                            "unable to verify block {block_root:?} signature for gossip validation: pubkey not found in cache"
+                        );
+
+                        false
+                    }
+                }
+                // A pre-PQ state holds BLS keys.
+                SignatureRef::Xmss(_) if state.phase() < Phase::Pq => false,
+                SignatureRef::Xmss(signature) => {
+                    let leaf_index = pq::compute_xmss_leaf_index(
+                        block.item.message().slot(),
+                        LEAF_OFFSET_BEACON_PROPOSER,
+                    )?;
+
+                    ensure!(
+                        pq::verify_validator_signature(
+                            &state,
+                            proposer_index,
+                            leaf_index,
+                            signing_root,
+                            signature,
+                        )?,
+                        Error::<P>::BlockWithoutValidProposerSignature { block_root },
+                    );
+
+                    true
+                }
+            };
+
+            if verified {
                 block = block.into_base_verified();
-            } else {
-                debug_with_peers!(
-                    "unable to verify block {block_root:?} signature for gossip validation: pubkey not found in cache"
-                );
             }
         }
 

@@ -5,7 +5,7 @@ use derive_more::Constructor;
 use helper_functions::misc;
 use ssz::{Ssz, SszReadDefault, SszWrite};
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{SignatureRef, SignedBeaconBlock},
     phase0::{
         containers::{BeaconBlockHeader, ProposerSlashing},
         primitives::{Epoch, H256, Slot, ValidatorIndex},
@@ -53,12 +53,17 @@ impl Blocks {
         &self,
         block: &SignedBeaconBlock<P>,
     ) -> Result<Option<ExplainedProposerSlashing>> {
+        // TODO(PQ): Detect PQ proposer slashings. They need headers with XMSS signatures.
+        let SignatureRef::Bls(signature) = block.signature() else {
+            return Ok(None);
+        };
+
         let proposer_index = block.message().proposer_index();
         let slot = block.message().slot();
 
         if let Some(existing_block_record) = self.find_block_record(proposer_index, slot)? {
             let block_record = BlockRecord {
-                signature: block.signature(),
+                signature,
                 parent_root: block.message().parent_root(),
                 state_root: block.message().state_root(),
                 body_root: block.message().body().hash_tree_root(),
@@ -83,7 +88,7 @@ impl Blocks {
 
                 let slashing = ProposerSlashing {
                     signed_header_1: existing_header,
-                    signed_header_2: block.to_header(),
+                    signed_header_2: block.message().to_header().with_signature(signature),
                 };
 
                 return Ok(Some(ExplainedProposerSlashing {
@@ -97,9 +102,13 @@ impl Blocks {
     }
 
     pub fn update<P: Preset>(&self, block: &SignedBeaconBlock<P>) -> Result<()> {
+        let SignatureRef::Bls(signature) = block.signature() else {
+            return Ok(());
+        };
+
         let key = build_block_record_key(block.message().proposer_index(), block.message().slot());
         let block_record = BlockRecord {
-            signature: block.signature(),
+            signature,
             parent_root: block.message().parent_root(),
             state_root: block.message().state_root(),
             body_root: block.message().body().hash_tree_root(),
@@ -203,11 +212,17 @@ mod tests {
             ProposerSlashingReason::DoubleVote,
         );
 
-        let signed_header_1 = block_1.to_header();
-        let signed_header_2 = block_2.to_header();
+        let signed_header_1 = block_1.to_header().pre_pq();
+        let signed_header_2 = block_2.to_header().pre_pq();
 
-        assert_eq!(explained_slashing.slashing.signed_header_1, signed_header_1);
-        assert_eq!(explained_slashing.slashing.signed_header_2, signed_header_2);
+        assert_eq!(
+            Some(explained_slashing.slashing.signed_header_1),
+            signed_header_1
+        );
+        assert_eq!(
+            Some(explained_slashing.slashing.signed_header_2),
+            signed_header_2
+        );
 
         Ok(())
     }

@@ -1176,7 +1176,7 @@ pub trait SignedBeaconBlock<P: Preset>: Debug + Send + Sync {
     type Message: BeaconBlock<P> + ?Sized;
 
     fn message(&self) -> &Self::Message;
-    fn signature(&self) -> SignatureBytes;
+    fn signature(&self) -> SignatureRef<'_>;
 }
 
 impl<P: Preset, B: SignedBeaconBlock<P>> SignedBeaconBlock<P> for Arc<B> {
@@ -1186,7 +1186,7 @@ impl<P: Preset, B: SignedBeaconBlock<P>> SignedBeaconBlock<P> for Arc<B> {
         self.as_ref().message()
     }
 
-    fn signature(&self) -> SignatureBytes {
+    fn signature(&self) -> SignatureRef<'_> {
         self.as_ref().signature()
     }
 }
@@ -1208,19 +1208,17 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBeaconBlock<P> {
         }
     }
 
-    // PQ blocks carry XMSS signatures, which never verify as BLS signatures.
-    // See `CombinedSignedBeaconBlock::xmss_signature`.
-    fn signature(&self) -> SignatureBytes {
+    fn signature(&self) -> SignatureRef<'_> {
         match self {
-            Self::Phase0(block) => block.signature,
-            Self::Altair(block) => block.signature,
-            Self::Bellatrix(block) => block.signature,
-            Self::Capella(block) => block.signature,
-            Self::Deneb(block) => block.signature,
-            Self::Electra(block) => block.signature,
-            Self::Fulu(block) => block.signature,
-            Self::Gloas(block) => block.signature,
-            Self::Pq(_) => SignatureBytes::zero(),
+            Self::Phase0(block) => SignatureRef::Bls(block.signature),
+            Self::Altair(block) => SignatureRef::Bls(block.signature),
+            Self::Bellatrix(block) => SignatureRef::Bls(block.signature),
+            Self::Capella(block) => SignatureRef::Bls(block.signature),
+            Self::Deneb(block) => SignatureRef::Bls(block.signature),
+            Self::Electra(block) => SignatureRef::Bls(block.signature),
+            Self::Fulu(block) => SignatureRef::Bls(block.signature),
+            Self::Gloas(block) => SignatureRef::Bls(block.signature),
+            Self::Pq(block) => SignatureRef::Xmss(&block.signature),
         }
     }
 }
@@ -1238,14 +1236,16 @@ impl<P: Preset> SignedBeaconBlock<P> for CombinedSignedBlindedBeaconBlock<P> {
         }
     }
 
-    fn signature(&self) -> SignatureBytes {
-        match self {
+    fn signature(&self) -> SignatureRef<'_> {
+        let signature = match self {
             Self::Bellatrix(block) => block.signature,
             Self::Capella(block) => block.signature,
             Self::Deneb(block) => block.signature,
             Self::Electra(block) => block.signature,
             Self::Fulu(block) => block.signature,
-        }
+        };
+
+        SignatureRef::Bls(signature)
     }
 }
 

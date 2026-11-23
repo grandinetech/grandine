@@ -839,8 +839,11 @@ pub fn construct_blob_sidecars<P: Preset>(
         return Ok(vec![]);
     };
 
+    let Some(signed_block_header) = block.to_header().pre_pq() else {
+        return Ok(vec![]);
+    };
+
     let commitments = body.blob_kzg_commitments().into_iter().copied();
-    let signed_block_header = block.to_header();
 
     izip!(0.., blobs, proofs, commitments)
         .map(|(index, blob, kzg_proof, kzg_commitment)| {

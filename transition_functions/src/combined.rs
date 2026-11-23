@@ -5,8 +5,8 @@ use enum_iterator::Sequence as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors,
-    error::SignatureKind,
-    fork, misc,
+    error::{Error as HelperError, SignatureKind},
+    fork, misc, pq as pq_helpers,
     signing::SignForSingleFork as _,
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
     verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
@@ -17,7 +17,8 @@ use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
     combined::{
-        BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        BeaconBlock, BeaconState, BlindedBeaconBlock, SignatureRef, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
     },
     config::Config,
     nonstandard::{BlockRewards, Phase, Toption},
@@ -26,6 +27,7 @@ use types::{
         containers::DepositData,
         primitives::{Slot, ValidatorIndex},
     },
+    pq::consts::LEAF_OFFSET_BEACON_PROPOSER,
     preset::Preset,
     traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
@@ -381,9 +383,13 @@ fn custom_blinded_state_transition<P: Preset, V: Verifier>(
     if !V::IS_NULL {
         let public_key = accessors::public_key(state, block.proposer_index())?;
 
+        let SignatureRef::Bls(signature) = signed_block.signature() else {
+            bail!(HelperError::SignatureInvalid(SignatureKind::Block));
+        };
+
         verifier.verify_singular(
             block.signing_root(config, state),
-            signed_block.signature(),
+            signature,
             pubkey_cache.get_or_insert(*public_key)?,
             SignatureKind::Block,
         )?;
@@ -488,14 +494,35 @@ pub fn verify_base_signature_with_head_state<P: Preset>(
     );
 
     let signing_root = misc::compute_signing_root(block.message(), domain);
-    let pubkey_bytes = accessors::public_key(head_state, block.message().proposer_index())?;
+    let proposer_index = block.message().proposer_index();
 
-    SingleVerifier.verify_singular(
-        signing_root,
-        block.signature(),
-        pubkey_cache.get_or_insert(*pubkey_bytes)?,
-        SignatureKind::Block,
-    )
+    match block.signature() {
+        SignatureRef::Bls(signature) => SingleVerifier.verify_singular(
+            signing_root,
+            signature,
+            pubkey_cache.get_or_insert(*accessors::public_key(head_state, proposer_index)?)?,
+            SignatureKind::Block,
+        ),
+        SignatureRef::Xmss(signature) => {
+            let leaf_index = pq_helpers::compute_xmss_leaf_index(
+                block.message().slot(),
+                LEAF_OFFSET_BEACON_PROPOSER,
+            )?;
+
+            ensure!(
+                pq_helpers::verify_validator_signature(
+                    head_state,
+                    proposer_index,
+                    leaf_index,
+                    signing_root,
+                    signature,
+                )?,
+                HelperError::SignatureInvalid(SignatureKind::Block),
+            );
+
+            Ok(())
+        }
+    }
 }
 
 pub fn verify_signatures<P: Preset>(

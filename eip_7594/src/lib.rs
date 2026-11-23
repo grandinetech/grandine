@@ -34,7 +34,7 @@ use types::{
         primitives::{Gwei, NodeId, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState, SignedBeaconBlock as _},
 };
 
 use error::Error;
@@ -384,10 +384,11 @@ pub fn construct_data_column_sidecars<P: Preset>(
                 return Ok(vec![]);
             }
 
+            let signed_block_header = block.message.to_header().with_signature(block.signature);
             let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body)?;
 
             get_fulu_data_column_sidecars(
-                signed_block.to_header(),
+                signed_block_header,
                 &body.blob_kzg_commitments,
                 kzg_commitments_inclusion_proof,
                 cells_and_kzg_proofs,

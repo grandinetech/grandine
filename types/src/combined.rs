@@ -130,7 +130,8 @@ use crate::{
             BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader,
             ProposerSlashing as Phase0ProposerSlashing,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
-            SignedBeaconBlock as Phase0SignedBeaconBlock, SignedBeaconBlockHeader,
+            SignedBeaconBlock as Phase0SignedBeaconBlock,
+            SignedBeaconBlockHeader as Phase0SignedBeaconBlockHeader,
         },
         primitives::{
             DepositIndex, ExecutionBlockHash, ExecutionBlockNumber, Slot, UnixSeconds,
@@ -145,6 +146,7 @@ use crate::{
             ExecutionRequests as PqExecutionRequests, ProposerSlashing as PqProposerSlashing,
             SignedAggregateAndProof as PqSignedAggregateAndProof,
             SignedBeaconBlock as PqSignedBeaconBlock,
+            SignedBeaconBlockHeader as PqSignedBeaconBlockHeader,
             SignedBlindedExecutionPayloadEnvelope as PqSignedBlindedExecutionPayloadEnvelope,
             SignedExecutionPayloadBid as PqSignedExecutionPayloadBid,
             SignedExecutionPayloadEnvelope as PqSignedExecutionPayloadEnvelope,
@@ -821,15 +823,17 @@ impl<P: Preset> SignedBeaconBlock<P> {
     }
 
     #[must_use]
-    pub const fn xmss_signature(&self) -> Option<&XmssSignature> {
-        match self {
-            Self::Pq(block) => Some(&block.signature),
-            _ => None,
-        }
-    }
-
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
-        self.message().to_header().with_signature(self.signature())
+        let message = self.message().to_header();
+
+        match self.signature() {
+            SignatureRef::Bls(signature) => message.with_signature(signature).into(),
+            SignatureRef::Xmss(signature) => PqSignedBeaconBlockHeader {
+                message,
+                signature: signature.clone(),
+            }
+            .into(),
+        }
     }
 
     pub fn from_ssz_at_phase(phase: Phase, bytes: &[u8]) -> Result<Self, ReadError> {
@@ -985,15 +989,6 @@ impl<P: Preset> BeaconBlock<P> {
         self.with_signature(SignatureBytes::zero())
     }
 
-    /// `None` unless the block is from PQ or later.
-    #[must_use]
-    pub fn with_xmss_signature(self, signature: XmssSignature) -> Option<SignedBeaconBlock<P>> {
-        match self {
-            Self::Pq(message) => Some(PqSignedBeaconBlock { message, signature }.into()),
-            _ => None,
-        }
-    }
-
     pub fn with_signature(self, signature: SignatureBytes) -> SignedBeaconBlock<P> {
         match self {
             Self::Phase0(message) => Phase0SignedBeaconBlock { message, signature }.into(),
@@ -1004,7 +999,6 @@ impl<P: Preset> BeaconBlock<P> {
             Self::Electra(message) => ElectraSignedBeaconBlock { message, signature }.into(),
             Self::Fulu(message) => FuluSignedBeaconBlock { message, signature }.into(),
             Self::Gloas(message) => GloasSignedBeaconBlock { message, signature }.into(),
-            // PQ blocks carry XMSS signatures. See `BeaconBlock::with_xmss_signature`.
             Self::Pq(message) => PqSignedBeaconBlock {
                 message,
                 signature: XmssSignature::empty(),
@@ -1450,6 +1444,13 @@ impl<P: Preset> TryFrom<SignedBeaconBlock<P>> for SignedBlindedBeaconBlock<P> {
 }
 
 impl<P: Preset> SignedBlindedBeaconBlock<P> {
+    // Blinded blocks predate PQ, so they are always signed with BLS.
+    #[must_use]
+    pub fn to_header(&self) -> Phase0SignedBeaconBlockHeader {
+        let signature = self.signature().bls().unwrap_or_else(SignatureBytes::zero);
+        self.message().to_header().with_signature(signature)
+    }
+
     pub fn unblind(
         self,
         payload_body: ExecutionPayloadBody<P>,
@@ -2037,6 +2038,16 @@ impl<'requests, P: Preset> EnvelopeExecutionRequests<'requests, P> {
 pub enum SignatureRef<'signature> {
     Bls(SignatureBytes),
     Xmss(&'signature XmssSignature),
+}
+
+impl SignatureRef<'_> {
+    #[must_use]
+    pub const fn bls(self) -> Option<SignatureBytes> {
+        match self {
+            Self::Bls(signature) => Some(signature),
+            Self::Xmss(_) => None,
+        }
+    }
 }
 
 // The phase of an envelope is not determined by its slot alone, but the two layouts differ in the
@@ -2934,6 +2945,31 @@ impl<P: Preset> AttesterSlashing<P> {
 
 #[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
 #[serde(untagged)]
+pub enum SignedBeaconBlockHeader {
+    Phase0(Phase0SignedBeaconBlockHeader),
+    Pq(PqSignedBeaconBlockHeader),
+}
+
+impl SignedBeaconBlockHeader {
+    #[must_use]
+    pub const fn message(&self) -> BeaconBlockHeader {
+        match self {
+            Self::Phase0(header) => header.message,
+            Self::Pq(header) => header.message,
+        }
+    }
+
+    #[must_use]
+    pub fn pre_pq(self) -> Option<Phase0SignedBeaconBlockHeader> {
+        match self {
+            Self::Phase0(header) => Some(header),
+            Self::Pq(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(untagged)]
 pub enum ProposerSlashing {
     Phase0(Phase0ProposerSlashing),
     Pq(PqProposerSlashing),
@@ -3265,7 +3301,7 @@ impl<P: Preset> DataColumnSidecar<P> {
         }
     }
 
-    pub const fn signed_block_header(&self) -> Option<&SignedBeaconBlockHeader> {
+    pub const fn signed_block_header(&self) -> Option<&Phase0SignedBeaconBlockHeader> {
         match self {
             Self::Fulu(sidecar) => Some(&sidecar.signed_block_header),
             Self::Gloas(_) => None,
@@ -3580,6 +3616,21 @@ mod extra_tests {
     use crate::preset::Mainnet;
 
     use super::*;
+
+    #[test]
+    fn signed_block_header_is_parsed_by_signature_length() -> Result<()> {
+        let phase0 = SignedBeaconBlockHeader::Phase0(Phase0SignedBeaconBlockHeader::default());
+        let pq = SignedBeaconBlockHeader::Pq(PqSignedBeaconBlockHeader::default());
+
+        for header in [phase0, pq] {
+            let parsed =
+                serde_json::from_value::<SignedBeaconBlockHeader>(serde_json::to_value(&header)?)?;
+
+            assert_eq!(parsed, header);
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn randao_reveal_is_parsed_by_length() -> anyhow::Result<()> {

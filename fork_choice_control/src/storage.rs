@@ -6,7 +6,6 @@ use core::{
 use std::{borrow::Cow, collections::HashSet, sync::Arc, thread::Builder};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, anyhow, bail, ensure};
-use bls::SignatureBytes;
 use database::{Database, PrefixableKey, View, decompress};
 use derive_more::Display;
 use diff::{Patch as _, PatchConfig};
@@ -29,8 +28,8 @@ use transition_functions::combined;
 use typenum::Unsigned as _;
 use types::{
     combined::{
-        BeaconState, DataColumnSidecar, EnvelopeExecutionRequests, SignedBeaconBlock,
-        SignedBlindedBeaconBlock, SignedBlindedExecutionPayloadEnvelope,
+        BeaconState, DataColumnSidecar, EnvelopeExecutionRequests, SignatureRef, SignedBeaconBlock,
+        SignedBeaconBlockHeader, SignedBlindedBeaconBlock, SignedBlindedExecutionPayloadEnvelope,
         SignedExecutionPayloadEnvelope,
     },
     config::Config,
@@ -45,7 +44,6 @@ use types::{
     },
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::SignedBeaconBlockHeader,
         primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
@@ -2482,7 +2480,10 @@ impl<P: Preset> StoredBlock<P> {
 
     #[must_use]
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
-        self.message().to_header().with_signature(self.signature())
+        match self {
+            Self::Full(block) => block.to_header(),
+            Self::Blinded(block) => block.to_header().into(),
+        }
     }
 }
 
@@ -2496,7 +2497,7 @@ impl<P: Preset> traits::SignedBeaconBlock<P> for StoredBlock<P> {
         }
     }
 
-    fn signature(&self) -> SignatureBytes {
+    fn signature(&self) -> SignatureRef<'_> {
         match self {
             Self::Full(block) => block.signature(),
             Self::Blinded(block) => block.signature(),

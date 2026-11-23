@@ -43,7 +43,7 @@ use crate::{
     fulu::containers::DataColumnIdentifier,
     gloas::primitives::{BlockAccessList, Transaction as GloasTransaction},
     phase0::{
-        containers::{Fork, SignedBeaconBlockHeader, Validator},
+        containers::{Fork, Validator},
         primitives::{Epoch, Gwei, Slot, Uint256, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
@@ -503,17 +503,6 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
             Self::BlockRoot((block_root, _)) => *block_root,
-        }
-    }
-
-    #[must_use]
-    pub fn signed_block_header(&self) -> Option<SignedBeaconBlockHeader> {
-        match self {
-            Self::Block(block) => Some(block.to_header()),
-            Self::Sidecar(sidecar) => sidecar
-                .pre_gloas()
-                .map(|sidecar| sidecar.signed_block_header),
-            Self::BlockRoot(_) => None,
         }
     }
 

@@ -590,7 +590,7 @@ impl RemoteBeaconNode {
 
         check_not_optimistic(&self.url, execution_optimistic)?;
 
-        Ok((block_header.header.message.slot, block_header.root))
+        Ok((block_header.header.message().slot, block_header.root))
     }
 
     pub async fn refresh_health(&self, slot: Slot) {
@@ -2379,7 +2379,7 @@ mod tests {
 
         assert_eq!(execution_optimistic, Some(false));
         assert_eq!(block_header.root, H256::repeat_byte(1));
-        assert_eq!(block_header.header.message.slot, 6);
+        assert_eq!(block_header.header.message().slot, 6);
 
         Ok(())
     }

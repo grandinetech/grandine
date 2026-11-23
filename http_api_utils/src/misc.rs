@@ -5,9 +5,9 @@ use bls::PublicKeyBytes;
 use parse_display::Display;
 use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
-use types::phase0::{
-    containers::SignedBeaconBlockHeader,
-    primitives::{CommitteeIndex, H256, Slot, ValidatorIndex},
+use types::{
+    combined::SignedBeaconBlockHeader,
+    phase0::primitives::{CommitteeIndex, H256, Slot, ValidatorIndex},
 };
 
 pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
@@ -69,7 +69,7 @@ pub struct ValidatorLivenessResponse {
 }
 
 /// <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlockHeader>
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct BlockHeadersResponse {
     pub root: H256,
     pub canonical: bool,
