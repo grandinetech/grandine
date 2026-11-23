@@ -295,6 +295,7 @@ impl Error {
             Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
+            | Self::EpochRewardsNotFinal { .. }
             | Self::ExecutionPayloadEnvelopeNotFound
             | Self::MatchingAttestationHeadBlockNotFound
             | Self::MatchingPayloadAttestationHeadBlockNotFound
@@ -313,7 +314,6 @@ impl Error {
             | Self::EpochBeforePrevious { .. }
             | Self::EpochNotInSyncCommitteePeriod
             | Self::EpochOutOfRangeForStateRandao
-            | Self::EpochRewardsNotFinal { .. }
             | Self::BlobDataIncludedHeaderMissing
             | Self::EventTopicsEmpty
             | Self::InvalidAggregatesAndProofs(_)
