@@ -97,7 +97,7 @@ refuses a sidecar that speaks another protocol version or proves for another ver
 ```shell
 git clone https://github.com/leanEthereum/leanVM
 cd leanVM
-git checkout c5ee9d239e42d0bc8113eb4aee3e2cae5faf1764
+git checkout 241b009a61ba5fde797d1213b5bf76310f0d5060
 cargo build --release -p leanvm-sidecar --features experimental_prover
 mkdir -p -m 700 ~/.leanvm
 target/release/leanvm-sidecar --socket ~/.leanvm/sidecar.sock
