@@ -13,6 +13,7 @@ impl-serde = { workspace = true }
 itertools = { workspace = true }
 once_cell = { workspace = true }
 rand = { workspace = true }
+rayon = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 ssz = { workspace = true }
@@ -21,7 +22,6 @@ typenum = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-std_ext = { workspace = true }
 tap = { workspace = true }
 [lints.rust]
 # `fixed_hash::construct_fixed_hash!` checks `feature = "dev"` in the crates that invoke it.
