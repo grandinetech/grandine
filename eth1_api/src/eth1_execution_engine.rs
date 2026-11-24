@@ -58,6 +58,7 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -65,6 +66,7 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
     ) {
         ExecutionServiceMessage::NotifyForkchoiceUpdated {
             head_eth1_block_hash,
+            head_beacon_block_root,
             safe_eth1_block_hash,
             finalized_eth1_block_hash,
             payload_attributes,

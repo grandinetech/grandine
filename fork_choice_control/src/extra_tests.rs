@@ -2263,6 +2263,88 @@ fn forkchoice_updated_invalid_verdict_invalidates_payloads_after_latest_valid_ha
     context.assert_head(1, block_1.message().hash_tree_root());
 }
 
+// A second identical update would only be a redundant call to the execution engine.
+// The update carries the root of the block, so the execution service can recognize
+// a head that `engine_newPayload` has already answered INVALID.
+#[test]
+fn forkchoice_updated_is_sent_once_with_root_for_block_extending_canonical_chain() {
+    let mut context = Context::bellatrix_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_2, _) =
+        context.block_with_payload(&state_1, 2, H256::default(), H256::repeat_byte(2));
+
+    let head_1 = (
+        H256::repeat_byte(1),
+        Some(block_1.message().hash_tree_root()),
+    );
+    let head_2 = (
+        H256::repeat_byte(2),
+        Some(block_2.message().hash_tree_root()),
+    );
+
+    context.on_slot(block_2.message().slot());
+
+    context.on_acceptable_block(&block_1);
+
+    assert_eq!(context.take_forkchoice_updated_heads(), [head_1]);
+
+    context.on_acceptable_block(&block_2);
+
+    assert_eq!(context.take_forkchoice_updated_heads(), [head_2]);
+}
+
+// ```text
+// 0 - 1 - 2 - 3
+// ```
+//
+// The execution engine answers INVALID for 3 with 1 as the latest valid payload.
+// Updates after that must move the execution engine to 1, never back to 2 or 3.
+#[test]
+fn forkchoice_updated_invalid_verdict_is_followed_by_update_to_latest_valid_payload() {
+    let mut context = Context::bellatrix_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_2, state_2) =
+        context.block_with_payload(&state_1, 2, H256::default(), H256::repeat_byte(2));
+    let (block_3, _) =
+        context.block_with_payload(&state_2, 3, H256::default(), H256::repeat_byte(3));
+
+    let head_1 = (
+        H256::repeat_byte(1),
+        Some(block_1.message().hash_tree_root()),
+    );
+    let head_2 = (
+        H256::repeat_byte(2),
+        Some(block_2.message().hash_tree_root()),
+    );
+    let head_3 = (
+        H256::repeat_byte(3),
+        Some(block_3.message().hash_tree_root()),
+    );
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    assert_eq!(
+        context.take_forkchoice_updated_heads(),
+        [head_1, head_2, head_3],
+    );
+
+    context.on_notified_invalid_fork_choice_update(&block_3, Some(&block_1));
+
+    context.assert_head(1, block_1.message().hash_tree_root());
+
+    assert_eq!(context.take_forkchoice_updated_heads(), [head_1]);
+}
+
 // No `latest_valid_hash` means only the head payload is known to be invalid.
 #[test]
 fn forkchoice_updated_invalid_verdict_without_latest_valid_hash_invalidates_head() {
@@ -2891,6 +2973,135 @@ fn gloas_forkchoice_updated_invalid_verdict_invalidates_the_block_carrying_the_h
     context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
     context.assert_head(1, block_1.message().hash_tree_root());
     context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+}
+
+// ```text
+// 0 -e- 1 -e- 2
+// ```
+//
+// The execution engine answers INVALID for 1's payload, which was sent as the head.
+// 1 stays the head on its empty node, so later updates must send the payload 1 builds on.
+// That is the genesis payload. No block was sent with it, so the updates carry no root.
+#[test]
+fn gloas_forkchoice_updated_after_invalid_head_payload_sends_payload_under_empty_node() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let payload_0_hash = block_1
+        .message()
+        .payload_bid()
+        .expect("Gloas blocks have payload bids")
+        .parent_block_hash;
+
+    let payload_1_hash = envelope_1.message.payload.block_hash;
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    assert_eq!(
+        context.take_forkchoice_updated_heads(),
+        [
+            (payload_0_hash, None),
+            (payload_1_hash, Some(block_1.message().hash_tree_root())),
+        ],
+    );
+
+    context.on_notified_invalid_fork_choice_update(&block_1, None);
+    context.assert_payload_envelope_invalidated(&block_1);
+
+    context.assert_head(1, block_1.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, block_2.message().hash_tree_root());
+
+    assert_eq!(
+        context.take_forkchoice_updated_heads(),
+        [(payload_0_hash, None)],
+    );
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+// ```
+//
+// 2 is the head on its empty node, which rests on 1's payload.
+// The update carries 1's root, so the execution service can recognize the payload
+// if `engine_newPayload` has answered INVALID for it.
+#[test]
+fn gloas_forkchoice_updated_for_empty_node_carries_root_of_block_with_payload() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let payload_1_hash = envelope_1.message.payload.block_hash;
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.take_forkchoice_updated_heads();
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, block_2.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+
+    assert_eq!(
+        context.take_forkchoice_updated_heads(),
+        [(payload_1_hash, Some(block_1.message().hash_tree_root()))],
+    );
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 3
+// ```
+//
+// 3 is the head on its empty node, which rests on 1's payload two blocks down.
+// The update carries 1's root, not that of 3's parent.
+#[test]
+fn gloas_forkchoice_updated_for_empty_node_carries_root_of_block_with_payload_past_empty_nodes() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_2, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let payload_1_hash = envelope_1.message.payload.block_hash;
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.take_forkchoice_updated_heads();
+
+    context.on_slot(block_3.message().slot());
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.assert_head(3, block_3.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+
+    let head = (payload_1_hash, Some(block_1.message().hash_tree_root()));
+
+    // One update for 2, then one for 3.
+    assert_eq!(context.take_forkchoice_updated_heads(), [head, head]);
 }
 
 // ```text

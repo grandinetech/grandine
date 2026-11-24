@@ -3989,13 +3989,8 @@ where
                     ));
                 }
 
-                // After Gloas, notify FCU should only be called when payload is processed or block produced
-                if self.store.phase() < Phase::Gloas {
-                    self.notify_forkchoice_updated(&new_head);
-                }
-
-                // Keep the old FCU call in post-Gloas phases to help
-                // with recovering from temporary EL problems
+                // Post-Gloas the payload of the block is processed separately, which sends another
+                // update. This one still helps with recovering from temporary EL problems.
                 self.notify_forkchoice_updated(&new_head);
 
                 self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
@@ -4323,6 +4318,8 @@ where
             state.latest_execution_payload_header().block_hash()
         };
 
+        let head_block_root = store.block_root_with_payload(new_head.block_root, head_block_hash);
+
         if store.phase() >= Phase::Gloas {
             let head_root = new_head.block_root;
 
@@ -4344,6 +4341,7 @@ where
 
         self.execution_engine.notify_forkchoice_updated(
             head_block_hash,
+            head_block_root,
             safe_block_hash,
             finalized_block_hash,
             Either::Left(new_head.block.phase()),

@@ -3188,6 +3188,16 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     #[must_use]
+    pub fn block_root_with_payload(
+        &self,
+        block_root: H256,
+        block_hash: ExecutionBlockHash,
+    ) -> Option<H256> {
+        self.store_snapshot
+            .block_root_with_payload(block_root, block_hash)
+    }
+
+    #[must_use]
     pub fn proposer_preferences(
         &self,
         parent_block_root: H256,

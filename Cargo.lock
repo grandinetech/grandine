@@ -930,7 +930,6 @@ dependencies = [
  "cached",
  "clock",
  "crossbeam-utils",
- "database",
  "dedicated_executor",
  "eth1_api",
  "execution_engine",
@@ -1194,7 +1193,7 @@ checksum = "46d07918caa9eeaaf06b7873925c53a61daac173539b4f7715090745e44e4e69"
 dependencies = [
  "proc-macro2 1.0.107",
  "quote 1.0.47",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2859,6 +2858,9 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "bls",
+ "clock",
+ "crossbeam-utils",
+ "database",
  "dedicated_executor",
  "derive_more 2.1.1",
  "eip_7594",
@@ -2867,10 +2869,12 @@ dependencies = [
  "eth2_libp2p",
  "ethereum-types",
  "execution_engine",
+ "factory",
  "features",
  "fork_choice_control",
  "fs-err",
  "futures",
+ "genesis",
  "grandine_version",
  "helper_functions",
  "hex",
@@ -2878,9 +2882,12 @@ dependencies = [
  "httpmock",
  "jwt-simple",
  "logging",
+ "lru",
  "memoffset",
+ "nonzero_ext",
  "panics",
  "prometheus_metrics",
+ "pubkey_cache",
  "reqwest 0.13.5",
  "scc",
  "serde",
@@ -7036,7 +7043,7 @@ checksum = "1c8d9ca532f185d5d4db7a7c9d51420b452168ea1c2b913953281bd6fe1fcbd0"
 dependencies = [
  "proc-macro2 1.0.107",
  "quote 1.0.47",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -7615,7 +7622,7 @@ checksum = "1c25ef604ac7dd839d44d64648952ea23c97866f124ff671b0ed2cf3ad9bb06e"
 dependencies = [
  "proc-macro2 1.0.107",
  "quote 1.0.47",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]

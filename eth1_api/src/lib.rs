@@ -26,3 +26,6 @@ mod execution_service;
 mod messages;
 mod misc;
 mod tasks;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_chain;

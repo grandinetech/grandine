@@ -10,6 +10,9 @@ workspace = true
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 bls = { workspace = true }
+clock = { workspace = true, optional = true }
+crossbeam-utils = { workspace = true, optional = true }
+database = { workspace = true, optional = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 eip_7594 = { workspace = true }
@@ -28,9 +31,12 @@ hex = { workspace = true }
 hex-literal = { workspace = true }
 jwt-simple = { workspace = true }
 logging = { workspace = true }
+lru = { workspace = true }
 memoffset = { workspace = true }
+nonzero_ext = { workspace = true }
 panics = { workspace = true }
 prometheus_metrics = { workspace = true }
+pubkey_cache = { workspace = true, optional = true }
 reqwest = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
@@ -48,11 +54,19 @@ web3 = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+clock = { workspace = true }
+crossbeam-utils = { workspace = true }
+database = { workspace = true }
+factory = { workspace = true }
+genesis = { workspace = true }
 hex-literal = { workspace = true }
 httpmock = { workspace = true }
+pubkey_cache = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
 unwrap_none = { workspace = true }
 
 [features]
 embed = []
+# `test_chain` for tests in crates that depend on this one.
+test-utils = ['dep:clock', 'dep:crossbeam-utils', 'dep:database', 'dep:pubkey_cache']
