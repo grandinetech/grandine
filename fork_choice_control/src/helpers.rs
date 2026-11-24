@@ -10,7 +10,7 @@ use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
-    MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
+    ForkchoiceUpdatedHead, MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
@@ -1018,6 +1018,15 @@ impl<P: Preset> Context<P> {
             .lock()
             .expect("execution engine mutex is poisoned")
             .insert_pow_block(block_hash, timed_pow_block);
+    }
+
+    // Heads sent in `engine_forkchoiceUpdated` since the last call.
+    // See `MockExecutionEngine::take_forkchoice_updated_heads`.
+    pub fn take_forkchoice_updated_heads(&self) -> Vec<ForkchoiceUpdatedHead> {
+        self.execution_engine
+            .lock()
+            .expect("execution engine mutex is poisoned")
+            .take_forkchoice_updated_heads()
     }
 
     pub fn on_notified_new_payload(

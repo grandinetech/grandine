@@ -7217,15 +7217,48 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Some((parent.block_root, full))
     }
 
-    // Status of the latest payload under the block's empty node.
+    // The root of the block whose own payload is `block_hash`, out of the block with `block_root`
+    // and the block whose payload is under its empty node.
+    // That is the block the payload was sent with in `engine_newPayload`.
+    // `None` if neither is, as for the terminal PoW block or the genesis payload.
+    #[must_use]
+    pub fn block_root_with_payload(
+        &self,
+        block_root: H256,
+        block_hash: ExecutionBlockHash,
+    ) -> Option<H256> {
+        let block = self.chain_link(block_root)?;
+
+        if block.execution_block_hash() == Some(block_hash) {
+            return Some(block_root);
+        }
+
+        self.block_with_payload_under_empty_node(block_root)
+            .filter(|block| block.execution_block_hash() == Some(block_hash))
+            .map(|block| block.block_root)
+    }
+
+    // The block whose payload is the latest one under the block's empty node.
     // That is the latest payload in the block's execution chain, leaving its own payload out.
     //
-    // Walked as (child, parent) pairs, from the block downwards.
+    // Walked as (child, parent) pairs, from the block downwards, into finalized blocks too.
     // A child on its parent's empty node leaves that payload out, so the walk goes past it.
-    // A child on its parent's full node needs that payload delivered,
-    // so the parent's status is the verdict on it.
+    // A child on its parent's full node needs that payload delivered, so the parent is the answer.
     // Pre-Gloas every presence is `Pending`, so a pre-Gloas parent always ends the walk.
-    // Finalized blocks all share one status.
+    // `None` if the walk runs past the blocks fork choice holds.
+    fn block_with_payload_under_empty_node(&self, block_root: H256) -> Option<&ChainLink<P>> {
+        self.chain_ending_with(block_root)
+            .tuple_windows()
+            .find(|(child, _)| !child.parent_payload_presence.is_empty())
+            .map(|(_, parent)| parent)
+    }
+
+    // Status of the latest payload under the block's empty node.
+    //
+    // Walked like `block_with_payload_under_empty_node`, except that the walk stops at the
+    // finalized boundary and takes the last finalized block's status.
+    // Verdicts update finalized blocks only as a group, when the last finalized block's status
+    // changes, so older finalized blocks can hold stale statuses.
     fn empty_node_payload_status(&self, block_root: H256) -> PayloadStatus {
         self.memoized_empty_node_payload_status(block_root, &mut StdHashMap::new())
     }

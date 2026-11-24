@@ -40,9 +40,15 @@ pub trait ExecutionEngine<P: Preset> {
     );
 
     /// [`notify_forkchoice_updated`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#notify_forkchoice_updated)
+    ///
+    /// `head_beacon_block_root` is matched together with `head_eth1_block_hash` against
+    /// `engine_newPayload` verdicts, which are keyed by the beacon block the payload was sent for.
+    /// A root that the payload was never sent with does not match anything.
+    /// `None` skips the match.
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -90,6 +96,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -97,6 +104,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
     ) {
         (*self).notify_forkchoice_updated(
             head_eth1_block_hash,
+            head_beacon_block_root,
             safe_eth1_block_hash,
             finalized_eth1_block_hash,
             payload_attributes,
@@ -150,6 +158,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -157,6 +166,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
     ) {
         self.as_ref().notify_forkchoice_updated(
             head_eth1_block_hash,
+            head_beacon_block_root,
             safe_eth1_block_hash,
             finalized_eth1_block_hash,
             payload_attributes,
@@ -218,6 +228,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -227,6 +238,7 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
             .expect("execution engine mutex is poisoned")
             .notify_forkchoice_updated(
                 head_eth1_block_hash,
+                head_beacon_block_root,
                 safe_eth1_block_hash,
                 finalized_eth1_block_hash,
                 payload_attributes,
@@ -283,6 +295,7 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
     fn notify_forkchoice_updated(
         &self,
         _head_eth1_block_hash: ExecutionBlockHash,
+        _head_beacon_block_root: Option<H256>,
         _safe_eth1_block_hash: ExecutionBlockHash,
         _finalized_eth1_block_hash: ExecutionBlockHash,
         _payload_attributes: Either<Phase, PayloadAttributes<P>>,
@@ -307,11 +320,17 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
     fn stop(&self) {}
 }
 
+/// The head of an `engine_forkchoiceUpdated` call: the head payload hash
+/// and the root of the beacon block it was sent for, if known.
+pub type ForkchoiceUpdatedHead = (ExecutionBlockHash, Option<H256>);
+
 pub struct MockExecutionEngine<P: Preset> {
     execution_valid: bool,
     optimistic_merge_block_validation: bool,
     pow_blocks: HashMap<ExecutionBlockHash, TimedPowBlock>,
     execution_service_tx: Option<UnboundedSender<ExecutionServiceMessage<P>>>,
+    // `ExecutionEngine::notify_forkchoice_updated` takes `&self`.
+    forkchoice_updated_heads: Mutex<Vec<ForkchoiceUpdatedHead>>,
 }
 
 impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
@@ -338,12 +357,17 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
 
     fn notify_forkchoice_updated(
         &self,
-        _head_eth1_block_hash: ExecutionBlockHash,
+        head_eth1_block_hash: ExecutionBlockHash,
+        head_beacon_block_root: Option<H256>,
         _safe_eth1_block_hash: ExecutionBlockHash,
         _finalized_eth1_block_hash: ExecutionBlockHash,
         _payload_attributes: Either<Phase, PayloadAttributes<P>>,
         _sender: Option<Sender<Option<PayloadId>>>,
     ) {
+        self.forkchoice_updated_heads
+            .lock()
+            .expect("forkchoice_updated_heads mutex is poisoned")
+            .push((head_eth1_block_hash, head_beacon_block_root));
     }
 
     fn notify_new_payload(
@@ -376,11 +400,22 @@ impl<P: Preset> MockExecutionEngine<P> {
             execution_valid,
             pow_blocks: HashMap::new(),
             execution_service_tx,
+            forkchoice_updated_heads: Mutex::default(),
         }
     }
 
     pub fn insert_pow_block(&mut self, block_hash: ExecutionBlockHash, pow_block: TimedPowBlock) {
         self.pow_blocks.insert(block_hash, pow_block);
+    }
+
+    /// Heads of `engine_forkchoiceUpdated` calls made since the last call to this method.
+    pub fn take_forkchoice_updated_heads(&self) -> Vec<ForkchoiceUpdatedHead> {
+        core::mem::take(
+            &mut self
+                .forkchoice_updated_heads
+                .lock()
+                .expect("forkchoice_updated_heads mutex is poisoned"),
+        )
     }
 }
 

@@ -1,6 +1,8 @@
 pub use crate::{
     block_hash::compute_block_hash,
-    execution_engine::{ExecutionEngine, MockExecutionEngine, NullExecutionEngine},
+    execution_engine::{
+        ExecutionEngine, ForkchoiceUpdatedHead, MockExecutionEngine, NullExecutionEngine,
+    },
     messages::ExecutionServiceMessage,
     types::{
         BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetBlobsParams,

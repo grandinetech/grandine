@@ -20,6 +20,8 @@ pub enum ExecutionServiceMessage<P: Preset> {
     },
     NotifyForkchoiceUpdated {
         head_eth1_block_hash: ExecutionBlockHash,
+        // See `ExecutionEngine::notify_forkchoice_updated`.
+        head_beacon_block_root: Option<H256>,
         safe_eth1_block_hash: ExecutionBlockHash,
         finalized_eth1_block_hash: ExecutionBlockHash,
         payload_attributes: Either<Phase, PayloadAttributes<P>>,

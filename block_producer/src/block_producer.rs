@@ -2546,6 +2546,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .execution_engine
             .notify_forkchoice_updated(
                 parent_hash,
+                self.producer_context
+                    .controller
+                    .snapshot()
+                    .block_root_with_payload(self.head_block_root, parent_hash),
                 safe_block_hash,
                 finalized_block_hash,
                 Either::Right(payload_attributes),
@@ -3428,17 +3432,19 @@ mod gloas_scoring_tests {
         let anchor =
             Arc::new(BeaconBlock::from(Hc::new(anchor)).with_signature(SignatureBytes::empty()));
         let state = Arc::new(BeaconState::Gloas(Hc::new(state)));
-        let test_chain::TestChain {
+        let eth1_api::test_chain::TestChain {
             controller,
             mutator_handle: _mutator,
             execution_engine: engine,
             event_channels: events,
-        } = test_chain::TestChain::new(
+            ..
+        } = eth1_api::test_chain::TestChain::new(
             &config,
             &pubkeys,
             anchor,
             state,
             clock::Tick::start_of_slot(proposal_slot),
+            None,
             futures::channel::mpsc::unbounded().0,
         )?;
         let executor = Arc::new(DedicatedExecutor::new("gloas integration", 2, None, None));
@@ -4115,12 +4121,14 @@ mod payload_id_tests {
     use core::time::Duration;
 
     use crossbeam_utils::sync::WaitGroup;
-    use execution_engine::ExecutionServiceMessage;
+    use execution_engine::{ExecutionServiceMessage, ForkchoiceUpdatedHead};
     use fork_choice_control::controller::MutatorHandle;
     use futures::channel::mpsc::UnboundedReceiver;
     use types::{preset::Minimal, traits::SignedBeaconBlock as _};
 
-    use super::{test_chain::TestChain, *};
+    use eth1_api::test_chain::TestChain;
+
+    use super::*;
 
     const TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -4128,6 +4136,7 @@ mod payload_id_tests {
         producer: BlockProducer<Minimal, WaitGroup>,
         context: BlockBuildContext<Minimal, WaitGroup>,
         parent_root: H256,
+        genesis_state: Arc<BeaconState<Minimal>>,
         proposer_index: ValidatorIndex,
         execution_service_rx: UnboundedReceiver<ExecutionServiceMessage<Minimal>>,
         // Keep the mutator running until the end of the test.
@@ -4150,12 +4159,14 @@ mod payload_id_tests {
                 mutator_handle,
                 execution_engine,
                 event_channels,
+                ..
             } = TestChain::new(
                 &config,
                 &pubkey_cache,
                 genesis_block,
-                genesis_state,
+                genesis_state.clone_arc(),
                 clock::Tick::start_of_slot(1),
+                None,
                 execution_service_tx,
             )?;
 
@@ -4231,6 +4242,7 @@ mod payload_id_tests {
                 producer,
                 context,
                 parent_root: genesis_root,
+                genesis_state,
                 proposer_index,
                 execution_service_rx,
                 _mutator_handle: mutator_handle,
@@ -4239,7 +4251,11 @@ mod payload_id_tests {
 
         // Answers the next `engine_forkchoiceUpdated` call with payload attributes.
         // Calls the mutator makes on its own carry none and are skipped.
-        async fn answer_payload_preparation(&mut self, payload_id: Option<PayloadId>) {
+        // Returns the head the call carried.
+        async fn answer_payload_preparation(
+            &mut self,
+            payload_id: Option<PayloadId>,
+        ) -> ForkchoiceUpdatedHead {
             loop {
                 let message = tokio::time::timeout(TIMEOUT, self.execution_service_rx.next())
                     .await
@@ -4247,6 +4263,8 @@ mod payload_id_tests {
                     .expect("execution service channel should be open");
 
                 if let ExecutionServiceMessage::NotifyForkchoiceUpdated {
+                    head_eth1_block_hash,
+                    head_beacon_block_root,
                     payload_attributes: Either::Right(_),
                     sender,
                     ..
@@ -4257,7 +4275,7 @@ mod payload_id_tests {
                         .send(payload_id)
                         .expect("payload preparation should still be waiting");
 
-                    return;
+                    return (head_eth1_block_hash, head_beacon_block_root);
                 }
             }
         }
@@ -4313,7 +4331,13 @@ mod payload_id_tests {
         let ensured =
             tokio::spawn(async move { context.ensure_local_execution_payload_id().await });
 
-        fixture.answer_payload_preparation(Some(payload_id)).await;
+        let (_, head_beacon_block_root) =
+            fixture.answer_payload_preparation(Some(payload_id)).await;
+
+        // The parent hash is the genesis block's own payload hash, so the root is the parent's.
+        // See `payload_preparation_on_empty_node_carries_root_of_block_with_payload` for the
+        // case where the parent payload belongs to an ancestor.
+        assert_eq!(head_beacon_block_root, Some(fixture.parent_root));
 
         assert!(ensured.await?);
         assert!(matches!(
@@ -4340,6 +4364,87 @@ mod payload_id_tests {
 
         assert!(!ensured.await?);
         assert!(fixture.cached_payload_id().await.is_none());
+
+        Ok(())
+    }
+
+    // ```text
+    // 0 -e- 1 -f- 2
+    // ```
+    //
+    // A proposal on 2 while 2 is on its empty node builds on 1's payload.
+    // The payload preparation carries 1's root, the block that payload was sent with,
+    // so the execution service can match `engine_newPayload` verdicts for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn payload_preparation_on_empty_node_carries_root_of_block_with_payload() -> Result<()> {
+        let mut fixture = Fixture::new(Phase::Gloas, false)?;
+        let producer_context = fixture.context.producer_context.clone_arc();
+        let config = &producer_context.chain_config;
+        let pubkey_cache = &producer_context.pubkey_cache;
+        let controller = &producer_context.controller;
+
+        let (block_1, state_1) = factory::empty_block(
+            config,
+            pubkey_cache,
+            fixture.genesis_state.clone_arc(),
+            1,
+            H256::default(),
+        )?;
+
+        let envelope_1 = factory::execution_payload_envelope(config, &block_1, &state_1)?;
+        let payload_1_hash = envelope_1.message.payload.block_hash;
+
+        let (block_2, _) = factory::empty_block_extending_parent_payload(
+            config,
+            pubkey_cache,
+            state_1,
+            2,
+            H256::default(),
+        )?;
+
+        let block_1_root = block_1.message().hash_tree_root();
+        let block_2_root = block_2.message().hash_tree_root();
+
+        controller.on_requested_block(block_1, None);
+        controller.wait_for_tasks();
+        controller.on_own_execution_payload_envelope(envelope_1);
+        controller.wait_for_tasks();
+        controller.on_slot(2);
+        controller.on_requested_block(block_2, None);
+        controller.wait_for_tasks();
+
+        assert_eq!(controller.head().value.block_root, block_2_root);
+
+        let proposal_state = controller.preprocessed_state_at_next_slot_blocking(block_2_root)?;
+        let proposer_index = accessors::get_beacon_proposer_index(config, &proposal_state)?;
+
+        let context = fixture.producer.new_build_context(
+            proposal_state,
+            block_2_root,
+            proposer_index,
+            BlockBuildOptions::default(),
+        );
+
+        let payload_attributes = PayloadAttributes::Gloas(PayloadAttributesV4 {
+            timestamp: 0,
+            prev_randao: H256::zero(),
+            suggested_fee_recipient: ExecutionAddress::zero(),
+            withdrawals: ContiguousList::default(),
+            parent_beacon_block_root: block_2_root,
+            slot_number: 3,
+            target_gas_limit: 30_000_000,
+        });
+
+        let prepared = tokio::spawn(async move {
+            context
+                .prepare_execution_payload(H256::zero(), H256::zero(), payload_attributes)
+                .await
+        });
+
+        let head = fixture.answer_payload_preparation(None).await;
+
+        assert!(prepared.await??.is_none());
+        assert_eq!(head, (payload_1_hash, Some(block_1_root)));
 
         Ok(())
     }
@@ -4414,96 +4519,5 @@ mod payload_id_tests {
         assert!(fixture.ensure_without_payload_preparation().await);
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test_chain {
-    use crossbeam_utils::sync::WaitGroup;
-    use execution_engine::ExecutionServiceMessage;
-    use fork_choice_control::{Controller, EventChannels, Storage, controller::MutatorHandle};
-    use futures::channel::mpsc::UnboundedSender;
-    use types::{combined::SignedBeaconBlock, nonstandard::StorageMode};
-
-    use super::*;
-
-    pub struct TestChain<P: Preset> {
-        pub controller: ApiController<P, WaitGroup>,
-        pub mutator_handle: MutatorHandle<P, WaitGroup>,
-        pub execution_engine: Arc<Eth1ExecutionEngine<P>>,
-        pub event_channels: Arc<EventChannels<P>>,
-    }
-
-    impl<P: Preset> TestChain<P> {
-        // A controller over an in-memory database, starting at `tick`.
-        // Its execution engine sends its requests to `execution_service_tx`.
-        #[expect(
-            clippy::default_trait_access,
-            reason = "`StoreConfig` is in `fork_choice_store`, which this crate does not depend on"
-        )]
-        pub fn new(
-            config: &Arc<ChainConfig>,
-            pubkey_cache: &Arc<PubkeyCache>,
-            anchor_block: Arc<SignedBeaconBlock<P>>,
-            anchor_state: Arc<BeaconState<P>>,
-            tick: clock::Tick,
-            execution_service_tx: UnboundedSender<ExecutionServiceMessage<P>>,
-        ) -> Result<Self> {
-            let execution_engine = Arc::new(Eth1ExecutionEngine::new(
-                config.clone_arc(),
-                Arc::new(eth1_api::Eth1Api::new(
-                    config.clone_arc(),
-                    reqwest::Client::new(),
-                    Arc::default(),
-                    None,
-                    None,
-                    None,
-                )),
-                execution_service_tx,
-            ));
-
-            let event_channels = Arc::new(EventChannels::default());
-
-            let storage = Arc::new(Storage::new(
-                config.clone_arc(),
-                pubkey_cache.clone_arc(),
-                database::Database::in_memory(),
-                StorageMode::default(),
-                true,
-                fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,
-                fork_choice_control::StateStorageConfig::default_for_mode(StorageMode::default()),
-            )?);
-
-            let (controller, mutator_handle) = Controller::new(
-                config.clone_arc(),
-                pubkey_cache.clone_arc(),
-                Default::default(),
-                anchor_block,
-                anchor_state,
-                tick,
-                event_channels.clone_arc(),
-                execution_engine.clone_arc(),
-                None,
-                futures::channel::mpsc::unbounded().0,
-                futures::sink::drain(),
-                futures::sink::drain(),
-                futures::sink::drain(),
-                futures::sink::drain(),
-                futures::sink::drain(),
-                storage,
-                core::iter::empty(),
-                true,
-                HashSet::default(),
-                Arc::default(),
-                Some(2),
-            )?;
-
-            Ok(Self {
-                controller,
-                mutator_handle,
-                execution_engine,
-                event_channels,
-            })
-        }
     }
 }
