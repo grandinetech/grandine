@@ -837,8 +837,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
 // Checking deposit proofs during genesis is redundant since we would be the ones constructing them.
 //
 // This could be implemented in terms of `validate_deposits` if the latter were modified to make
-// proof checking optional, but the overhead of Rayon and `multi_verify` for single deposits is
-// enough to slow down genesis by over 50%.
+// proof checking optional, but the overhead of Rayon for single deposits would slow down genesis.
 pub fn process_deposit_data<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
