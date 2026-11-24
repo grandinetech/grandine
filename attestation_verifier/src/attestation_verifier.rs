@@ -24,11 +24,11 @@ use helper_functions::{
     signing::SignForSingleFork,
     verifier::{MultiVerifier, Triple, Verifier},
 };
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 use logging::{debug_with_peers, exception};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
+use rayon::iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _};
 use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof},
@@ -447,12 +447,12 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             }
         }
 
-        let attestation_triples = attestation_batch_triples(
-            config,
-            self.controller.pubkey_cache(),
-            messages.iter(),
-            state,
-        )?;
+        let attestation_triples = messages
+            .par_iter()
+            .map(|attestation| {
+                attestation_triple(config, self.controller.pubkey_cache(), attestation, state)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         verifier.extend(attestation_triples, SignatureKind::Attestation)?;
 
@@ -532,7 +532,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         // }
 
         let (accepted, other): (Vec<_>, Vec<_>) = attestations
-            .into_par_iter()
+            .into_iter()
             .map(|attestation| snapshot.prevalidate_verifier_attestation(attestation))
             .partition_map(|result| match result {
                 Ok(AttestationAction::Accept { .. }) => Either::Left(result),
@@ -584,18 +584,24 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
 
         verifier.reserve(results.len());
 
-        let triples = attestation_batch_triples(
-            self.controller.chain_config(),
-            self.controller.pubkey_cache(),
-            results.iter().filter_map(|result| {
+        let triples = results
+            .iter()
+            .filter_map(|result| {
                 if let Ok(AttestationAction::Accept { attestation, .. }) = result {
                     Some(attestation.item.as_ref())
                 } else {
                     None
                 }
-            }),
-            state,
-        )?;
+            })
+            .map(|attestation| {
+                attestation_triple(
+                    self.controller.chain_config(),
+                    self.controller.pubkey_cache(),
+                    attestation,
+                    state,
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         verifier.extend(triples, SignatureKind::Attestation)?;
 
@@ -603,83 +609,76 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
     }
 }
 
-fn attestation_batch_triples<'a, P: Preset>(
+fn attestation_triple<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    attestations: impl IntoIterator<IntoIter = impl Iterator<Item = &'a Attestation<P>> + Send>,
+    attestation: &Attestation<P>,
     state: &BeaconState<P>,
-) -> Result<Vec<Triple>> {
-    attestations
-        .into_iter()
-        .par_bridge()
-        .map(|attestation| {
-            let triple = match attestation {
-                Attestation::Phase0(attestation) => {
-                    let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
+) -> Result<Triple> {
+    let triple = match attestation {
+        Attestation::Phase0(attestation) => {
+            let indexed_attestation = phase0::get_indexed_attestation(state, attestation)?;
 
-                    let mut triple = Triple::default();
+            let mut triple = Triple::default();
 
-                    predicates::validate_constructed_indexed_attestation(
-                        config,
-                        pubkey_cache,
-                        state,
-                        &indexed_attestation,
-                        &mut triple,
-                    )?;
+            predicates::validate_constructed_indexed_attestation(
+                config,
+                pubkey_cache,
+                state,
+                &indexed_attestation,
+                &mut triple,
+            )?;
 
-                    triple
-                }
-                Attestation::Electra(attestation) => {
-                    let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+            triple
+        }
+        Attestation::Electra(attestation) => {
+            let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
 
-                    let mut triple = Triple::default();
+            let mut triple = Triple::default();
 
-                    predicates::validate_constructed_indexed_attestation(
-                        config,
-                        pubkey_cache,
-                        state,
-                        &indexed_attestation,
-                        &mut triple,
-                    )?;
+            predicates::validate_constructed_indexed_attestation(
+                config,
+                pubkey_cache,
+                state,
+                &indexed_attestation,
+                &mut triple,
+            )?;
 
-                    triple
-                }
-                Attestation::Gloas(attestation) => {
-                    let indexed_attestation = gloas::get_indexed_attestation(state, attestation)?;
+            triple
+        }
+        Attestation::Gloas(attestation) => {
+            let indexed_attestation = gloas::get_indexed_attestation(state, attestation)?;
 
-                    let mut triple = Triple::default();
+            let mut triple = Triple::default();
 
-                    predicates::validate_constructed_indexed_attestation(
-                        config,
-                        pubkey_cache,
-                        state,
-                        &indexed_attestation,
-                        &mut triple,
-                    )?;
+            predicates::validate_constructed_indexed_attestation(
+                config,
+                pubkey_cache,
+                state,
+                &indexed_attestation,
+                &mut triple,
+            )?;
 
-                    triple
-                }
-                Attestation::Single(attestation) => {
-                    let indexed_attestation: ElectraIndexedAttestation<P> =
-                        (*attestation).try_into()?;
+            triple
+        }
+        Attestation::Single(attestation) => {
+            let indexed_attestation: ElectraIndexedAttestation<P> = (*attestation).try_into()?;
 
-                    let mut triple = Triple::default();
+            let mut triple = Triple::default();
 
-                    predicates::validate_constructed_indexed_attestation(
-                        config,
-                        pubkey_cache,
-                        state,
-                        &indexed_attestation,
-                        &mut triple,
-                    )?;
+            predicates::validate_constructed_indexed_attestation(
+                config,
+                pubkey_cache,
+                state,
+                &indexed_attestation,
+                &mut triple,
+            )?;
 
-                    triple
-                }
-            };
+            triple
+        }
+    };
 
-            Ok(triple)
-        })
-        .collect()
+    Ok(triple)
 }
 
 struct AggregateWithOrigin<P: Preset> {
