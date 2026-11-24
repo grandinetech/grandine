@@ -75,10 +75,13 @@ impl<'path> Case<'path> {
 
             ensure!(
                 failures.is_empty(),
-                "{}/{} requests failed{separator}{:?}",
+                "{}/{} requests failed{separator}{}",
                 failures.len(),
                 successes.len().saturating_add(failures.len()),
-                failures.into_iter().join(separator),
+                failures
+                    .into_iter()
+                    .map(|e| format!("{e:?}"))
+                    .join(separator),
             );
 
             Ok(())
