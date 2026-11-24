@@ -1,4 +1,4 @@
-use core::ops::{Range, RangeFrom, RangeToInclusive};
+use core::ops::{Bound, Range, RangeFrom, RangeToInclusive};
 #[cfg(not(target_os = "zkvm"))]
 use std::path::Path;
 use std::{
@@ -698,7 +698,9 @@ impl Database {
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
-                .get_prev(key.as_ref())
+                // `im::OrdMap::get_prev` in im 15.1.0 can miss keys stored in inner B-tree nodes.
+                .range::<_, [u8]>((Bound::Unbounded, Bound::Included(key.as_ref())))
+                .next_back()
                 .map(|(key, value)| Ok((key.to_vec(), decompress(value)?))),
         }
         .transpose()
@@ -738,7 +740,9 @@ impl Database {
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
-                .get_next(key.as_ref())
+                // `im::OrdMap::get_next` in im 15.1.0 can miss keys stored in inner B-tree nodes.
+                .range::<_, [u8]>((Bound::Included(key.as_ref()), Bound::Unbounded))
+                .next()
                 .map(|(key, value)| (key.to_vec(), value.to_vec())),
         }
         .pipe(Ok)
@@ -765,7 +769,9 @@ impl Database {
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
-                .get_next(key.as_ref())
+                // `im::OrdMap::get_next` in im 15.1.0 can miss keys stored in inner B-tree nodes.
+                .range::<_, [u8]>((Bound::Included(key.as_ref()), Bound::Unbounded))
+                .next()
                 .map(|(found_key, _)| found_key.to_vec()),
         }
         .pipe(Ok)
@@ -820,7 +826,9 @@ impl View {
                 None => None,
             },
             ViewKind::InMemory { map } => map
-                .get_next(key.as_ref())
+                // `im::OrdMap::get_next` in im 15.1.0 can miss keys stored in inner B-tree nodes.
+                .range::<_, [u8]>((Bound::Included(key.as_ref()), Bound::Unbounded))
+                .next()
                 .map(|(key, value)| (&**key, &**value)),
         }
         .pipe(Ok)
