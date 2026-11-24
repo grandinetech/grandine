@@ -112,6 +112,8 @@ pub struct SyncManager<P: Preset> {
     execution_payload_envelope_requests: RangeAndRootRequests<H256, P>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
+    last_sync_range_block_batches: usize,
+    last_sync_range_empty_block_batches: usize,
     sequential_redownloads: usize,
     status_updates_cache: TimedSizedCache<Epoch, ()>,
     storage_mode: StorageMode,
@@ -139,6 +141,8 @@ impl<P: Preset> SyncManager<P> {
             data_column_requests: RangeAndRootRequests::<DataColumnIdentifier, P>::default(),
             execution_payload_envelope_requests: RangeAndRootRequests::<H256, P>::default(),
             last_sync_range: 0..0,
+            last_sync_range_block_batches: 0,
+            last_sync_range_empty_block_batches: 0,
             last_sync_head: 0,
             sequential_redownloads: 0,
             status_updates_cache: TimedSizedCache::with_size_and_lifespan(5, PEER_UPDATE_COOLDOWN),
@@ -618,6 +622,15 @@ impl<P: Preset> SyncManager<P> {
 
         let mut redownloads_increased = false;
 
+        // Peers answered every block batch in the last range with no blocks, so those slots are
+        // empty. Moving past them is progress: restarting at the local head would never cross
+        // a run of empty slots wider than one round of batches.
+        let last_sync_range_empty = self.last_sync_range_block_batches > 0
+            && self.last_sync_range_empty_block_batches >= self.last_sync_range_block_batches;
+
+        self.last_sync_range_block_batches = 0;
+        self.last_sync_range_empty_block_batches = 0;
+
         if self.sync_from_finalized
             && (self.last_sync_range.end >= local_head_slot || is_forward_synced)
         {
@@ -627,6 +640,16 @@ impl<P: Preset> SyncManager<P> {
         let sync_start_slot = {
             if self.sync_from_finalized {
                 core::cmp::max(self.last_sync_range.end, local_finalized_slot).saturating_add(1)
+            } else if local_head_slot <= self.last_sync_head && last_sync_range_empty {
+                self.log(
+                    Level::Debug,
+                    format_args!(
+                        "last sync range {:?} has no blocks, continuing after it",
+                        self.last_sync_range,
+                    ),
+                );
+
+                core::cmp::max(self.last_sync_range.end, local_head_slot).saturating_add(1)
             } else if local_head_slot <= self.last_sync_head {
                 self.log(Level::Debug, "local head not progressing");
                 self.sequential_redownloads = self.sequential_redownloads.saturating_add(1);
@@ -878,6 +901,10 @@ impl<P: Preset> SyncManager<P> {
             }
         } else {
             self.last_sync_range = sync_start_slot..max_slot;
+            self.last_sync_range_block_batches = sync_batches
+                .iter()
+                .filter(|batch| batch.target == SyncTarget::Block)
+                .count();
         }
 
         sync_batches
@@ -1157,6 +1184,10 @@ impl<P: Preset> SyncManager<P> {
                 ),
             );
 
+            if request_direction == Some(SyncDirection::Forward) {
+                self.record_finished_forward_block_batch(&sync_batch);
+            }
+
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
                 if misc::compute_epoch_at_slot::<P>(
                     sync_batch.start_slot.saturating_add(sync_batch.count),
@@ -1167,6 +1198,16 @@ impl<P: Preset> SyncManager<P> {
 
                 self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
             }
+        }
+    }
+
+    fn record_finished_forward_block_batch(&mut self, sync_batch: &SyncBatch<P>) {
+        if !sync_batch.response_received
+            && (self.last_sync_range.start..=self.last_sync_range.end)
+                .contains(&sync_batch.start_slot)
+        {
+            self.last_sync_range_empty_block_batches =
+                self.last_sync_range_empty_block_batches.saturating_add(1);
         }
     }
 
@@ -2094,6 +2135,85 @@ mod tests {
             head_slot: 200,
             earliest_available_slot,
         })
+    }
+
+    #[tokio::test]
+    async fn test_build_forward_sync_batches_crosses_empty_slots() {
+        let config = Arc::new(Config::mainnet());
+        let current_slot = 20_001;
+        let local_head_slot = 3000;
+        let local_finalized_slot = 1000;
+        let slots_per_request = EPOCHS_PER_REQUEST.get() * <Mainnet as Preset>::SlotsPerEpoch::U64;
+        let sampling_columns = HashSet::new();
+
+        let peer_status = StatusMessage::V1(StatusMessageV1 {
+            fork_digest: H32::default(),
+            finalized_root: H256::default(),
+            finalized_epoch: 248,
+            head_root: H256::default(),
+            head_slot: 20_000,
+        });
+
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
+
+        sync_manager.add_peer(PeerId::random(), peer_status);
+
+        // The head never moves, but every range comes back empty, so sync keeps moving forward
+        // past `SEQUENTIAL_REDOWNLOADS_TILL_RESET` rounds.
+        for i in 0..30 {
+            let batches = sync_manager
+                .build_forward_sync_batches(
+                    &config,
+                    current_slot,
+                    local_head_slot,
+                    local_finalized_slot,
+                    false,
+                    &sampling_columns,
+                )
+                .await;
+
+            let sync_range_from = local_head_slot + slots_per_request * i + 1;
+            let sync_range_to = sync_range_from + slots_per_request - 1;
+
+            assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
+
+            for batch in batches {
+                sync_manager.record_finished_forward_block_batch(&batch);
+            }
+        }
+
+        // Blocks arrived but the head did not move: fall back to redownloading from the head.
+        let batches = sync_manager
+            .build_forward_sync_batches(
+                &config,
+                current_slot,
+                local_head_slot,
+                local_finalized_slot,
+                false,
+                &sampling_columns,
+            )
+            .await;
+
+        for mut batch in batches {
+            batch.response_received = true;
+            sync_manager.record_finished_forward_block_batch(&batch);
+        }
+
+        sync_manager
+            .build_forward_sync_batches(
+                &config,
+                current_slot,
+                local_head_slot,
+                local_finalized_slot,
+                false,
+                &sampling_columns,
+            )
+            .await;
+
+        let sync_range_from = local_head_slot + 1;
+        let sync_range_to = sync_range_from + slots_per_request - 1;
+
+        assert_eq!(sync_manager.last_sync_range, sync_range_from..sync_range_to);
     }
 
     #[test]
