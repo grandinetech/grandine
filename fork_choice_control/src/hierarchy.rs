@@ -66,7 +66,7 @@ impl FromStr for Hierarchy {
 impl Default for Hierarchy {
     fn default() -> Self {
         Self {
-            exponents: ContiguousList::try_from([23, 18, 16, 13, 11, 9, 5])
+            exponents: ContiguousList::try_from([25, 13, 10, 7, 5])
                 .expect("default exponents fit in the list"),
         }
     }
@@ -754,20 +754,20 @@ mod tests {
     fn depth_is_the_number_of_levels() {
         assert_eq!(hierarchy([5]).depth(), 1);
         assert_eq!(hierarchy([11, 9, 5]).depth(), 3);
-        assert_eq!(Hierarchy::default().depth(), 7);
+        assert_eq!(Hierarchy::default().depth(), 5);
     }
 
     #[test]
     fn display_and_from_str_round_trip() {
-        assert_eq!(Hierarchy::default().to_string(), "23,18,16,13,11,9,5");
+        assert_eq!(Hierarchy::default().to_string(), "25,13,10,7,5");
         assert_eq!(hierarchy([5]).to_string(), "5");
 
-        let parsed = "23,18,16,13,11,9,5"
+        let parsed = "25,13,10,7,5"
             .parse::<Hierarchy>()
             .expect("hierarchy string is valid");
 
         assert_eq!(parsed.exponents(), Hierarchy::default().exponents());
-        assert_eq!(parsed.to_string(), "23,18,16,13,11,9,5");
+        assert_eq!(parsed.to_string(), "25,13,10,7,5");
         assert_eq!(
             Hierarchy::default()
                 .to_string()
