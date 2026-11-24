@@ -332,6 +332,17 @@ impl Verifier for MultiVerifier {
             return Ok(());
         }
 
+        if let [triple] = self.triples.as_slice() {
+            let signature = Signature::try_from(triple.signature_bytes)?;
+
+            ensure!(
+                signature.verify(triple.message, &triple.public_key),
+                Error::SignatureInvalid(SignatureKind::Multi),
+            );
+
+            return Ok(());
+        }
+
         let messages = self.triples.iter().map(|triple| triple.message.as_bytes());
 
         let signatures = par_iter!(self.triples)
@@ -504,6 +515,27 @@ mod tests {
         let mut verifier = MultiVerifier::default();
         verifier.verify_singular(message, signature, public_key, SignatureKind::Block)?;
         verifier.finish()
+    }
+
+    // A lone triple is still checked against its message.
+    #[test]
+    fn multi_verifier_finalize_fails_with_1_invalid_signature() -> Result<()> {
+        let secret_key = secret_key();
+        let public_key = Arc::new(secret_key.to_public_key());
+        let signature = secret_key.sign(H256::default()).into();
+
+        let mut verifier = MultiVerifier::default();
+        verifier.verify_singular(
+            H256::repeat_byte(1),
+            signature,
+            public_key,
+            SignatureKind::Block,
+        )?;
+        verifier
+            .finish()
+            .expect_err("the signature is over a different message");
+
+        Ok(())
     }
 
     fn secret_key() -> SecretKey {
