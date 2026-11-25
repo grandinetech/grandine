@@ -1,93 +1,56 @@
-//! Proofs from a `leanvm-sidecar` process over its Unix socket, through leanVM's own client at the
-//! pinned revision, so that the protocol and the verifier the sidecar proves for stay in step with
-//! it.
+//! Proofs made in this process with leanVM at the pinned revision.
 //!
 //! An aggregate proof attests `(pubkey, message)` claims, sorted and without duplicates. Leaf
 //! indices are not part of them: [`ProverBackend::verify`] cannot check them, and
 //! [`ProverBackend::prove`] refuses signatures made at another leaf than their statement's.
 
-use core::time::Duration;
-use std::{
-    io::ErrorKind,
-    path::{Path, PathBuf},
+use lean_vm::{
+    AggregateClaims, AggregateProof, MAX_RECURSIONS, OutputClaims,
+    lean_xmss::{LeanXmssPublicKey, LeanXmssSignature, Message},
 };
-
-use lean_xmss::{LeanXmssPublicKey, LeanXmssSignature};
-use leanvm_claims::{AggregateClaims, OutputClaims};
-use leanvm_sidecar::{Client, SidecarError};
-use parking_lot::Mutex;
 use xmss::XmssSignature;
 
 use crate::{Error, ProverBackend, Statement, check_shape};
 
-/// The most children one aggregate request takes.
-const MAX_CHILDREN_PER_AGGREGATE: usize = 16;
-
-/// `log_inv_rate` of the proofs requested: higher gives smaller proofs that take longer to make.
-/// A proof verifies whatever rate it was made at.
+/// `log_inv_rate` of the proofs made: higher gives smaller proofs that take longer to make. A
+/// proof verifies whatever rate it was made at.
 const LOG_INV_RATE: usize = 2;
 
-// The sidecar proves one request at a time, so these include waiting behind others.
-const PROVE_TIMEOUT: Duration = Duration::from_secs(300);
-const VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Proves and verifies through a `leanvm-sidecar` built from the pinned leanVM revision.
+/// Proves and verifies with leanVM in this process. Proofs are made one at a time.
 ///
-/// A proof is the sidecar's proof alone: the verifier rebuilds the claims from the statements. The
-/// empty proof stands for nothing to prove (the sidecar refuses to prove no claims), and verifies
-/// only against statements with no public keys.
-///
-/// Two connections are kept, one for proving, where requests queue in the sidecar, and one for
-/// verifying, which the sidecar answers without waiting for proofs in progress. Each is reopened
-/// after a failure.
-pub struct SidecarBackend {
-    socket: PathBuf,
-    prove_connection: Mutex<Option<Client>>,
-    verify_connection: Mutex<Option<Client>>,
+/// A proof is leanVM's proof alone: the verifier rebuilds the claims from the statements. The
+/// empty proof stands for nothing to prove (leanVM refuses to prove no claims), and verifies only
+/// against statements with no public keys.
+#[derive(Debug)]
+pub struct InProcessBackend {
+    _private: (),
 }
 
-impl SidecarBackend {
-    /// Opens both connections, so that a missing or incompatible sidecar is reported now. Returns
-    /// the prover the sidecar runs as well.
-    pub fn connect(socket: impl Into<PathBuf>) -> Result<(Self, String), Error> {
-        let socket = socket.into();
-        let prove_connection = open(&socket, PROVE_TIMEOUT)?;
-        let verify_connection = open(&socket, VERIFY_TIMEOUT)?;
-        let prover = verify_connection.prover().to_owned();
-
-        let backend = Self {
-            socket,
-            prove_connection: Mutex::new(Some(prove_connection)),
-            verify_connection: Mutex::new(Some(verify_connection)),
-        };
-
-        Ok((backend, prover))
+impl InProcessBackend {
+    /// Starts leanVM's prover with `threads` threads (0 for its default, about one per core) and
+    /// builds its aggregation program. Blocks for as long as that takes. Call it once per process:
+    /// leanVM panics if its prover already runs with another thread count.
+    #[must_use]
+    pub fn start(threads: usize) -> Self {
+        lean_vm::setup(threads);
+        Self { _private: () }
     }
 
-    // Checks the sidecar proved exactly `expected`.
+    // Checks leanVM proved exactly `expected`.
     fn aggregate(
-        &self,
-        children: &[(AggregateClaims, Vec<u8>)],
-        signatures: &[(LeanXmssPublicKey, lean_xmss::Message, LeanXmssSignature)],
+        children: &[(AggregateClaims, AggregateProof)],
+        signatures: Vec<(LeanXmssPublicKey, Message, LeanXmssSignature)>,
         expected: &AggregateClaims,
-    ) -> Result<Vec<u8>, Error> {
-        // A proof may still be made after its connection fails, so it is not requested again.
-        let (claims, proof) = with_connection(
-            &self.socket,
-            &self.prove_connection,
-            PROVE_TIMEOUT,
-            false,
-            |client| {
-                client.aggregate(
-                    children,
-                    signatures,
-                    &[],
-                    &[],
-                    OutputClaims::All,
-                    LOG_INV_RATE,
-                )
-            },
-        )?;
+    ) -> Result<AggregateProof, Error> {
+        let (claims, proof) = lean_vm::aggregate(
+            children,
+            signatures,
+            vec![],
+            None,
+            OutputClaims::All,
+            LOG_INV_RATE,
+        )
+        .map_err(Error::LeanVm)?;
 
         if claims != *expected {
             return Err(Error::ClaimsMismatch {
@@ -100,9 +63,9 @@ impl SidecarBackend {
     }
 }
 
-impl ProverBackend for SidecarBackend {
+impl ProverBackend for InProcessBackend {
     fn name(&self) -> &'static str {
-        "sidecar"
+        "leanVM"
     }
 
     fn prove(
@@ -139,11 +102,11 @@ impl ProverBackend for SidecarBackend {
             }
         }
 
-        self.aggregate(&[], &raw_signatures, &expected)
+        Self::aggregate(&[], raw_signatures, &expected).map(|proof| proof.to_bytes())
     }
 
-    // Folds the children `MAX_CHILDREN_PER_AGGREGATE` at a time until one proof remains. A single
-    // child is returned as it is.
+    // Folds the children `MAX_RECURSIONS` at a time until one proof remains. A single child is
+    // returned as it is.
     fn merge(&self, children: &[(&[Statement], &[u8])]) -> Result<Vec<u8>, Error> {
         let mut level = vec![];
 
@@ -152,22 +115,27 @@ impl ProverBackend for SidecarBackend {
 
             match (claims.lean_xmss.is_empty(), proof.is_empty()) {
                 (true, true) => {}
-                (false, false) => level.push((claims, proof.to_vec())),
+                (false, false) => {
+                    let proof = AggregateProof::from_bytes(proof)
+                        .ok_or(Error::MalformedProof { child: index })?;
+
+                    level.push((claims, proof));
+                }
                 _ => return Err(Error::ProofDoesNotMatchClaims { child: index }),
             }
         }
 
         while level.len() > 1 {
-            let mut next = Vec::with_capacity(level.len().div_ceil(MAX_CHILDREN_PER_AGGREGATE));
+            let mut next = Vec::with_capacity(level.len().div_ceil(MAX_RECURSIONS));
 
-            for chunk in level.chunks(MAX_CHILDREN_PER_AGGREGATE) {
+            for chunk in level.chunks(MAX_RECURSIONS) {
                 if let [only] = chunk {
                     next.push(only.clone());
                     continue;
                 }
 
-                let expected = union(chunk);
-                let proof = self.aggregate(chunk, &[], &expected)?;
+                let expected = union(chunk.iter().map(|(claims, _)| claims));
+                let proof = Self::aggregate(chunk, vec![], &expected)?;
 
                 next.push((expected, proof));
             }
@@ -175,7 +143,10 @@ impl ProverBackend for SidecarBackend {
             level = next;
         }
 
-        Ok(level.pop().map(|(_, proof)| proof).unwrap_or_default())
+        Ok(level
+            .pop()
+            .map(|(_, proof)| proof.to_bytes())
+            .unwrap_or_default())
     }
 
     fn verify(&self, statements: &[Statement], proof: &[u8]) -> Result<bool, Error> {
@@ -185,13 +156,7 @@ impl ProverBackend for SidecarBackend {
             return Ok(claims.lean_xmss.is_empty() && proof.is_empty());
         }
 
-        with_connection(
-            &self.socket,
-            &self.verify_connection,
-            VERIFY_TIMEOUT,
-            true,
-            |client| client.verify(&claims, proof),
-        )
+        Ok(AggregateProof::from_bytes(proof).is_some_and(|proof| proof.verify(&claims)))
     }
 }
 
@@ -222,10 +187,10 @@ fn claims(statements: &[Statement]) -> AggregateClaims {
     }
 }
 
-fn union(children: &[(AggregateClaims, Vec<u8>)]) -> AggregateClaims {
+fn union<'claims>(children: impl IntoIterator<Item = &'claims AggregateClaims>) -> AggregateClaims {
     let mut lean_xmss = children
-        .iter()
-        .flat_map(|(claims, _)| claims.lean_xmss.iter().copied())
+        .into_iter()
+        .flat_map(|claims| claims.lean_xmss.iter().copied())
         .collect::<Vec<_>>();
 
     lean_xmss.sort_unstable_by_key(|(pubkey, message)| (pubkey.to_bytes(), *message));
@@ -235,54 +200,6 @@ fn union(children: &[(AggregateClaims, Vec<u8>)]) -> AggregateClaims {
         lean_xmss,
         lean_sphincs: vec![],
         da_commitment: None,
-    }
-}
-
-fn open(socket: &Path, timeout: Duration) -> Result<Client, Error> {
-    let client = Client::connect(socket).map_err(Error::Sidecar)?;
-
-    client
-        .set_timeout(Some(timeout))
-        .map_err(|error| Error::Sidecar(SidecarError::Io(error)))?;
-
-    Ok(client)
-}
-
-/// Runs `call` on the connection in `slot`, opening it first if needed. A failed connection is
-/// dropped unless the sidecar refused the request. With `retry`, a request on a reused connection
-/// that turns out to be closed is sent once more on a new one.
-fn with_connection<T>(
-    socket: &Path,
-    slot: &Mutex<Option<Client>>,
-    timeout: Duration,
-    retry: bool,
-    mut call: impl FnMut(&mut Client) -> Result<T, SidecarError>,
-) -> Result<T, Error> {
-    let mut slot = slot.lock();
-    let mut reused = slot.is_some();
-
-    loop {
-        let client = match slot.as_mut() {
-            Some(client) => client,
-            None => slot.insert(open(socket, timeout)?),
-        };
-
-        match call(client) {
-            Ok(value) => return Ok(value),
-            Err(error @ SidecarError::Rejected(..)) => return Err(Error::Sidecar(error)),
-            Err(SidecarError::Io(error))
-                if retry
-                    && reused
-                    && !matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) =>
-            {
-                *slot = None;
-                reused = false;
-            }
-            Err(error) => {
-                *slot = None;
-                return Err(Error::Sidecar(error));
-            }
-        }
     }
 }
 
@@ -337,19 +254,20 @@ mod tests {
 
     #[test]
     fn the_union_of_children_is_sorted() {
-        let first = (claims(&[statement(&[5, 2], 1)]), vec![1]);
-        let second = (claims(&[statement(&[2, 4], 1)]), vec![2]);
+        let first = claims(&[statement(&[5, 2], 1)]);
+        let second = claims(&[statement(&[2, 4], 1)]);
 
-        assert_eq!(union(&[first, second]), claims(&[statement(&[2, 4, 5], 1)]),);
+        assert_eq!(
+            union([&first, &second]),
+            claims(&[statement(&[2, 4, 5], 1)])
+        );
     }
 
-    // Needs a `leanvm-sidecar` built from the pinned revision, listening on the socket in
-    // `LEANVM_SIDECAR_SOCKET`. Takes a minute with the stable prover.
+    // Slow outside release builds, and starts a prover on every core.
     #[test]
-    #[ignore = "needs a running leanvm-sidecar"]
-    fn proofs_from_a_sidecar_merge_and_verify() -> Result<(), Box<dyn core::error::Error>> {
-        let socket = std::env::var("LEANVM_SIDECAR_SOCKET")?;
-        let (backend, _) = SidecarBackend::connect(socket)?;
+    #[ignore = "proves for real"]
+    fn proofs_merge_and_verify() -> Result<(), Box<dyn core::error::Error>> {
+        let backend = InProcessBackend::start(0);
 
         let keys = [1, 2, 3].map(|byte| xmss::XmssSecretKey::from_seed(&[byte; 32]));
         let leaf_index = 5;
@@ -412,15 +330,5 @@ mod tests {
         ));
 
         Ok(())
-    }
-
-    #[test]
-    fn a_missing_sidecar_is_reported() {
-        let socket = std::env::temp_dir().join("grandine-no-such-leanvm-sidecar.sock");
-
-        assert!(matches!(
-            SidecarBackend::connect(socket),
-            Err(Error::Sidecar(_)),
-        ));
     }
 }

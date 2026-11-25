@@ -16,6 +16,9 @@ ifeq ($(DISABLE_TRACING),0)
 	FEATURES := $(FEATURES) --features tracing
 endif
 
+# Builds leanVM's prover once per CPU tier, so that PQ proving runs the fastest the host supports.
+export RUSTC_WRAPPER ?= $(CURDIR)/scripts/build/tier-rustc
+
 .PHONY: all
 all: build
 

@@ -8,12 +8,13 @@ use std::{
     collections::{HashMap, HashSet},
     io::ErrorKind,
     net::{TcpListener, UdpSocket},
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, RwLock},
+    time::Instant,
 };
 
 use allocator as _;
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
@@ -844,22 +845,24 @@ async fn build_local_node<P: Preset>(
     Ok((chain, services))
 }
 
-// Other clients' aggregates and blocks carry STARK proofs, which only the sidecar verifies.
-async fn install_pq_prover(chain_config: &ChainConfig, socket: Option<PathBuf>) -> Result<()> {
+// Other clients' aggregates and blocks carry STARK proofs, which only leanVM verifies.
+// `LEANVM_THREADS` sets the prover's threads. 0, the default, lets leanVM choose.
+async fn install_pq_prover(chain_config: &ChainConfig) -> Result<()> {
     if chain_config.pq_fork_epoch == FAR_FUTURE_EPOCH {
         return Ok(());
     }
 
-    let socket = socket.ok_or_else(|| anyhow!("a PQ network requires --pq-prover-socket"))?;
+    let threads = match std::env::var("LEANVM_THREADS") {
+        Ok(threads) => threads
+            .parse()
+            .with_context(|| format!("LEANVM_THREADS is not a thread count: {threads:?}"))?,
+        Err(std::env::VarError::NotPresent) => 0,
+        Err(error) => bail!("LEANVM_THREADS is not valid: {error}"),
+    };
 
-    tokio::task::spawn_blocking(move || connect_pq_sidecar(&socket)).await?
-}
-
-#[cfg(unix)]
-fn connect_pq_sidecar(socket: &Path) -> Result<()> {
-    let (backend, prover) = pq_prover::SidecarBackend::connect(socket)
-        .map_err(|error| anyhow!("cannot connect to {}: {error}", socket.display()))?;
-
+    let started = Instant::now();
+    let backend =
+        tokio::task::spawn_blocking(move || pq_prover::InProcessBackend::start(threads)).await?;
     let backend = Arc::new(backend);
 
     if pq_prover::install_aggregate_backend(Box::new(backend.clone_arc())).is_err()
@@ -868,17 +871,9 @@ fn connect_pq_sidecar(socket: &Path) -> Result<()> {
         bail!("PQ prover backends were already installed");
     }
 
-    info_with_peers!(
-        "proving and verifying PQ aggregates with the {prover} leanVM sidecar at {}",
-        socket.display(),
-    );
+    info_with_peers!("started the leanVM prover in {:?}", started.elapsed());
 
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn connect_pq_sidecar(_socket: &Path) -> Result<()> {
-    bail!("PQ networks need the leanVM sidecar, which is reached over a Unix socket")
 }
 
 // The VRF roots in the head state by state public key. Empty before the PQ fork.
@@ -1632,7 +1627,7 @@ async fn run_beacon_node<P: Preset>(
 ) -> Result<()> {
     let validator_client = config.validator_client_config();
 
-    install_pq_prover(&config.chain_config, beacon_node.pq_prover_socket.clone()).await?;
+    install_pq_prover(&config.chain_config).await?;
 
     let (eth1_api_to_metrics_tx, eth1_api_to_metrics_rx) = config
         .metrics_config

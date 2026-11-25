@@ -8,13 +8,10 @@ use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use xmss::{MESSAGE_SIZE, XmssPublicKey, XmssSignature};
 
-pub use crate::reference::ReferenceBackend;
-#[cfg(unix)]
-pub use crate::sidecar::SidecarBackend;
+pub use crate::{in_process::InProcessBackend, reference::ReferenceBackend};
 
+mod in_process;
 mod reference;
-#[cfg(unix)]
-mod sidecar;
 
 /// The spec's `XMSSAggregateStatement`: each of `pubkeys` signed `message` at `leaf_index`.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -38,11 +35,12 @@ pub enum Error {
     InvalidSignature { statement: usize, signature: usize },
     #[error("child {child} has a proof but no claims, or claims but no proof")]
     ProofDoesNotMatchClaims { child: usize },
-    #[error("the sidecar proved {actual} claims instead of the {expected} requested")]
+    #[error("the proof of child {child} is malformed")]
+    MalformedProof { child: usize },
+    #[error("the prover proved {actual} claims instead of the {expected} requested")]
     ClaimsMismatch { expected: usize, actual: usize },
-    #[cfg(unix)]
-    #[error("leanVM sidecar: {0}")]
-    Sidecar(leanvm_sidecar::SidecarError),
+    #[error("leanVM: {0}")]
+    LeanVm(lean_vm::AggregateError),
 }
 
 /// The spec's `stark` module.

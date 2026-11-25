@@ -10,12 +10,6 @@ workspace = true
 fake_crypto = ['xmss/fake_crypto']
 
 [dependencies]
-lean_xmss = { workspace = true }
-leanvm_claims = { workspace = true }
-parking_lot = { workspace = true }
+lean_vm = { workspace = true }
 thiserror = { workspace = true }
 xmss = { workspace = true }
-
-# The sidecar is reached over a Unix socket.
-[target.'cfg(unix)'.dependencies]
-leanvm_sidecar = { workspace = true }

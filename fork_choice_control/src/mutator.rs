@@ -1555,24 +1555,6 @@ where
                     }
                 }
             }
-            Err(error) if prover_could_not_decide(&error) => {
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.register_mutator_aggregate_and_proof(&["ignored"]);
-                }
-
-                warn_with_peers!(
-                    "aggregate and proof ignored: its proof could not be verified \
-                     (error: {error:#}, origin: {origin:?})"
-                );
-
-                let (gossip_id, sender) = origin.split();
-
-                if let Some(gossip_id) = gossip_id {
-                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
-                }
-
-                reply_to_http_api(sender, Err(error));
-            }
             Err(error) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["rejected"]);
@@ -4054,30 +4036,6 @@ where
     }
 
     fn reject_block(&mut self, error: AnyhowError, block_root: H256, origin: BlockOrigin) {
-        // The block may be valid. It is fetched again when a descendant needs it.
-        if prover_could_not_decide(&error) {
-            warn_with_peers!(
-                "block ignored: its proof could not be verified \
-                 (error: {error:#}, block root: {block_root:?}, origin: {origin:?})"
-            );
-
-            let sender = match origin {
-                BlockOrigin::Gossip(gossip_id) => {
-                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
-                    None
-                }
-                BlockOrigin::Api(sender) => sender,
-                BlockOrigin::Requested(_)
-                | BlockOrigin::Own
-                | BlockOrigin::Persisted
-                | BlockOrigin::Test(_) => None,
-            };
-
-            reply_block_validation_result_to_http_api(sender, Err(error));
-
-            return;
-        }
-
         warn_with_peers!(
             "block rejected (error: {error:#}, block root: {block_root:?}, origin: {origin:?})"
         );
@@ -6716,14 +6674,6 @@ fn reply_delayed_data_column_sidecar_validation_result<P: Preset>(
     }
 }
 
-// The PQ prover failed to verify a proof either way, as when its sidecar is down. That says nothing
-// about whether the proof is valid.
-fn prover_could_not_decide(error: &AnyhowError) -> bool {
-    error
-        .chain()
-        .any(<dyn core::error::Error>::is::<pq_prover::Error>)
-}
-
 #[cfg(test)]
 mod tests {
     use eth2_libp2p::PeerId;
@@ -6736,21 +6686,6 @@ mod tests {
     use super::*;
 
     type Queue = HashMap<H256, Delayed<Minimal>>;
-
-    #[test]
-    fn only_prover_errors_count_as_undecided() {
-        let undecided = AnyhowError::new(pq_prover::Error::ClaimsMismatch {
-            expected: 1,
-            actual: 0,
-        })
-        .context("aggregate and proof has invalid signature")
-        .context(Error::<Minimal>::InvalidExecutionPayload);
-
-        assert!(prover_could_not_decide(&undecided));
-        assert!(!prover_could_not_decide(
-            &AnyhowError::from(Error::<Minimal>::InvalidExecutionPayload).context("proof invalid"),
-        ));
-    }
 
     fn requested_envelope() -> ExecutionPayloadEnvelopeOrigin {
         ExecutionPayloadEnvelopeOrigin::Requested(PeerId::random())

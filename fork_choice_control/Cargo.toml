@@ -37,7 +37,6 @@ num_cpus = { workspace = true }
 once_cell = { workspace = true }
 panics = { workspace = true }
 parking_lot = { workspace = true }
-pq_prover = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }

@@ -87,34 +87,16 @@ docker buildx build \
 ## PQ devnets
 
 On a network that schedules the PQ fork, validators sign with XMSS keys, and aggregates of their
-signatures are STARK proofs. Grandine does not build a prover. It proves and verifies through the
-leanVM sidecar, a separate process reached over a Unix socket. On such a network, the beacon node
-does not start without one (`grandine vc` needs none).
+signatures are STARK proofs. Grandine proves and verifies them in-process with leanVM, at the
+revision pinned in `Cargo.toml` (`lean_vm`): proofs made with another revision do not verify. The
+beacon node starts the prover at startup (`grandine vc` needs none). The `LEANVM_THREADS`
+environment variable sets its thread count; the default, 0, lets leanVM choose about one per
+physical core it may run on. A proof can use several GiB of memory while it runs.
 
-The sidecar must come from the leanVM revision pinned in `Cargo.toml` (`lean_xmss`). The client
-refuses a sidecar that speaks another protocol version or proves for another verifier:
-
-```shell
-git clone https://github.com/leanEthereum/leanVM
-cd leanVM
-git checkout 241b009a61ba5fde797d1213b5bf76310f0d5060
-cargo build --release -p leanvm-sidecar --features experimental_prover
-mkdir -p -m 700 ~/.leanvm
-target/release/leanvm-sidecar --socket ~/.leanvm/sidecar.sock
-```
-
-Without `--features experimental_prover` the sidecar runs the stable prover, which makes the same
-proofs more slowly. It warms up before it listens, so the socket appears once it is ready. Keep the
-socket in a directory only its user can write: any client that connects can keep it proving.
-
-Then point Grandine at the socket:
-
-```shell
-grandine \
-    --configuration-directory <devnet config> \
-    --pq-prover-socket ~/.leanvm/sidecar.sock \
-    ...
-```
+`make build` and `make release` compile leanVM's prover once per CPU tier
+(`scripts/build/tier-rustc`), and the binary runs the fastest tier the CPU supports. A plain `cargo
+build` leaves the tiers without their CPU features: proofs are then slower, and the first one prints
+a warning. x86-64 hosts need AVX2 and PCLMULQDQ.
 
 The validator keys of a PQ network are the usual EIP-2335 keystores. Grandine derives the XMSS key
 and the VRF tree of each validator from its BLS secret key, as the devnet genesis does. Both are
@@ -132,7 +114,7 @@ directory once built.
 
 By default, Grandine proves aggregates only for committees in which one of its validators is an
 aggregator. `--features AggregateAllAttestations` proves every committee it collects signatures
-for, which is useful on a small devnet but costs much more sidecar time.
+for, which is useful on a small devnet but costs much more proving time.
 
 ## Team
 
