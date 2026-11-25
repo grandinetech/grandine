@@ -152,18 +152,54 @@ impl<P: Preset> Pool<P> {
         self.pq_signatures.lock().await.seal(slot)
     }
 
-    pub async fn best_pq_aggregate(
+    pub async fn pq_committee_signatures(
         &self,
         key: AttestationKey,
-    ) -> Option<Arc<PqPoolAttestation<P>>> {
+    ) -> Option<CommitteeSignatures> {
+        self.pq_signatures
+            .lock()
+            .await
+            .committee_signatures(key.data, key.committee_index)
+    }
+
+    /// Whether a pooled aggregate of `key` has the attesters at all of `positions`.
+    pub async fn is_covered_by_pq_aggregate(
+        &self,
+        key: AttestationKey,
+        positions: &[usize],
+    ) -> bool {
         self.pq_aggregates
             .read()
             .await
-            .get(&key.data.target.epoch)?
-            .get(&key)?
-            .iter()
-            .max_by_key(|aggregate| aggregate.aggregation_bits.count_ones())
+            .get(&key.data.target.epoch)
+            .and_then(|aggregates| aggregates.get(&key))
+            .is_some_and(|aggregates| {
+                aggregates.iter().any(|aggregate| {
+                    positions.iter().all(|position| {
+                        aggregate
+                            .aggregation_bits
+                            .get(*position)
+                            .is_some_and(|bit| *bit)
+                    })
+                })
+            })
+    }
+
+    /// The pooled aggregates of `key`, the most attesters first.
+    pub async fn pq_aggregates(&self, key: AttestationKey) -> Vec<Arc<PqPoolAttestation<P>>> {
+        let mut aggregates = self
+            .pq_aggregates
+            .read()
+            .await
+            .get(&key.data.target.epoch)
+            .and_then(|aggregates| aggregates.get(&key))
             .cloned()
+            .unwrap_or_default();
+
+        aggregates
+            .sort_by_key(|aggregate| core::cmp::Reverse(aggregate.aggregation_bits.count_ones()));
+
+        aggregates
     }
 
     pub async fn pq_aggregates_by_epoch(&self, epoch: Epoch) -> Vec<Arc<PqPoolAttestation<P>>> {
@@ -685,6 +721,32 @@ mod tests {
         assert_eq!(
             pooled_bits(&pool.pq_aggregates_by_epoch(0).await),
             [[true, true, false, false], [false, false, true, true],],
+        );
+    }
+
+    #[tokio::test]
+    async fn pq_aggregates_cover_positions_and_come_largest_first() {
+        let pool = Pool::<Minimal>::new(Arc::new(ChainConfig::minimal()));
+        let key = AttestationKey {
+            data: AttestationData::default(),
+            committee_index: 0,
+        };
+
+        assert!(!pool.is_covered_by_pq_aggregate(key, &[0]).await);
+
+        pool.insert_pq_aggregate(pq_aggregate(&[true, false, false, false]))
+            .await;
+        pool.insert_pq_aggregate(pq_aggregate(&[false, true, true, false]))
+            .await;
+
+        assert!(pool.is_covered_by_pq_aggregate(key, &[1, 2]).await);
+        // Two aggregates together do not cover attesters that no one of them has.
+        assert!(!pool.is_covered_by_pq_aggregate(key, &[0, 1]).await);
+        assert!(!pool.is_covered_by_pq_aggregate(key, &[4]).await);
+
+        assert_eq!(
+            pooled_bits(&pool.pq_aggregates(key).await),
+            [[false, true, true, false], [true, false, false, false]],
         );
     }
 }

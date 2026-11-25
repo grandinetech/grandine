@@ -1,5 +1,6 @@
-//! The signatures of PQ single attestations, kept until the aggregation cutoff of their slot and
-//! then proven, one aggregate per committee and attestation data.
+//! The signatures of PQ single attestations, proven one aggregate per committee and attestation
+//! data: all of a slot at the aggregation cutoff of its first aggregators, and a committee again at
+//! the later cutoff of each own aggregator after the first.
 
 use std::collections::BTreeMap;
 
@@ -33,6 +34,7 @@ const MAX_DATA_PER_COMMITTEE: u64 = 4;
 
 type Key = (Slot, H256, CommitteeIndex);
 
+#[derive(Clone)]
 pub struct CommitteeSignatures {
     data: AttestationData,
     committee_index: CommitteeIndex,
@@ -44,7 +46,7 @@ pub struct CommitteeSignatures {
 #[derive(Default)]
 pub struct PqSignaturePool {
     signatures: BTreeMap<Key, CommitteeSignatures>,
-    // Signatures of this slot and earlier ones have been handed over for proving.
+    // Signatures of this slot and earlier ones have been handed over to the first aggregators.
     sealed_slot: Option<Slot>,
 }
 
@@ -67,7 +69,7 @@ impl PqSignaturePool {
 
         let slot = data.slot;
 
-        if slot < current_slot || self.sealed_slot.is_some_and(|sealed| slot <= sealed) {
+        if slot < current_slot {
             return;
         }
 
@@ -105,7 +107,8 @@ impl PqSignaturePool {
         }
     }
 
-    /// Takes the signatures of `slot`. Signatures for it that arrive later are dropped.
+    /// The signatures of `slot` collected so far, once per slot. Signatures for it that arrive
+    /// later are still collected, for [`Self::committee_signatures`].
     pub fn seal(&mut self, slot: Slot) -> Vec<CommitteeSignatures> {
         self.prune(slot);
 
@@ -115,15 +118,21 @@ impl PqSignaturePool {
 
         self.sealed_slot = Some(slot);
 
-        let later = self
-            .signatures
-            .split_off(&(slot.saturating_add(1), H256::zero(), 0));
-
-        core::mem::replace(&mut self.signatures, later)
-            .into_iter()
-            .filter(|((entry_slot, _, _), _)| *entry_slot == slot)
-            .map(|(_, committee_signatures)| committee_signatures)
+        self.signatures
+            .range((slot, H256::zero(), 0)..(slot.saturating_add(1), H256::zero(), 0))
+            .map(|(_, committee_signatures)| committee_signatures.clone())
             .collect()
+    }
+
+    /// The signatures collected so far for `data` in the committee.
+    pub fn committee_signatures(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> Option<CommitteeSignatures> {
+        self.signatures
+            .get(&(data.slot, data.hash_tree_root(), committee_index))
+            .cloned()
     }
 
     fn prune(&mut self, current_slot: Slot) {
@@ -138,6 +147,11 @@ impl CommitteeSignatures {
     #[must_use]
     pub fn signature_count(&self) -> usize {
         self.signatures.len()
+    }
+
+    /// The committee positions of the attesters whose signatures were collected.
+    pub fn positions(&self) -> impl Iterator<Item = usize> + '_ {
+        self.signatures.keys().copied()
     }
 
     #[must_use]
@@ -253,10 +267,15 @@ mod tests {
             Some(123)
         );
 
-        // Signatures of a sealed slot are dropped, and a slot is sealed only once.
-        pool.insert::<Minimal>(3, &single, 1, 2);
+        // A slot is sealed only once, but its signatures are still collected.
+        pool.insert::<Minimal>(3, &attestation(3, 125, H256::zero()), 0, 2);
         assert!(pool.seal(3).is_empty());
-        assert!(pool.signatures.is_empty());
+
+        let later = pool
+            .committee_signatures(single.data, 0)
+            .expect("signatures are still collected");
+
+        assert_eq!(later.positions().collect::<Vec<_>>(), [0, 1]);
     }
 
     #[test]

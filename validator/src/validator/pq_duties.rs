@@ -2,14 +2,18 @@
 //!
 //! TODO(PQ): Perform PQ duties through remote beacon nodes and Web3Signer.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use anyhow::{Result, bail, ensure};
 use block_producer::ValidatorBlindedBlock;
 use bls::{PublicKeyBytes, Signature};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc, pq, signing::SignForSingleFork};
-use logging::{info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use operation_pools::{AttestationKey, PqAggregateToBroadcast};
 use slashing_protection::Attestation as SlashingProtectionAttestation;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
@@ -27,6 +31,7 @@ use types::{
         primitives::{CommitteeIndex, H256, Uint256},
     },
     pq::{
+        beacon_state::BeaconState as PqBeaconState,
         consts::{
             LEAF_OFFSET_AGGREGATE_AND_PROOF, LEAF_OFFSET_BEACON_PROPOSER,
             LEAF_OFFSET_EXECUTION_PAYLOAD_ENVELOPE, LEAF_OFFSET_PROPOSER_PREFERENCES,
@@ -47,7 +52,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::BeaconNodeApi as _, beacon_nodes::BeaconNodes,
+    beacon_node_api::BeaconNodeApi as _, beacon_nodes::BeaconNodes, misc::Aggregator,
     own_beacon_committee_members::BeaconCommitteeMember, own_ptc_members::PTCMember,
     slot_head::SlotHead, validator::Validator,
 };
@@ -435,19 +440,46 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         });
     }
 
-    /// Signs and publishes the proven aggregate of each committee an own validator aggregates
-    /// for, at the aggregator's staggered `get_aggregate_due_ms`.
-    ///
-    /// TODO(PQ): Skip aggregates whose attesters a received aggregate already has
-    /// (`should_broadcast_aggregate`).
+    /// Has the pool prove the committee of each own aggregator after the first in its aggregation
+    /// committee again at the aggregator's own `get_aggregation_cutoff_ms`, with the signatures
+    /// that arrived since.
+    pub(super) fn prove_pq_aggregates_at_own_cutoffs(&self, beacon_nodes: &BeaconNodes<P, W>) {
+        let Some(BeaconState::Pq(state)) = beacon_nodes.state().map(AsRef::as_ref) else {
+            return;
+        };
+
+        let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() else {
+            return;
+        };
+
+        for (key, aggregators) in &self.own_aggregators {
+            let positions = aggregator_positions(state, *key, aggregators)
+                .into_iter()
+                .map(|(_, position)| position)
+                .filter(|position| *position > 0)
+                .collect::<BTreeSet<_>>();
+
+            for position in positions {
+                attestation_agg_pool.prove_pq_aggregate_at(*key, position);
+            }
+        }
+    }
+
+    /// Signs and publishes an aggregate of each committee an own validator aggregates for, at the
+    /// aggregator's staggered `get_aggregate_due_ms`, unless an aggregate received or published
+    /// already has its attesters (`should_broadcast_aggregate`).
     #[expect(clippy::too_many_lines)]
-    pub(super) async fn publish_pq_aggregates_and_proofs(&self, beacon_nodes: &BeaconNodes<P, W>) {
+    pub(super) fn publish_pq_aggregates_and_proofs(&self, beacon_nodes: &BeaconNodes<P, W>) {
         let BeaconNodes::Local(local) = beacon_nodes else {
             warn_with_peers!("PQ aggregates are published only through the built-in beacon node");
             return;
         };
 
-        let Some(BeaconState::Pq(state)) = beacon_nodes.state().map(AsRef::as_ref) else {
+        let Some(state) = beacon_nodes.state().cloned() else {
+            return;
+        };
+
+        let BeaconState::Pq(pq_state) = state.as_ref() else {
             return;
         };
 
@@ -458,58 +490,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let config = self.chain_source.chain_config.clone_arc();
 
         for (key, aggregators) in &self.own_aggregators {
-            let (aggregate, proof) = match attestation_agg_pool.best_pq_aggregate(*key).await {
-                Ok(Some(aggregate_and_proof)) => aggregate_and_proof,
-                Ok(None) => {
-                    warn_with_peers!(
-                        "no proven PQ aggregate for committee {} in slot {}",
-                        key.committee_index,
-                        key.data.slot,
-                    );
-                    continue;
-                }
-                Err(error) => {
-                    warn_with_peers!("failed to obtain a PQ aggregate: {error:?}");
-                    continue;
-                }
-            };
+            let key = *key;
 
-            let aggregation_committee =
-                match pq::get_aggregation_committee(state, key.data.slot, key.committee_index) {
-                    Ok(aggregation_committee) => aggregation_committee,
-                    Err(error) => {
-                        warn_with_peers!("failed to compute an aggregation committee: {error:?}");
-                        continue;
-                    }
-                };
-
-            for aggregator in aggregators {
-                let Some(position) = aggregation_committee
-                    .iter()
-                    .position(|index| *index == aggregator.aggregator_index)
-                    .and_then(|position| u32::try_from(position).ok())
+            for (aggregator, position) in aggregator_positions(pq_state, key, aggregators) {
+                let Ok(leaf_index) =
+                    pq::compute_xmss_leaf_index(key.data.slot, LEAF_OFFSET_AGGREGATE_AND_PROOF)
                 else {
-                    continue;
-                };
-
-                let message = PqAggregateAndProof {
-                    aggregator_index: aggregator.aggregator_index,
-                    aggregate: aggregate.clone(),
-                    proof: proof.clone(),
-                };
-
-                let domain = accessors::get_domain(
-                    &config,
-                    state,
-                    DOMAIN_AGGREGATE_AND_PROOF,
-                    Some(aggregate.data.target.epoch),
-                );
-                let signing_root = misc::compute_signing_root(&message, domain);
-
-                let Ok(leaf_index) = pq::compute_xmss_leaf_index(
-                    aggregate.data.slot,
-                    LEAF_OFFSET_AGGREGATE_AND_PROOF,
-                ) else {
                     continue;
                 };
 
@@ -518,13 +504,60 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .aggregate_due_pq(position)
                     .saturating_sub(config.aggregate_due_pq(0));
 
+                let attestation_agg_pool = attestation_agg_pool.clone_arc();
+                let config = config.clone_arc();
                 let local = local.clone();
                 let signer = self.signer.clone_arc();
                 let slashing_protector = self.slashing_protector.clone_arc();
+                let state = state.clone_arc();
+                let aggregator_index = aggregator.aggregator_index;
                 let public_key = aggregator.public_key;
 
                 tokio::spawn(async move {
                     tokio::time::sleep(delay).await;
+
+                    let (aggregate, proof) =
+                        match attestation_agg_pool.pq_aggregate_to_broadcast(key).await {
+                            Ok(PqAggregateToBroadcast::Aggregate(aggregate, proof)) => {
+                                (aggregate, proof)
+                            }
+                            Ok(PqAggregateToBroadcast::NotProven) => {
+                                warn_with_peers!(
+                                    "no proven PQ aggregate for committee {} in slot {}",
+                                    key.committee_index,
+                                    key.data.slot,
+                                );
+                                return;
+                            }
+                            Ok(PqAggregateToBroadcast::Redundant) => {
+                                debug_with_peers!(
+                                    "not publishing PQ aggregate of aggregator {aggregator_index} \
+                                     for committee {} in slot {}: an aggregate received or \
+                                     published has all of its attesters",
+                                    key.committee_index,
+                                    key.data.slot,
+                                );
+                                return;
+                            }
+                            Err(error) => {
+                                warn_with_peers!("failed to obtain a PQ aggregate: {error:?}");
+                                return;
+                            }
+                        };
+
+                    let message = PqAggregateAndProof {
+                        aggregator_index,
+                        aggregate,
+                        proof,
+                    };
+
+                    let domain = accessors::get_domain(
+                        &config,
+                        &state,
+                        DOMAIN_AGGREGATE_AND_PROOF,
+                        Some(message.aggregate.data.target.epoch),
+                    );
+                    let signing_root = misc::compute_signing_root(&message, domain);
 
                     let signature = match signer
                         .sign_pq(
@@ -560,6 +593,33 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
     }
+}
+
+/// The own aggregators of `key` with their positions in its aggregation committee.
+fn aggregator_positions<'aggregators, P: Preset>(
+    state: &PqBeaconState<P>,
+    key: AttestationKey,
+    aggregators: &'aggregators [Aggregator],
+) -> Vec<(&'aggregators Aggregator, u32)> {
+    let aggregation_committee =
+        match pq::get_aggregation_committee(state, key.data.slot, key.committee_index) {
+            Ok(aggregation_committee) => aggregation_committee,
+            Err(error) => {
+                warn_with_peers!("failed to compute an aggregation committee: {error:?}");
+                return vec![];
+            }
+        };
+
+    aggregators
+        .iter()
+        .filter_map(|aggregator| {
+            let position = aggregation_committee
+                .iter()
+                .position(|index| *index == aggregator.aggregator_index)?;
+
+            Some((aggregator, u32::try_from(position).ok()?))
+        })
+        .collect()
 }
 
 /// Signs `signing_root` at `leaf_index` with the XMSS key derived from `public_key`.

@@ -1,7 +1,7 @@
 pub use crate::{
     attestation_agg_pool::{
         AttestationKey, AttestationPacker, Manager as AttestationAggPool, PoolAttestation,
-        compute_on_chain_aggregate, convert_to_electra_attestation,
+        PqAggregateToBroadcast, compute_on_chain_aggregate, convert_to_electra_attestation,
         try_convert_to_single_attestation,
     },
     blob_reconstruction_pool::Manager as BlobReconstructionPool,
@@ -21,7 +21,7 @@ mod attestation_agg_pool {
         compute_on_chain_aggregate, convert_to_electra_attestation,
         try_convert_to_single_attestation,
     };
-    pub use manager::Manager;
+    pub use manager::{Manager, PqAggregateToBroadcast};
     pub use types::{AttestationKey, PoolAttestation};
 
     mod attestation_packer;

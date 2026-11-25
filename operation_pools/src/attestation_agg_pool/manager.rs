@@ -31,6 +31,7 @@ use crate::{
     attestation_agg_pool::{
         conversion::{compute_pq_on_chain_aggregate, current_state},
         pool::Pool,
+        pq_signature_pool::CommitteeSignatures,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask,
             GloasProposableAttestationsTask, InsertAttestationTask, InsertPqAggregateTask,
@@ -42,12 +43,20 @@ use crate::{
     misc::PoolTask,
 };
 
+pub enum PqAggregateToBroadcast<P: Preset> {
+    Aggregate(PqAttestation<P>, AttestationProof<P>),
+    /// No aggregate of the committee was proven or received.
+    NotProven,
+    /// An aggregate received or published has all the attesters of each pooled one.
+    Redundant,
+}
+
 pub struct Manager<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
     metrics: Option<Arc<Metrics>>,
     pool: Arc<Pool<P>>,
-    // One proof at a time. A slot whose proving would wait for the previous one is skipped.
+    // One proof at a time. A slot whose first proofs would wait for the previous slot's is skipped.
     pq_proving: Arc<Semaphore>,
     validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
@@ -192,18 +201,98 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         .await
     }
 
-    /// The pooled PQ aggregate of `key` with the most attesters, and its proof.
-    pub async fn best_pq_aggregate(
+    /// The pooled PQ aggregate of `key` with the most attesters that no aggregate received or
+    /// published has all of ([`should_broadcast_aggregate`]).
+    ///
+    /// [`should_broadcast_aggregate`]: https://github.com/ethereum/consensus-specs/blob/pq/specs/_features/pq/validator.md#broadcast-aggregate
+    pub async fn pq_aggregate_to_broadcast(
         &self,
         key: AttestationKey,
-    ) -> Result<Option<(PqAttestation<P>, AttestationProof<P>)>> {
-        let Some(aggregate) = self.pool.best_pq_aggregate(key).await else {
-            return Ok(None);
-        };
+    ) -> Result<PqAggregateToBroadcast<P>> {
+        let aggregates = self.pool.pq_aggregates(key).await;
 
-        let (attestation, mut proofs) = compute_pq_on_chain_aggregate([aggregate.as_ref()])?;
+        if aggregates.is_empty() {
+            return Ok(PqAggregateToBroadcast::NotProven);
+        }
 
-        Ok(proofs.pop().map(|proof| (attestation, proof)))
+        for aggregate in aggregates {
+            let (attestation, mut proofs) = compute_pq_on_chain_aggregate([aggregate.as_ref()])?;
+
+            if self
+                .controller
+                .is_aggregate_subset_known(&CombinedAttestation::Pq(attestation.clone()))
+            {
+                continue;
+            }
+
+            if let Some(proof) = proofs.pop() {
+                return Ok(PqAggregateToBroadcast::Aggregate(attestation, proof));
+            }
+        }
+
+        Ok(PqAggregateToBroadcast::Redundant)
+    }
+
+    /// Proves the signatures of `key` collected until the aggregation cutoff of the own aggregator
+    /// at `position` in its aggregation committee, unless a pooled aggregate already has all of
+    /// their attesters. Waits for earlier proofs until the aggregator's aggregate is due.
+    pub fn prove_pq_aggregate_at(&self, key: AttestationKey, position: u32) {
+        let controller = self.controller.clone_arc();
+        let pool = self.pool.clone_arc();
+        let pq_proving = self.pq_proving.clone_arc();
+
+        tokio::spawn(async move {
+            let config = controller.chain_config().clone_arc();
+            let genesis_time = controller.genesis_time();
+            let slot = key.data.slot;
+            let delay_bps = config
+                .aggregator_delay_bps
+                .saturating_mul(u64::from(position));
+
+            let until = |due_bps: u64| {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default();
+
+                clock::duration_until_due_bps(
+                    &config,
+                    genesis_time,
+                    slot,
+                    due_bps.saturating_add(delay_bps),
+                    now,
+                )
+            };
+
+            tokio::time::sleep(until(config.aggregation_cutoff_bps)).await;
+
+            let now = Instant::now();
+            let deadline = now
+                .checked_add(until(config.aggregate_due_bps_pq))
+                .unwrap_or(now);
+
+            let Some(input) = pool.pq_committee_signatures(key).await else {
+                return;
+            };
+
+            let positions = input.positions().collect::<Vec<_>>();
+
+            if pool.is_covered_by_pq_aggregate(key, &positions).await {
+                return;
+            }
+
+            let Ok(Ok(_permit)) =
+                tokio::time::timeout_at(deadline.into(), pq_proving.acquire_owned()).await
+            else {
+                warn_with_peers!(
+                    "no time to prove the PQ aggregate of committee {} in slot {slot} \
+                     for aggregator position {position}",
+                    key.committee_index,
+                );
+                return;
+            };
+
+            prove_and_pool(&controller, &pool, input, slot, deadline).await;
+        });
     }
 
     /// Pools a validated PQ aggregate with its proof.
@@ -326,34 +415,8 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                     break;
                 }
 
-                let controller = controller.clone_arc();
-
-                let result = tokio::task::spawn_blocking(move || {
-                    let state = current_state(&controller, input.target());
-
-                    input.prove(
-                        controller.chain_config(),
-                        state.as_ref(),
-                        pq_prover::aggregate_backend(),
-                    )
-                })
-                .await;
-
-                match result {
-                    Ok(Ok(aggregate)) if Instant::now() < deadline => {
-                        pool.insert_pq_aggregate(Arc::new(aggregate)).await;
-                    }
-                    Ok(Ok(_)) => {
-                        warn_with_peers!("PQ aggregate of slot {slot} was proven too late");
-                        break;
-                    }
-                    Ok(Err(error)) => {
-                        debug_with_peers!("failed to prove PQ aggregate of slot {slot}: {error:?}");
-                    }
-                    Err(error) => {
-                        warn_with_peers!("PQ proving task of slot {slot} failed: {error:?}");
-                        break;
-                    }
+                if !prove_and_pool(&controller, &pool, input, slot, deadline).await {
+                    break;
                 }
             }
         });
@@ -369,5 +432,47 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     fn spawn_detached(&self, task: impl PoolTask) {
         self.dedicated_executor.spawn(task.run()).detach()
+    }
+}
+
+// Proves `input` and pools the aggregate if it is proven before `deadline`. Returns whether there
+// may be time to prove more.
+async fn prove_and_pool<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    pool: &Pool<P>,
+    input: CommitteeSignatures,
+    slot: Slot,
+    deadline: Instant,
+) -> bool {
+    let controller = controller.clone_arc();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let state = current_state(&controller, input.target());
+
+        input.prove(
+            controller.chain_config(),
+            state.as_ref(),
+            pq_prover::aggregate_backend(),
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(aggregate)) if Instant::now() < deadline => {
+            pool.insert_pq_aggregate(Arc::new(aggregate)).await;
+            true
+        }
+        Ok(Ok(_)) => {
+            warn_with_peers!("PQ aggregate of slot {slot} was proven too late");
+            false
+        }
+        Ok(Err(error)) => {
+            debug_with_peers!("failed to prove PQ aggregate of slot {slot}: {error:?}");
+            true
+        }
+        Err(error) => {
+            warn_with_peers!("PQ proving task of slot {slot} failed: {error:?}");
+            false
+        }
     }
 }

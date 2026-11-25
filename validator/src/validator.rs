@@ -1877,6 +1877,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             })
             .pipe(group_into_btreemap);
 
+        if slot_head.phase() == Phase::Pq {
+            self.prove_pq_aggregates_at_own_cutoffs(beacon_nodes);
+        }
+
         Ok(())
     }
 
@@ -1886,7 +1890,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let slot_head = beacon_nodes.head();
 
         if slot_head.phase() == Phase::Pq {
-            self.publish_pq_aggregates_and_proofs(beacon_nodes).await;
+            self.publish_pq_aggregates_and_proofs(beacon_nodes);
             return;
         }
 

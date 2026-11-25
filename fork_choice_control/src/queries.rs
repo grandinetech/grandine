@@ -35,7 +35,7 @@ use types::{
     RandaoMixes,
     altair::containers::SyncCommittee,
     combined::{
-        BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
         SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
         UnblindError,
     },
@@ -1917,6 +1917,13 @@ where
             status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
+    }
+
+    /// Whether an aggregate received or published has all of `aggregate`'s attesters.
+    #[must_use]
+    pub fn is_aggregate_subset_known(&self, aggregate: &Attestation<P>) -> bool {
+        self.store_snapshot()
+            .is_gossip_aggregate_subset_known(aggregate)
     }
 
     #[must_use]
