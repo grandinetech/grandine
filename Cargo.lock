@@ -8606,6 +8606,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "arithmetic",
  "bls",
  "builder_api",
  "derive_more 2.1.1",
@@ -10778,6 +10779,7 @@ version = "0.0.0"
 dependencies = [
  "hex",
  "lean_xmss",
+ "nonzero_ext",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -9,9 +9,11 @@
 
 use core::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
+    num::NonZeroU64,
     str::FromStr,
 };
 
+use nonzero_ext::nonzero;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use ssz::{H256, MerkleTree, ReadError, Size, SszHash, SszRead, SszSize, SszWrite};
 use thiserror::Error;
@@ -40,6 +42,9 @@ pub const FAKE_CRYPTO: bool = cfg!(feature = "fake_crypto");
 
 /// The spec's `Uint64` leaf indices must fit in this.
 pub type LeafIndex = u32;
+
+/// Leaves per tree. [`XmssSecretKey::prepare`] builds the tree of one such aligned range.
+pub const LEAVES_PER_TREE: NonZeroU64 = nonzero!(1_u64 << 16);
 
 const LEAF_INDEX_SIZE: usize = size_of::<LeafIndex>();
 
@@ -313,7 +318,8 @@ impl XmssSecretKey {
         self.public_key
     }
 
-    /// Builds the tree of the `2^16`-leaf range containing `leaf_index` ahead of signing.
+    /// Builds the tree of the [`LEAVES_PER_TREE`]-leaf range containing `leaf_index` ahead of
+    /// signing.
     #[cfg_attr(feature = "fake_crypto", expect(clippy::missing_const_for_fn))]
     pub fn prepare(&self, leaf_index: LeafIndex) -> Result<(), Error> {
         backend::prepare(&self.expanded, leaf_index)

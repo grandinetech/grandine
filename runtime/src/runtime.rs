@@ -87,7 +87,11 @@ use slashing_protection::{
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tokio::{runtime::Builder, select, time::sleep};
+use tokio::{
+    runtime::Builder,
+    select,
+    time::{MissedTickBehavior, sleep},
+};
 #[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -97,7 +101,7 @@ use types::{
     nonstandard::{Phase, PublishedDuty},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        primitives::H256,
+        primitives::{H256, UnixSeconds},
     },
     pq::validator_list::padded_pubkey,
     preset::{Preset, PresetName},
@@ -1183,18 +1187,30 @@ async fn run_services<P: Preset>(
         }
 
         // Signing builds the trees of a leaf range first, which takes longer than a duty allows.
-        // TODO(PQ): Prepare the next trees before duties reach them.
-        //           Slot duties move to another tree about every 13,000 slots.
+        // Slot duties move to another tree every 8192 slots. The trees of the next range are built
+        // as soon as the current one starts, one key at a time: building them all at the boundary
+        // stalled the validators for minutes.
         let current_slot = Tick::current::<P>(&chain_config, genesis.genesis_time)?.slot;
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
-        tokio::task::spawn_blocking({
+        tokio::spawn({
             let signer = signer.clone_arc();
+            let chain_config = chain_config.clone_arc();
+            let genesis_time = genesis.genesis_time;
 
-            move || {
-                if let Err(error) = signer.prepare_pq_keys(current_epoch, current_slot) {
-                    warn_with_peers!("failed to prepare XMSS keys: {error:?}");
+            async move {
+                let prepare_current = tokio::task::spawn_blocking({
+                    let signer = signer.clone_arc();
+                    move || signer.prepare_pq_keys(current_epoch, current_slot)
+                });
+
+                match prepare_current.await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => warn_with_peers!("failed to prepare XMSS keys: {error:?}"),
+                    Err(error) => warn_with_peers!("failed to prepare XMSS keys: {error:?}"),
                 }
+
+                prepare_next_xmss_trees::<P>(signer, &chain_config, genesis_time).await;
             }
         });
 
@@ -1320,6 +1336,45 @@ async fn run_services<P: Preset>(
     clock_target.stop();
 
     Ok(())
+}
+
+/// Builds the XMSS trees of the next slot duty range as soon as the current one starts, one key at
+/// a time on one thread. Checks once a slot and only builds when the range changes.
+async fn prepare_next_xmss_trees<P: Preset>(
+    signer: Arc<Signer>,
+    chain_config: &ChainConfig,
+    genesis_time: UnixSeconds,
+) {
+    let mut interval = tokio::time::interval(chain_config.slot_duration_ms);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    let mut prepared = None;
+
+    loop {
+        interval.tick().await;
+
+        let leaves = match Tick::current::<P>(chain_config, genesis_time)
+            .and_then(|tick| Signer::pq_leaves_to_prepare::<P>(tick.slot))
+        {
+            Ok(leaves) => leaves,
+            Err(error) => {
+                warn_with_peers!("failed to find the next XMSS trees: {error:?}");
+                continue;
+            }
+        };
+
+        if prepared == Some(leaves) {
+            continue;
+        }
+
+        let signer = signer.clone_arc();
+
+        match tokio::task::spawn_blocking(move || signer.prepare_pq_keys_serially(&leaves)).await {
+            Ok(Ok(())) => prepared = Some(leaves),
+            Ok(Err(error)) => warn_with_peers!("failed to build the next XMSS trees: {error:?}"),
+            Err(error) => warn_with_peers!("failed to build the next XMSS trees: {error:?}"),
+        }
+    }
 }
 
 async fn run_clock<P: Preset>(

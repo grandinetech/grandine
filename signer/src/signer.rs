@@ -1,12 +1,17 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::Path,
     sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    time::Instant,
 };
 
 use anyhow::{Error as AnyhowError, Result};
 use arc_swap::{ArcSwap, Guard};
+use arithmetic::U64Ext as _;
 use bls::{PublicKeyBytes, SecretKey, Signature, traits::SecretKey as _};
 use doppelganger_protection::DoppelgangerProtection;
 use futures::{
@@ -17,7 +22,7 @@ use futures::{
 };
 use helper_functions::misc;
 use itertools::{Itertools as _, izip};
-use logging::{info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use rayon::{
     ThreadPoolBuilder,
@@ -31,6 +36,7 @@ use tokio::sync::Notify;
 use tracing::instrument;
 use types::{
     phase0::primitives::{Epoch, H256, Slot},
+    pq::consts::XMSS_LEAVES_PER_SLOT,
     preset::Preset,
     redacting_url::RedactingUrl,
 };
@@ -47,6 +53,9 @@ use crate::{
 // Whole epochs of selection proofs and registrations are signed at once, which would otherwise
 // open thousands of requests to a Web3Signer.
 const MAX_CONCURRENT_WEB3SIGNER_REQUESTS: usize = 32;
+
+// How often [`Signer::prepare_pq_keys_serially`] logs its progress, in keys.
+const PQ_TREE_PROGRESS_INTERVAL: usize = 100;
 
 #[derive(Debug, Error)]
 enum Error {
@@ -168,6 +177,8 @@ impl Signer {
         .collect::<Result<Vec<_>, _>>()?;
 
         let pq_keys = self.pq_keys_read().values().cloned().collect_vec();
+        let key_count = pq_keys.len();
+        let started_at = Instant::now();
 
         pq_keys.into_par_iter().try_for_each(|pq_key| {
             leaves
@@ -176,6 +187,102 @@ impl Signer {
 
             pq_key.save_xmss_cache()
         })?;
+
+        info_with_peers!(
+            "prepared the XMSS trees of {key_count} validators in {:?} (leaves: {leaves:?})",
+            started_at.elapsed(),
+        );
+
+        Ok(())
+    }
+
+    /// The leaves [`Self::prepare_pq_keys_serially`] builds the trees of at `slot`: the
+    /// attestation and duty leaves of `slot`, then the first duty leaf of the next tree and the
+    /// attestation leaf of the epoch of its last slot. The trees in use come first so that they
+    /// stay among the most recently used when the next ones fill the key's tree cache.
+    pub fn pq_leaves_to_prepare<P: Preset>(slot: Slot) -> Result<[LeafIndex; 4]> {
+        let tree_leaves = xmss::LEAVES_PER_TREE;
+        let duty_leaf = helper_functions::pq::compute_xmss_leaf_index(slot, 0)?;
+        let first_duty_leaf = helper_functions::pq::compute_xmss_leaf_index(0, 0)?;
+
+        let next_duty_leaf = duty_leaf
+            .prev_multiple_of(tree_leaves)
+            .try_add(tree_leaves.get())?;
+
+        let next_tree_last_slot = next_duty_leaf
+            .try_add(tree_leaves.get())?
+            .try_sub(1)?
+            .try_sub(first_duty_leaf)?
+            .try_div(XMSS_LEAVES_PER_SLOT)?;
+
+        let leaves = [
+            helper_functions::pq::compute_xmss_attestation_leaf_index(
+                misc::compute_epoch_at_slot::<P>(slot),
+            )?,
+            duty_leaf,
+            helper_functions::pq::compute_xmss_attestation_leaf_index(
+                misc::compute_epoch_at_slot::<P>(next_tree_last_slot),
+            )?,
+            next_duty_leaf,
+        ];
+
+        let [first, second, third, fourth] = leaves.map(LeafIndex::try_from);
+
+        Ok([first?, second?, third?, fourth?])
+    }
+
+    /// Builds the trees the XMSS keys sign at `leaves` from, one key at a time on the calling
+    /// thread, and saves each key's cache after its trees. Takes seconds per key, but only one
+    /// core.
+    ///
+    /// Do not call on an async executor thread.
+    pub fn prepare_pq_keys_serially(&self, leaves: &[LeafIndex]) -> Result<()> {
+        let pq_keys = self
+            .pq_keys_read()
+            .iter()
+            .map(|(public_key, pq_key)| (*public_key, pq_key.clone_arc()))
+            .collect_vec();
+        let key_count = pq_keys.len();
+        let started_at = Instant::now();
+        let mut slowest = Duration::ZERO;
+
+        info_with_peers!(
+            "building the XMSS trees of {key_count} validators one at a time (leaves: {leaves:?})",
+        );
+
+        for (index, (public_key, pq_key)) in pq_keys.into_iter().enumerate() {
+            let key_started_at = Instant::now();
+
+            for leaf_index in leaves {
+                pq_key.xmss().prepare(*leaf_index)?;
+            }
+
+            pq_key.save_xmss_cache()?;
+
+            let key_time = key_started_at.elapsed();
+            slowest = slowest.max(key_time);
+
+            debug_with_peers!("built the XMSS trees of validator {public_key:?} in {key_time:?}");
+
+            let done = index.saturating_add(1);
+
+            if done.is_multiple_of(PQ_TREE_PROGRESS_INTERVAL) && done < key_count {
+                info_with_peers!(
+                    "built the XMSS trees of {done} of {key_count} validators in {:?}",
+                    started_at.elapsed(),
+                );
+            }
+        }
+
+        let elapsed = started_at.elapsed();
+        let average = elapsed
+            .checked_div(u32::try_from(key_count)?)
+            .unwrap_or_default();
+
+        info_with_peers!(
+            "built the XMSS trees of {key_count} validators in {elapsed:?} \
+             (average: {average:?}, slowest: {slowest:?})",
+        );
 
         Ok(())
     }
@@ -842,6 +949,41 @@ mod tests {
 
     const SECRET_KEY: [u8; 32] =
         hex!("47b8192d77bf871b62e87859d653922725724a5c031afeabc60bcef5ff665138");
+
+    // On Mainnet the duty trees change at slot 4096 and then every 8192 slots.
+    #[test]
+    fn pq_leaves_to_prepare_are_those_of_the_current_and_next_duty_trees() -> Result<()> {
+        use helper_functions::pq::{compute_xmss_attestation_leaf_index, compute_xmss_leaf_index};
+        use types::preset::Mainnet;
+
+        let leaves = |epoch, slot, next_epoch, next_slot| -> Result<[LeafIndex; 4]> {
+            Ok([
+                compute_xmss_attestation_leaf_index(epoch)?.try_into()?,
+                compute_xmss_leaf_index(slot, 0)?.try_into()?,
+                compute_xmss_attestation_leaf_index(next_epoch)?.try_into()?,
+                compute_xmss_leaf_index(next_slot, 0)?.try_into()?,
+            ])
+        };
+
+        assert_eq!(
+            Signer::pq_leaves_to_prepare::<Mainnet>(0)?,
+            leaves(0, 0, 383, 4096)?,
+        );
+        assert_eq!(
+            Signer::pq_leaves_to_prepare::<Mainnet>(4095)?,
+            leaves(127, 4095, 383, 4096)?,
+        );
+        assert_eq!(
+            Signer::pq_leaves_to_prepare::<Mainnet>(4096)?,
+            leaves(128, 4096, 639, 12288)?,
+        );
+        assert_eq!(
+            Signer::pq_leaves_to_prepare::<Mainnet>(12287)?,
+            leaves(383, 12287, 639, 12288)?,
+        );
+
+        Ok(())
+    }
 
     // The index resolver waits on the notification, so it must fire on a key change and only then.
     #[test]

@@ -13,6 +13,7 @@ fake_crypto = []
 [dependencies]
 hex = { workspace = true }
 lean_xmss = { workspace = true }
+nonzero_ext = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 ssz = { workspace = true }
