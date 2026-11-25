@@ -231,8 +231,8 @@ mod tests {
     #[test]
     fn estimated_cache_size_of_the_default_cache_sizes() {
         for (storage_mode, estimated_cache_size) in [
-            (StorageMode::Archive, ByteSize::mib(15_520)),
-            (StorageMode::default(), ByteSize::mib(3_104)),
+            (StorageMode::Archive, ByteSize::mib(13_965)),
+            (StorageMode::default(), ByteSize::mib(2_793)),
         ] {
             let config = StateStorageConfig::default_for_mode(storage_mode);
 
