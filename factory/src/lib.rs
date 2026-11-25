@@ -65,7 +65,9 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
+    traits::{
+        BeaconState as _, BlockBodyWithPayloadBid, PostGloasBeaconState, SignedBeaconBlock as _,
+    },
 };
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
@@ -362,7 +364,7 @@ pub fn execution_payload_envelope<P: Preset>(
         .message()
         .body()
         .with_payload_bid()
-        .map(|body| &body.signed_execution_payload_bid().message)
+        .map(BlockBodyWithPayloadBid::execution_payload_bid)
     else {
         bail!("block should be post-Gloas");
     };
@@ -603,15 +605,17 @@ pub fn execution_payload<P: Preset>(
             ..CapellaExecutionPayload::default()
         }
         .into(),
-        Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => DenebExecutionPayload {
-            parent_hash,
-            prev_randao,
-            timestamp,
-            block_hash,
-            withdrawals,
-            ..DenebExecutionPayload::default()
+        Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas | Phase::Pq => {
+            DenebExecutionPayload {
+                parent_hash,
+                prev_randao,
+                timestamp,
+                block_hash,
+                withdrawals,
+                ..DenebExecutionPayload::default()
+            }
+            .into()
         }
-        .into(),
     };
 
     Ok(execution_payload)
@@ -837,6 +841,8 @@ fn block_with_parent_payload<P: Preset>(
             },
         }))
         .with_signed_execution_payload_bid(signed_execution_payload_bid),
+        // TODO(PQ): Build PQ blocks. They need XMSS signatures and VRF proofs.
+        Phase::Pq => bail!("the factory cannot build PQ blocks yet"),
     }
     .with_execution_payload(execution_payload)?;
 

@@ -13,6 +13,7 @@ use static_assertions::{assert_not_impl_any, const_assert_eq};
 use thiserror::Error;
 use typenum::U1;
 use variant_count::VariantCount;
+use xmss::XmssSignature;
 
 use crate::{
     altair::{
@@ -127,6 +128,10 @@ use crate::{
             ValidatorIndex,
         },
     },
+    pq::{
+        beacon_state::BeaconState as PqBeaconState,
+        containers::{BeaconBlock as PqBeaconBlock, SignedBeaconBlock as PqSignedBeaconBlock},
+    },
     preset::{Mainnet, Preset},
     traits::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithExecutionRequests,
@@ -147,6 +152,7 @@ pub enum BeaconState<P: Preset> {
     Electra(Hc<ElectraBeaconState<P>>),
     Fulu(Hc<FuluBeaconState<P>>),
     Gloas(Hc<GloasBeaconState<P>>),
+    Pq(Hc<PqBeaconState<P>>),
 }
 
 // This assertion will become incorrect if later phases don't modify `BeaconState`.
@@ -162,6 +168,7 @@ const_assert_eq!(BeaconState::<Mainnet>::VARIANT_COUNT, Phase::CARDINALITY);
     [ElectraBeaconState];
     [FuluBeaconState];
     [GloasBeaconState];
+    [PqBeaconState];
 )]
 impl<P: Preset> From<implementor<P>> for BeaconState<P> {
     fn from(state: implementor<P>) -> Self {
@@ -181,6 +188,7 @@ impl<P: Preset> SszSize for BeaconState<P> {
         ElectraBeaconState::<P>::SIZE,
         FuluBeaconState::<P>::SIZE,
         GloasBeaconState::<P>::SIZE,
+        PqBeaconState::<P>::SIZE,
     ]);
 }
 
@@ -208,6 +216,7 @@ impl<P: Preset> SszWrite for BeaconState<P> {
             Self::Electra(state) => state.write_variable(bytes),
             Self::Fulu(state) => state.write_variable(bytes),
             Self::Gloas(state) => state.write_variable(bytes),
+            Self::Pq(state) => state.write_variable(bytes),
         }
     }
 }
@@ -225,6 +234,7 @@ impl<P: Preset> SszHash for BeaconState<P> {
             Self::Electra(state) => state.hash_tree_root(),
             Self::Fulu(state) => state.hash_tree_root(),
             Self::Gloas(state) => state.hash_tree_root(),
+            Self::Pq(state) => state.hash_tree_root(),
         }
     }
 }
@@ -257,7 +267,7 @@ impl<P: Preset> BeaconState<P> {
             (_, header) => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
 
                 return Err(StatePhaseError {
                     state_phase: self.phase(),
@@ -284,7 +294,7 @@ impl<P: Preset> BeaconState<P> {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
 
                 return Err(StatePhaseError {
                     state_phase: self.phase(),
@@ -306,6 +316,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(_) => Phase::Electra,
             Self::Fulu(_) => Phase::Fulu,
             Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
         }
     }
 
@@ -325,6 +336,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -338,6 +350,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -350,6 +363,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -362,6 +376,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -373,6 +388,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -387,6 +403,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -400,6 +417,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state),
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -414,6 +432,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Electra(_) => None,
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -427,6 +446,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Electra(_) => None,
             Self::Fulu(state) => Some(state),
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -441,6 +461,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Electra(_)
             | Self::Fulu(_) => None,
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -454,6 +475,7 @@ impl<P: Preset> BeaconState<P> {
             | Self::Electra(_)
             | Self::Fulu(_) => None,
             Self::Gloas(state) => Some(state),
+            Self::Pq(state) => Some(state),
         }
     }
 
@@ -467,6 +489,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => state.set_cached_root(root),
             Self::Fulu(state) => state.set_cached_root(root),
             Self::Gloas(state) => state.set_cached_root(root),
+            Self::Pq(state) => state.set_cached_root(root),
         }
     }
 
@@ -480,6 +503,7 @@ impl<P: Preset> BeaconState<P> {
             Self::Electra(state) => Some(state.deposit_requests_start_index),
             Self::Fulu(state) => Some(state.deposit_requests_start_index),
             Self::Gloas(state) => Some(state.deposit_requests_start_index),
+            Self::Pq(state) => Some(state.deposit_requests_start_index),
         }
     }
 
@@ -504,6 +528,7 @@ impl<P: Preset> BeaconState<P> {
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(state)
@@ -521,6 +546,7 @@ pub enum SignedBeaconBlock<P: Preset> {
     Electra(ElectraSignedBeaconBlock<P>),
     Fulu(FuluSignedBeaconBlock<P>),
     Gloas(GloasSignedBeaconBlock<P>),
+    Pq(PqSignedBeaconBlock<P>),
 }
 
 // This assertion will become incorrect if later phases don't modify `SignedBeaconBlock`.
@@ -541,6 +567,7 @@ impl<P: Preset> SszSize for SignedBeaconBlock<P> {
         ElectraSignedBeaconBlock::<P>::SIZE,
         FuluSignedBeaconBlock::<P>::SIZE,
         GloasSignedBeaconBlock::<P>::SIZE,
+        PqSignedBeaconBlock::<P>::SIZE,
     ]);
 }
 
@@ -549,14 +576,23 @@ impl<P: Preset> SszRead<Config> for SignedBeaconBlock<P> {
         // There are 2 fixed parts before `block.message.slot`:
         // - The offset of `block.message`.
         // - The contents of `block.signature`.
-        let slot_start = Offset::SIZE
-            .get()
-            .saturating_add(SignatureBytes::SIZE.get());
+        // The signature is 96 bytes before PQ and 2404 bytes after it.
+        let slot_at = |signature_size: usize| {
+            let slot_start = Offset::SIZE.get().saturating_add(signature_size);
+            let slot_end = slot_start.saturating_add(Slot::SIZE.get());
+            Slot::from_ssz_default(ssz::subslice(bytes, slot_start..slot_end)?)
+        };
 
-        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
+        // The slot read with the BLS layout is meaningless for a PQ block, but it falls in a
+        // pre-PQ phase with negligible probability.
+        let mut slot = slot_at(SignatureBytes::SIZE.get())?;
+        let mut phase = config.phase_at_slot::<P>(slot);
+
+        if phase >= Phase::Pq {
+            slot = slot_at(XmssSignature::SIZE.get())?;
+            phase = config.phase_at_slot::<P>(slot);
+        }
+
         let block = Self::from_ssz_at_phase(phase, bytes)?;
 
         assert_eq!(slot, block.message().slot());
@@ -576,6 +612,7 @@ impl<P: Preset> SszWrite for SignedBeaconBlock<P> {
             Self::Electra(block) => block.write_variable(bytes),
             Self::Fulu(block) => block.write_variable(bytes),
             Self::Gloas(block) => block.write_variable(bytes),
+            Self::Pq(block) => block.write_variable(bytes),
         }
     }
 }
@@ -593,6 +630,7 @@ impl<P: Preset> SszHash for SignedBeaconBlock<P> {
             Self::Electra(block) => block.hash_tree_root(),
             Self::Fulu(block) => block.hash_tree_root(),
             Self::Gloas(block) => block.hash_tree_root(),
+            Self::Pq(block) => block.hash_tree_root(),
         }
     }
 }
@@ -691,12 +729,13 @@ impl<P: Preset> SignedBeaconBlock<P> {
                 let GloasSignedBeaconBlock { message, signature } = block;
                 (message.into(), signature)
             }
+            Self::Pq(block) => (block.message.into(), SignatureBytes::zero()),
         }
     }
 
     pub fn execution_payload(self) -> Option<ExecutionPayload<P>> {
         match self {
-            Self::Phase0(_) | Self::Altair(_) | Self::Gloas(_) => None,
+            Self::Phase0(_) | Self::Altair(_) | Self::Gloas(_) | Self::Pq(_) => None,
             Self::Bellatrix(block) => Some(ExecutionPayload::Bellatrix(
                 block.message.into_inner().body.execution_payload,
             )),
@@ -729,6 +768,7 @@ impl<P: Preset> SignedBeaconBlock<P> {
             Self::Electra(_) => Phase::Electra,
             Self::Fulu(_) => Phase::Fulu,
             Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
         }
     }
 
@@ -736,7 +776,7 @@ impl<P: Preset> SignedBeaconBlock<P> {
         self.message()
             .body()
             .with_payload_bid()
-            .map(|body| body.signed_execution_payload_bid().message.block_hash)
+            .map(|body| body.execution_payload_bid().block_hash)
             .or_else(|| {
                 self.message()
                     .body()
@@ -749,13 +789,21 @@ impl<P: Preset> SignedBeaconBlock<P> {
         self.message()
             .body()
             .with_payload_bid()
-            .map(|body| body.signed_execution_payload_bid().message.gas_limit)
+            .map(|body| body.execution_payload_bid().gas_limit)
             .or_else(|| {
                 self.message()
                     .body()
                     .with_execution_payload()
                     .map(|body| body.execution_payload().gas_limit())
             })
+    }
+
+    #[must_use]
+    pub const fn xmss_signature(&self) -> Option<&XmssSignature> {
+        match self {
+            Self::Pq(block) => Some(&block.signature),
+            _ => None,
+        }
     }
 
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
@@ -772,6 +820,7 @@ impl<P: Preset> SignedBeaconBlock<P> {
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(block)
@@ -794,6 +843,7 @@ pub enum BeaconBlock<P: Preset> {
     Electra(Hc<ElectraBeaconBlock<P>>),
     Fulu(Hc<FuluBeaconBlock<P>>),
     Gloas(Hc<GloasBeaconBlock<P>>),
+    Pq(Hc<PqBeaconBlock<P>>),
 }
 
 // This assertion will become incorrect if later phases don't modify `BeaconBlock`.
@@ -811,6 +861,7 @@ impl<P: Preset> SszSize for BeaconBlock<P> {
         ElectraBeaconBlock::<P>::SIZE,
         FuluBeaconBlock::<P>::SIZE,
         GloasBeaconBlock::<P>::SIZE,
+        PqBeaconBlock::<P>::SIZE,
     ]);
 }
 
@@ -832,6 +883,7 @@ impl<P: Preset> SszRead<Config> for BeaconBlock<P> {
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         assert_eq!(slot, block.slot());
@@ -851,6 +903,7 @@ impl<P: Preset> SszWrite for BeaconBlock<P> {
             Self::Electra(block) => block.write_variable(bytes),
             Self::Fulu(block) => block.write_variable(bytes),
             Self::Gloas(block) => block.write_variable(bytes),
+            Self::Pq(block) => block.write_variable(bytes),
         }
     }
 }
@@ -868,6 +921,7 @@ impl<P: Preset> SszHash for BeaconBlock<P> {
             Self::Electra(block) => block.hash_tree_root(),
             Self::Fulu(block) => block.hash_tree_root(),
             Self::Gloas(block) => block.hash_tree_root(),
+            Self::Pq(block) => block.hash_tree_root(),
         }
     }
 }
@@ -899,11 +953,23 @@ impl<P: Preset> BeaconBlock<P> {
             Self::Gloas(block) => {
                 block.body.graffiti = graffiti;
             }
+            Self::Pq(block) => {
+                block.body.graffiti = graffiti;
+            }
         }
     }
 
     pub fn with_zero_signature(self) -> SignedBeaconBlock<P> {
         self.with_signature(SignatureBytes::zero())
+    }
+
+    /// `None` unless the block is from PQ or later.
+    #[must_use]
+    pub fn with_xmss_signature(self, signature: XmssSignature) -> Option<SignedBeaconBlock<P>> {
+        match self {
+            Self::Pq(message) => Some(PqSignedBeaconBlock { message, signature }.into()),
+            _ => None,
+        }
     }
 
     pub fn with_signature(self, signature: SignatureBytes) -> SignedBeaconBlock<P> {
@@ -916,6 +982,12 @@ impl<P: Preset> BeaconBlock<P> {
             Self::Electra(message) => ElectraSignedBeaconBlock { message, signature }.into(),
             Self::Fulu(message) => FuluSignedBeaconBlock { message, signature }.into(),
             Self::Gloas(message) => GloasSignedBeaconBlock { message, signature }.into(),
+            // PQ blocks carry XMSS signatures. See `BeaconBlock::with_xmss_signature`.
+            Self::Pq(message) => PqSignedBeaconBlock {
+                message,
+                signature: XmssSignature::empty(),
+            }
+            .into(),
         }
     }
 
@@ -930,6 +1002,7 @@ impl<P: Preset> BeaconBlock<P> {
             Self::Electra(block) => block.state_root = state_root,
             Self::Fulu(block) => block.state_root = state_root,
             Self::Gloas(block) => block.state_root = state_root,
+            Self::Pq(block) => block.state_root = state_root,
         }
 
         self
@@ -962,7 +1035,7 @@ impl<P: Preset> BeaconBlock<P> {
             (_, payload) => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
 
                 return Err(BlockPhaseError {
                     block_phase: self.phase(),
@@ -990,7 +1063,7 @@ impl<P: Preset> BeaconBlock<P> {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
             }
         }
 
@@ -1012,7 +1085,7 @@ impl<P: Preset> BeaconBlock<P> {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
             }
         }
 
@@ -1033,7 +1106,7 @@ impl<P: Preset> BeaconBlock<P> {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
             }
         }
 
@@ -1078,7 +1151,7 @@ impl<P: Preset> BeaconBlock<P> {
             (block, header) => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
 
                 Err(BlockPhaseError {
                     block_phase: block.phase(),
@@ -1090,7 +1163,7 @@ impl<P: Preset> BeaconBlock<P> {
 
     pub fn execution_payload(self) -> Option<ExecutionPayload<P>> {
         match self {
-            Self::Phase0(_) | Self::Altair(_) | Self::Gloas(_) => None,
+            Self::Phase0(_) | Self::Altair(_) | Self::Gloas(_) | Self::Pq(_) => None,
             Self::Bellatrix(block) => Some(ExecutionPayload::Bellatrix(
                 block.into_inner().body.execution_payload,
             )),
@@ -1119,6 +1192,7 @@ impl<P: Preset> BeaconBlock<P> {
             Self::Electra(_) => Phase::Electra,
             Self::Fulu(_) => Phase::Fulu,
             Self::Gloas(_) => Phase::Gloas,
+            Self::Pq(_) => Phase::Pq,
         }
     }
 }
@@ -1216,6 +1290,11 @@ impl<P: Preset> From<BeaconBlock<P>> for SignedBeaconBlock<P> {
                 signature: SignatureBytes::default(),
             }
             .into(),
+            BeaconBlock::Pq(message) => PqSignedBeaconBlock {
+                message,
+                signature: XmssSignature::empty(),
+            }
+            .into(),
         }
     }
 }
@@ -1244,7 +1323,7 @@ pub enum SignedBlindedBeaconBlock<P: Preset> {
 impl<P: Preset> SszSize for SignedBlindedBeaconBlock<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
         BellatrixSignedBlindedBeaconBlock::<P>::SIZE,
         CapellaSignedBlindedBeaconBlock::<P>::SIZE,
         DenebSignedBlindedBeaconBlock::<P>::SIZE,
@@ -1292,9 +1371,9 @@ impl<P: Preset> SszRead<Phase> for SignedBlindedBeaconBlock<P> {
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Gloas => {
+            Phase::Gloas | Phase::Pq => {
                 return Err(ReadError::Custom {
-                    message: "blinded block has slot in Gloas",
+                    message: "blinded block has slot in Gloas or later",
                 });
             }
         };
@@ -1462,7 +1541,7 @@ pub enum BlindedBeaconBlock<P: Preset> {
 impl<P: Preset> SszSize for BlindedBeaconBlock<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
         BellatrixBlindedBeaconBlock::<P>::SIZE,
         CapellaBlindedBeaconBlock::<P>::SIZE,
         DenebSignedBlindedBeaconBlock::<P>::SIZE,
@@ -1489,9 +1568,9 @@ impl<P: Preset> SszRead<Phase> for BlindedBeaconBlock<P> {
             Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Gloas => {
+            Phase::Gloas | Phase::Pq => {
                 return Err(ReadError::Custom {
-                    message: "blinded block has slot in Gloas",
+                    message: "blinded block has slot in Gloas or later",
                 });
             }
         };
@@ -1595,7 +1674,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             (block, payload) => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 8);
+                const_assert_eq!(Phase::CARDINALITY, 9);
 
                 Err(BlockPhaseError {
                     block_phase: block.phase(),
@@ -1647,7 +1726,7 @@ impl<P: Preset> SszHash for ExecutionPayload<P> {
 impl<P: Preset> SszSize for ExecutionPayload<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         BellatrixExecutionPayload::<P>::SIZE,
         CapellaExecutionPayload::<P>::SIZE,
         DenebExecutionPayload::<P>::SIZE,
@@ -1684,7 +1763,7 @@ impl<P: Preset> SszRead<Phase> for ExecutionPayload<P> {
             Phase::Deneb | Phase::Electra | Phase::Fulu => {
                 Self::Deneb(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Gloas | Phase::Pq => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(block)
@@ -1822,7 +1901,7 @@ pub enum ExecutionRequests<P: Preset> {
 impl<P: Preset> SszSize for ExecutionRequests<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
         ElectraExecutionRequests::<P>::SIZE,
         GloasExecutionRequests::<P>::SIZE,
     ]);
@@ -1887,7 +1966,7 @@ impl<P: Preset> LightClientBootstrap<P> {
 impl<P: Preset> SszSize for LightClientBootstrap<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
         AltairLightClientBootstrap::<P>::SIZE,
         CapellaLightClientBootstrap::<P>::SIZE,
         DenebLightClientBootstrap::<P>::SIZE,
@@ -1939,7 +2018,7 @@ assert_not_impl_any!(LightClientFinalityUpdate<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for LightClientFinalityUpdate<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
         AltairLightClientFinalityUpdate::<P>::SIZE,
         CapellaLightClientFinalityUpdate::<P>::SIZE,
         DenebLightClientFinalityUpdate::<P>::SIZE,
@@ -2017,7 +2096,7 @@ assert_not_impl_any!(LightClientOptimisticUpdate<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for LightClientOptimisticUpdate<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
         AltairLightClientOptimisticUpdate::<P>::SIZE,
         CapellaLightClientOptimisticUpdate::<P>::SIZE,
         DenebLightClientOptimisticUpdate::<P>::SIZE,
@@ -2095,7 +2174,7 @@ assert_not_impl_any!(LightClientUpdate<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for LightClientUpdate<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 2 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 3 }>([
         AltairLightClientUpdate::<P>::SIZE,
         CapellaLightClientUpdate::<P>::SIZE,
         DenebLightClientUpdate::<P>::SIZE,
@@ -2207,7 +2286,7 @@ pub enum SignedAggregateAndProof<P: Preset> {
 impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
         Phase0SignedAggregateAndProof::<P>::SIZE,
         ElectraSignedAggregateAndProof::<P>::SIZE,
         GloasSignedAggregateAndProof::<P>::SIZE,
@@ -2222,6 +2301,11 @@ impl<P: Preset> SszRead<Phase> for SignedAggregateAndProof<P> {
             }
             Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => {
+                return Err(ReadError::Custom {
+                    message: "PQ aggregates are not supported yet",
+                });
+            }
         };
 
         Ok(signed_aggregate_and_proof)
@@ -2311,7 +2395,7 @@ pub enum Attestation<P: Preset> {
 impl<P: Preset> SszSize for Attestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
         Phase0Attestation::<P>::SIZE,
         ElectraAttestation::<P>::SIZE,
         GloasAttestation::<P>::SIZE,
@@ -2334,6 +2418,11 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
             }
             Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => {
+                return Err(ReadError::Custom {
+                    message: "PQ attestations are not supported yet",
+                });
+            }
         };
 
         assert_eq!(slot, attestation.data().slot);
@@ -2428,7 +2517,7 @@ assert_not_impl_any!(AttesterSlashing<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for AttesterSlashing<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
         Phase0AttesterSlashing::<P>::SIZE,
         ElectraAttesterSlashing::<P>::SIZE,
         GloasAttesterSlashing::<P>::SIZE,
@@ -2480,7 +2569,7 @@ pub enum DataColumnSidecar<P: Preset> {
 }
 
 impl<P: Preset> SszSize for DataColumnSidecar<P> {
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
         FuluDataColumnSidecar::<P>::SIZE,
         GloasDataColumnSidecar::<P>::SIZE,
     ]);

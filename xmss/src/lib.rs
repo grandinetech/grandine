@@ -57,8 +57,10 @@ pub struct XmssPublicKey([u8; PUBLIC_KEY_SIZE]);
 
 /// The spec's `XMSSSignature`: the leaf index (little-endian `u32`) followed by one signature per
 /// layer.
+///
+/// Boxed so that containers holding one stay small enough to move around cheaply.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct XmssSignature([u8; SIGNATURE_SIZE]);
+pub struct XmssSignature(Box<[u8; SIGNATURE_SIZE]>);
 
 impl Default for XmssSignature {
     fn default() -> Self {
@@ -66,18 +68,55 @@ impl Default for XmssSignature {
     }
 }
 
+impl XmssPublicKey {
+    #[must_use]
+    pub const fn from_array(bytes: [u8; PUBLIC_KEY_SIZE]) -> Self {
+        Self(bytes)
+    }
+
+    #[must_use]
+    pub const fn as_array(&self) -> &[u8; PUBLIC_KEY_SIZE] {
+        &self.0
+    }
+
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self([0; PUBLIC_KEY_SIZE])
+    }
+}
+
+impl XmssSignature {
+    #[must_use]
+    pub fn from_array(bytes: [u8; SIGNATURE_SIZE]) -> Self {
+        Self(Box::new(bytes))
+    }
+
+    #[must_use]
+    pub fn as_array(&self) -> &[u8; SIGNATURE_SIZE] {
+        &self.0
+    }
+
+    /// The all-zero signature, which the spec requires of self-built bids.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::from_array([0; SIGNATURE_SIZE])
+    }
+
+    /// The leaf index the signature claims (the spec's `GetLeafIndex`).
+    #[must_use]
+    pub fn leaf_index(&self) -> LeafIndex {
+        let mut leaf_index = [0; LEAF_INDEX_SIZE];
+        leaf_index.copy_from_slice(&self.0[..LEAF_INDEX_SIZE]);
+        LeafIndex::from_le_bytes(leaf_index)
+    }
+}
+
 macro_rules! impl_bytes {
     ($type: ident, $size: expr) => {
         impl $type {
-            #[must_use]
-            pub const fn from_array(bytes: [u8; $size]) -> Self {
-                Self(bytes)
-            }
-
             pub fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
-                bytes
-                    .try_into()
-                    .map(Self)
+                <[u8; $size]>::try_from(bytes)
+                    .map(Self::from_array)
                     .map_err(|_| Error::InvalidLength {
                         expected: $size,
                         actual: bytes.len(),
@@ -85,36 +124,26 @@ macro_rules! impl_bytes {
             }
 
             #[must_use]
-            pub const fn as_array(&self) -> &[u8; $size] {
-                &self.0
-            }
-
-            #[must_use]
-            pub const fn empty() -> Self {
-                Self([0; $size])
-            }
-
-            #[must_use]
             pub fn is_empty(&self) -> bool {
-                self.0 == [0; $size]
+                *self.as_array() == [0; $size]
             }
         }
 
         impl From<[u8; $size]> for $type {
             fn from(bytes: [u8; $size]) -> Self {
-                Self(bytes)
+                Self::from_array(bytes)
             }
         }
 
         impl AsRef<[u8]> for $type {
             fn as_ref(&self) -> &[u8] {
-                &self.0
+                self.as_array()
             }
         }
 
         impl Display for $type {
             fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-                write!(formatter, "0x{}", hex::encode(self.0))
+                write!(formatter, "0x{}", hex::encode(self.as_array()))
             }
         }
 
@@ -161,7 +190,7 @@ macro_rules! impl_bytes {
 
         impl SszWrite for $type {
             fn write_fixed(&self, bytes: &mut [u8]) {
-                bytes.copy_from_slice(&self.0);
+                bytes.copy_from_slice(self.as_array());
             }
         }
     };
@@ -183,7 +212,7 @@ impl SszHash for XmssSignature {
 
     // 2404 bytes are 76 chunks, padded to 128 = 2^7.
     fn hash_tree_root(&self) -> H256 {
-        MerkleTree::<U7>::merkleize_bytes(self.0)
+        MerkleTree::<U7>::merkleize_bytes(self.as_array())
     }
 }
 
@@ -196,16 +225,6 @@ impl From<H256> for XmssPublicKey {
 impl From<XmssPublicKey> for H256 {
     fn from(public_key: XmssPublicKey) -> Self {
         Self(public_key.0)
-    }
-}
-
-impl XmssSignature {
-    /// The leaf index the signature claims (the spec's `GetLeafIndex`).
-    #[must_use]
-    pub fn leaf_index(&self) -> LeafIndex {
-        let mut leaf_index = [0; LEAF_INDEX_SIZE];
-        leaf_index.copy_from_slice(&self.0[..LEAF_INDEX_SIZE]);
-        LeafIndex::from_le_bytes(leaf_index)
     }
 }
 
@@ -267,7 +286,8 @@ impl XmssSecretKey {
         message: &[u8; MESSAGE_SIZE],
         leaf_index: LeafIndex,
     ) -> Result<XmssSignature, Error> {
-        backend::sign(&self.expanded, &self.public_key.0, message, leaf_index).map(XmssSignature)
+        backend::sign(&self.expanded, &self.public_key.0, message, leaf_index)
+            .map(XmssSignature::from_array)
     }
 }
 

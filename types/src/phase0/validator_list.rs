@@ -144,17 +144,26 @@ impl CacheNode {
     }
 
     pub(crate) fn hash(&self, buf: &RawValidatorList, len: usize, offset: usize) -> H256 {
+        self.hash_with(len, offset, &|index| {
+            buf.get(index.try_into().expect("index doesn't fit in u64"))
+                .expect(
+                    "validator list invariant violated: partial \
+                        validator list is out of sync with current length",
+                )
+                .hash_tree_root()
+        })
+    }
+
+    pub(crate) fn hash_with(
+        &self,
+        len: usize,
+        offset: usize,
+        leaf: &dyn Fn(usize) -> H256,
+    ) -> H256 {
         self.root
             .get_or_init(|| {
                 if len == 1 {
-                    let validator = buf
-                        .get(offset.try_into().expect("offset doesn't fit in usize"))
-                        .expect(
-                            "validator list invariant violated: partial \
-                                validator list is out of sync with current length",
-                        );
-
-                    return Box::new(validator.hash_tree_root());
+                    return Box::new(leaf(offset));
                 }
 
                 let left_len = len.next_power_of_two() / 2;
@@ -177,8 +186,8 @@ impl CacheNode {
 
                 let (left, right) = self.children();
 
-                let left = left.hash(buf, left_len, offset);
-                let right = right.hash(buf, right_len, right_offset);
+                let left = left.hash_with(left_len, offset, leaf);
+                let right = right.hash_with(right_len, right_offset, leaf);
 
                 let right_hash = (right_height..left_height)
                     .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)

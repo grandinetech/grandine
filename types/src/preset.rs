@@ -54,6 +54,7 @@ use crate::{
         },
         primitives::{Gwei, H256, ValidatorIndex},
     },
+    pq::primitives::AggregationCommittees,
 };
 
 #[cfg(test)]
@@ -125,7 +126,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
                 Output: IncompletePersistentVectorElements<
                     Ptc<Self>,
                     UnhashedBundleSize<Ptc<Self>>,
-                > + Debug
+                > + ContiguousVectorElements<AggregationCommittees>
+                            + MerkleElements<AggregationCommittees>
+                            + Debug
                             + Send
                             + Sync,
             >,
@@ -280,6 +283,17 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     // unreachable in practice (a list this long does not fit in a gossip message).
     type GloasDepositRequestsBound: MerkleElements<DepositRequest> + Eq + Debug + Send + Sync;
 
+    // PQ
+    type MaxCommitteesPerSlotPq: BitVectorBits
+        + MerkleBits
+        + NonZero
+        + Eq
+        + Ord
+        + Debug
+        + Send
+        + Sync;
+    type MaxStarkProofSize: MerkleElements<u8> + Eq + Debug + Send + Sync;
+
     // Derived type-level variables
     type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
         + MerkleBits
@@ -354,6 +368,20 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 16_829;
     const MAX_ATTESTER_SLASHING_SIZE: u64 = 2_097_616;
     const MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE: u64 = 196_932;
+
+    // PQ
+    const MIN_ATTESTATION_INCLUSION_DELAY_PQ: NonZeroU64 = nonzero!(2_u64);
+    const MAX_ATTESTATIONS_PQ: u64 = 16;
+    const MAX_VALIDATOR_PREREGISTRATION_REQUESTS_PER_PAYLOAD: u64 = 64;
+    const MAX_BUILDER_PREREGISTRATION_REQUESTS_PER_PAYLOAD: u64 = 4;
+    const MAX_VOLUNTARY_EXIT_REQUESTS_PER_PAYLOAD: u64 = 16;
+    const PREREGISTRATIONS_LIMIT: u64 = 1 << 19;
+    const PREREGISTRATION_EXPIRY_SLOTS: u64 = 1 << 18;
+
+    // PQ type-specific SSZ bounds
+    const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE_PQ: u64 = 1_055_231;
+    const MAX_ATTESTER_SLASHING_SIZE_PQ: u64 = 2_621_720;
+    const MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE_PQ: u64 = 199_240;
 
     /// Returns the default configuration associated with a preset.
     ///
@@ -432,6 +460,10 @@ impl Preset for Mainnet {
     type MaxBuilderDepositRequestsPerPayload = U64;
     type MaxBuilderExitRequestsPerPayload = U16;
     type GloasDepositRequestsBound = U65536;
+
+    // PQ
+    type MaxCommitteesPerSlotPq = U16;
+    type MaxStarkProofSize = U1048576;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -518,6 +550,9 @@ impl Preset for Minimal {
         type MaxBuilderDepositRequestsPerPayload;
         type MaxBuilderExitRequestsPerPayload;
         type GloasDepositRequestsBound;
+
+        // PQ
+        type MaxStarkProofSize;
     }
 
     // Phase 0
@@ -540,6 +575,9 @@ impl Preset for Minimal {
 
     // Gloas
     type PtcSize = U16;
+
+    // PQ
+    type MaxCommitteesPerSlotPq = U4;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -573,6 +611,10 @@ impl Preset for Minimal {
     // Gloas type-specific SSZ bounds
     const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 1462;
     const MAX_ATTESTER_SLASHING_SIZE: u64 = 131_536;
+
+    // PQ type-specific SSZ bounds
+    const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE_PQ: u64 = 1_052_158;
+    const MAX_ATTESTER_SLASHING_SIZE_PQ: u64 = 2_228_504;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -643,6 +685,10 @@ impl Preset for Medalla {
         type MaxBuilderDepositRequestsPerPayload;
         type MaxBuilderExitRequestsPerPayload;
         type GloasDepositRequestsBound;
+
+        // PQ
+        type MaxCommitteesPerSlotPq;
+        type MaxStarkProofSize;
 
         // Derived type-level variables
         type MaxAttestersPerSlot;
@@ -772,6 +818,15 @@ impl PresetName {
             Self::Mainnet => GloasPreset::new::<Mainnet>(),
             Self::Minimal => GloasPreset::new::<Minimal>(),
             Self::Medalla => GloasPreset::new::<Medalla>(),
+        }
+    }
+
+    #[must_use]
+    pub fn pq_preset(self) -> PqPreset {
+        match self {
+            Self::Mainnet => PqPreset::new::<Mainnet>(),
+            Self::Minimal => PqPreset::new::<Minimal>(),
+            Self::Medalla => PqPreset::new::<Medalla>(),
         }
     }
 
@@ -1196,6 +1251,57 @@ impl GloasPreset {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct PqPreset {
+    #[serde(with = "serde_utils::string_or_native")]
+    max_committees_per_slot_pq: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    min_attestation_inclusion_delay_pq: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_stark_proof_size: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_attestations_pq: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_validator_preregistration_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_builder_preregistration_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    preregistrations_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    preregistration_expiry_slots: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_voluntary_exit_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_signed_aggregate_and_proof_size_pq: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_attester_slashing_size_pq: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_signed_execution_payload_bid_size_pq: u64,
+}
+
+impl PqPreset {
+    #[must_use]
+    pub fn new<P: Preset>() -> Self {
+        Self {
+            max_committees_per_slot_pq: P::MaxCommitteesPerSlotPq::non_zero(),
+            min_attestation_inclusion_delay_pq: P::MIN_ATTESTATION_INCLUSION_DELAY_PQ,
+            max_stark_proof_size: P::MaxStarkProofSize::U64,
+            max_attestations_pq: P::MAX_ATTESTATIONS_PQ,
+            max_validator_preregistration_requests_per_payload:
+                P::MAX_VALIDATOR_PREREGISTRATION_REQUESTS_PER_PAYLOAD,
+            max_builder_preregistration_requests_per_payload:
+                P::MAX_BUILDER_PREREGISTRATION_REQUESTS_PER_PAYLOAD,
+            preregistrations_limit: P::PREREGISTRATIONS_LIMIT,
+            preregistration_expiry_slots: P::PREREGISTRATION_EXPIRY_SLOTS,
+            max_voluntary_exit_requests_per_payload: P::MAX_VOLUNTARY_EXIT_REQUESTS_PER_PAYLOAD,
+            max_signed_aggregate_and_proof_size_pq: P::MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE_PQ,
+            max_attester_slashing_size_pq: P::MAX_ATTESTER_SLASHING_SIZE_PQ,
+            max_signed_execution_payload_bid_size_pq: P::MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE_PQ,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ops::Deref;
@@ -1252,6 +1358,7 @@ mod tests {
                 &preset_name.electra_preset(),
                 &preset_name.fulu_preset(),
                 &preset_name.gloas_preset(),
+                &preset_name.pq_preset(),
             ];
         }
     }

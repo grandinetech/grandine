@@ -533,6 +533,8 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     Phase::Electra | Phase::Fulu | Phase::Gloas => {
                         AttesterSlashing::Electra(case.ssz(config, file_name))
                     }
+                    // TODO(PQ): Decode PQ attester slashings.
+                    Phase::Pq => panic!("PQ attester slashings are not supported yet"),
                 };
 
                 if matches!(meta.bls_setting, BlsSetting::Ignored) {

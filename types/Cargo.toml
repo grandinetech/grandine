@@ -38,6 +38,7 @@ try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 url = { workspace = true }
 variant_count = { workspace = true }
+xmss = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 diff = { workspace = true }

@@ -34,7 +34,7 @@ use types::{
         primitives::{Gwei, NodeId, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconBlock, BeaconState, SignedBeaconBlock as _},
+    traits::{BeaconState, SignedBeaconBlock as _},
 };
 
 use error::Error;
@@ -393,11 +393,13 @@ pub fn construct_data_column_sidecars<P: Preset>(
                 cells_and_kzg_proofs,
             )
         }
-        SignedBeaconBlock::Gloas(block) => get_data_column_sidecars_post_gloas(
-            block.message.hash_tree_root(),
-            block.message.slot(),
-            cells_and_kzg_proofs,
-        ),
+        SignedBeaconBlock::Gloas(_) | SignedBeaconBlock::Pq(_) => {
+            get_data_column_sidecars_post_gloas(
+                signed_block.message().hash_tree_root(),
+                signed_block.message().slot(),
+                cells_and_kzg_proofs,
+            )
+        }
     }
 }
 

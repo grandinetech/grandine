@@ -132,6 +132,17 @@ pub mod gloas {
     mod spec_tests;
 }
 
+pub mod pq {
+    pub mod beacon_state;
+    pub mod builder_list;
+    pub mod consts;
+    pub mod containers;
+    pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
+    pub mod validator_list;
+}
+
 pub use collections::{
     Balances, BuilderPendingPayments, BuilderPendingWithdrawals, Builders,
     PayloadExpectedWithdrawals, PendingConsolidations, PendingDeposits, PendingPartialWithdrawals,

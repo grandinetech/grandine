@@ -149,7 +149,7 @@ impl CacheNode {
         );
     }
 
-    fn hash(&self, buf: &RawValidatorList, len: usize, offset: usize) -> H256 {
+    fn hash(&self, len: usize, offset: usize, leaf: &dyn Fn(usize) -> H256) -> H256 {
         self.root
             .get_or_init(|| {
                 let left_len = len.min(self.capacity());
@@ -170,10 +170,13 @@ impl CacheNode {
 
                 let left_hash = (left_height..self.height)
                     .map(<MinimumBundleSize<Validator> as BundleSize<Validator>>::zero_hash)
-                    .fold(left.hash(buf, left_len, offset), hashing::hash_256_256);
+                    .fold(
+                        left.hash_with(left_len, offset, leaf),
+                        hashing::hash_256_256,
+                    );
 
                 let right_hash = if right_len > 0 {
-                    right.hash(buf, right_len, right_offset)
+                    right.hash(right_len, right_offset, leaf)
                 } else {
                     H256::zero()
                 };
@@ -185,6 +188,19 @@ impl CacheNode {
 }
 
 impl ProgressiveValidatorList {
+    /// Merkleizes the list with `leaf` as the root of the validator at each index.
+    ///
+    /// The cache keeps the roots `leaf` returns, so a given list must always be hashed with the
+    /// same `leaf`.
+    pub(crate) fn hash_tree_root_with(&self, leaf: &dyn Fn(usize) -> H256) -> H256 {
+        let root = match self.len_usize() {
+            0 => H256::zero(),
+            length => self.cache.hash(length, 0, leaf),
+        };
+
+        mix_in_length(root, self.len_usize())
+    }
+
     pub(crate) fn from_raw(buf: RawValidatorList) -> Self {
         Self {
             buf,
@@ -390,12 +406,15 @@ impl SszHash for ProgressiveValidatorList {
     type PackingFactor = U1;
 
     fn hash_tree_root(&self) -> H256 {
-        let root = match self.len_usize() {
-            0 => H256::zero(),
-            length => self.cache.hash(&self.buf, length, 0),
-        };
-
-        mix_in_length(root, self.len_usize())
+        self.hash_tree_root_with(&|index| {
+            self.buf
+                .get(index.try_into().expect("index doesn't fit in u64"))
+                .expect(
+                    "validator list invariant violated: partial \
+                        validator list is out of sync with current length",
+                )
+                .hash_tree_root()
+        })
     }
 }
 

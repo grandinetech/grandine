@@ -227,6 +227,8 @@ pub enum DerivedFieldsV1 {
     Electra(ElectraDerivedFields),
     Fulu(ElectraDerivedFields),
     Gloas(GloasDerivedFields),
+    // A PQ state has the fields of a Gloas state.
+    Pq(GloasDerivedFields),
 }
 
 impl DerivedFieldsV1 {
@@ -303,6 +305,14 @@ impl DerivedFieldsV1 {
                 blocks,
                 end,
             )?),
+            Phase::Pq => Self::Pq(GloasDerivedFields::new(
+                config,
+                pubkey_cache,
+                state,
+                block_rewards,
+                blocks,
+                end,
+            )?),
         };
 
         Ok(fields)
@@ -317,7 +327,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.rewards(count),
             Self::Electra(fields) | Self::Fulu(fields) => fields.rewards(count),
-            Self::Gloas(fields) => fields.rewards(count),
+            Self::Gloas(fields) | Self::Pq(fields) => fields.rewards(count),
         }
     }
 
@@ -330,7 +340,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.randao_mix(count),
             Self::Electra(fields) | Self::Fulu(fields) => fields.randao_mix(count),
-            Self::Gloas(fields) => fields.randao_mix(count),
+            Self::Gloas(fields) | Self::Pq(fields) => fields.randao_mix(count),
         }
     }
 
@@ -343,7 +353,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.total_active_balance,
             Self::Electra(fields) | Self::Fulu(fields) => fields.total_active_balance,
-            Self::Gloas(fields) => fields.total_active_balance,
+            Self::Gloas(fields) | Self::Pq(fields) => fields.total_active_balance,
         }
     }
 
@@ -356,7 +366,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.validator_snapshot.as_ref(),
             Self::Electra(fields) | Self::Fulu(fields) => fields.validator_snapshot.as_ref(),
-            Self::Gloas(fields) => fields.validator_snapshot.as_ref(),
+            Self::Gloas(fields) | Self::Pq(fields) => fields.validator_snapshot.as_ref(),
         }
     }
 
@@ -368,7 +378,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => fields.active_changes.as_ref(),
             Self::Electra(fields) | Self::Fulu(fields) => fields.active_changes.as_ref(),
-            Self::Gloas(fields) => fields.active_changes.as_ref(),
+            Self::Gloas(fields) | Self::Pq(fields) => fields.active_changes.as_ref(),
         }
     }
 
@@ -381,7 +391,7 @@ impl DerivedFieldsV1 {
             | Self::Capella(fields)
             | Self::Deneb(fields) => Some(fields.reward_inputs.clone()),
             Self::Electra(fields) | Self::Fulu(fields) => Some(fields.reward_inputs.clone()),
-            Self::Gloas(fields) => Some(fields.reward_inputs.clone()),
+            Self::Gloas(fields) | Self::Pq(fields) => Some(fields.reward_inputs.clone()),
         }
     }
 
@@ -400,7 +410,7 @@ impl DerivedFieldsV1 {
                 fields.inactivity_score_positions.clone(),
                 fields.inactivity_scores.clone(),
             )),
-            Self::Gloas(fields) => Some((
+            Self::Gloas(fields) | Self::Pq(fields) => Some((
                 fields.inactivity_score_positions.clone(),
                 fields.inactivity_scores.clone(),
             )),
@@ -422,7 +432,7 @@ impl DerivedFieldsV1 {
             Self::Electra(fields) | Self::Fulu(fields) => fields
                 .slots(count)
                 .map(|slots| slots.iter().map(|slot| slot.validators.clone()).collect()),
-            Self::Gloas(fields) => fields
+            Self::Gloas(fields) | Self::Pq(fields) => fields
                 .slots(count)
                 .map(|slots| slots.iter().map(|slot| slot.validators.clone()).collect()),
         }
@@ -443,7 +453,7 @@ impl DerivedFieldsV1 {
             Self::Electra(fields) | Self::Fulu(fields) => fields
                 .slots(count)
                 .map(|slots| slots.iter().map(|slot| slot.balances.clone()).collect()),
-            Self::Gloas(fields) => fields
+            Self::Gloas(fields) | Self::Pq(fields) => fields
                 .slots(count)
                 .map(|slots| slots.iter().map(|slot| slot.balances.clone()).collect()),
         }
@@ -463,7 +473,7 @@ impl DerivedFieldsV1 {
                     .map(|slot| slot.pending_deposits.clone())
                     .collect()
             }),
-            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+            Self::Gloas(fields) | Self::Pq(fields) => fields.slots(count).map(|slots| {
                 slots
                     .iter()
                     .map(|slot| slot.pending_deposits.clone())
@@ -489,7 +499,7 @@ impl DerivedFieldsV1 {
                     .map(|slot| slot.pending_partial_withdrawals.clone())
                     .collect()
             }),
-            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+            Self::Gloas(fields) | Self::Pq(fields) => fields.slots(count).map(|slots| {
                 slots
                     .iter()
                     .map(|slot| slot.pending_partial_withdrawals.clone())
@@ -515,7 +525,7 @@ impl DerivedFieldsV1 {
                     .map(|slot| slot.pending_consolidations.clone())
                     .collect()
             }),
-            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+            Self::Gloas(fields) | Self::Pq(fields) => fields.slots(count).map(|slots| {
                 slots
                     .iter()
                     .map(|slot| slot.pending_consolidations.clone())
@@ -534,7 +544,7 @@ impl DerivedFieldsV1 {
             | Self::Deneb(_)
             | Self::Electra(_)
             | Self::Fulu(_) => None,
-            Self::Gloas(fields) => fields
+            Self::Gloas(fields) | Self::Pq(fields) => fields
                 .slots(count)
                 .map(|slots| slots.iter().map(|slot| slot.builders.clone()).collect()),
         }
@@ -553,7 +563,7 @@ impl DerivedFieldsV1 {
             | Self::Deneb(_)
             | Self::Electra(_)
             | Self::Fulu(_) => None,
-            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+            Self::Gloas(fields) | Self::Pq(fields) => fields.slots(count).map(|slots| {
                 slots
                     .iter()
                     .map(|slot| slot.builder_pending_payments.clone())
@@ -575,7 +585,7 @@ impl DerivedFieldsV1 {
             | Self::Deneb(_)
             | Self::Electra(_)
             | Self::Fulu(_) => None,
-            Self::Gloas(fields) => fields.slots(count).map(|slots| {
+            Self::Gloas(fields) | Self::Pq(fields) => fields.slots(count).map(|slots| {
                 slots
                     .iter()
                     .map(|slot| slot.builder_pending_withdrawals.clone())
@@ -600,6 +610,7 @@ impl SszWrite for DerivedFieldsV1 {
             Self::Electra(fields) => (6, fields.to_ssz()?),
             Self::Fulu(fields) => (7, fields.to_ssz()?),
             Self::Gloas(fields) => (8, fields.to_ssz()?),
+            Self::Pq(fields) => (9, fields.to_ssz()?),
         };
 
         bytes.push(phase);
@@ -624,6 +635,7 @@ impl<C> SszRead<C> for DerivedFieldsV1 {
             6 => SszRead::from_ssz(context, payload).map(Self::Electra),
             7 => SszRead::from_ssz(context, payload).map(Self::Fulu),
             8 => SszRead::from_ssz(context, payload).map(Self::Gloas),
+            9 => SszRead::from_ssz(context, payload).map(Self::Pq),
             _ => Err(ReadError::Custom {
                 message: "unsupported derived fields phase",
             }),

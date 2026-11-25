@@ -61,6 +61,14 @@ use types::{
         },
         primitives::{DepositIndex, ExecutionBlockHash, H256, UnixSeconds},
     },
+    pq::{
+        beacon_state::BeaconState as PqBeaconState,
+        containers::{
+            BeaconBlock as PqBeaconBlock, BeaconBlockBody as PqBeaconBlockBody,
+            ExecutionRequests as PqExecutionRequests,
+            SignedExecutionPayloadBid as PqSignedExecutionPayloadBid,
+        },
+    },
     preset::Preset,
     traits::{BeaconState as _, PostGloasBeaconState},
 };
@@ -91,6 +99,11 @@ impl<'config, P: Preset> Incremental<'config, P> {
             ..ExecutionPayloadBid::default()
         };
 
+        let pq_execution_payload_bid = ExecutionPayloadBid::<P> {
+            execution_requests_root: PqExecutionRequests::<P>::default().hash_tree_root(),
+            ..ExecutionPayloadBid::default()
+        };
+
         let body_root = match phase {
             Phase::Phase0 => Phase0BeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Altair => AltairBeaconBlockBody::<P>::default().hash_tree_root(),
@@ -105,6 +118,14 @@ impl<'config, P: Preset> Incremental<'config, P> {
                     ..SignedExecutionPayloadBid::default()
                 },
                 ..GloasBeaconBlockBody::default()
+            }
+            .hash_tree_root(),
+            Phase::Pq => PqBeaconBlockBody::<P> {
+                signed_execution_payload_bid: PqSignedExecutionPayloadBid {
+                    message: pq_execution_payload_bid.clone(),
+                    ..PqSignedExecutionPayloadBid::default()
+                },
+                ..PqBeaconBlockBody::default()
             }
             .hash_tree_root(),
         };
@@ -174,6 +195,15 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
                 latest_execution_payload_bid: gloas_execution_payload_bid,
                 ..GloasBeaconState::default()
+            }
+            .into(),
+            Phase::Pq => PqBeaconState {
+                slot,
+                fork,
+                latest_block_header,
+                deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
+                latest_execution_payload_bid: pq_execution_payload_bid,
+                ..PqBeaconState::default()
             }
             .into(),
         };
@@ -418,6 +448,16 @@ fn beacon_block_internal<P: Preset>(
             },
             ..Default::default()
         })),
+        Phase::Pq => BeaconBlock::from(Hc::new(PqBeaconBlock {
+            body: PqBeaconBlockBody {
+                signed_execution_payload_bid: PqSignedExecutionPayloadBid {
+                    message: execution_payload_bid.unwrap_or_default(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })),
     }
     .with_state_root(state_root)
     .with_zero_signature()
@@ -516,7 +556,7 @@ mod spec_tests {
         let expected_genesis_state = case.ssz::<_, BeaconState<Minimal>>(&config, "state");
 
         let execution_payload_header = match phase {
-            Phase::Phase0 | Phase::Altair | Phase::Gloas => {
+            Phase::Phase0 | Phase::Altair | Phase::Gloas | Phase::Pq => {
                 assert!(!case.exists("execution_payload_header"));
                 None
             }

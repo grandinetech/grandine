@@ -9853,6 +9853,7 @@ dependencies = [
  "typenum",
  "url",
  "variant_count",
+ "xmss",
  "zstd",
 ]
 

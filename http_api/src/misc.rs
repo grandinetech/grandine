@@ -64,6 +64,7 @@ use types::{
         },
         primitives::Slot,
     },
+    pq::containers::SignedBeaconBlock as PqSignedBeaconBlock,
     preset::{Preset, ProposerLookaheadLength},
 };
 
@@ -203,6 +204,7 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 blobs: blobs.unwrap_or_default(),
             }),
             BeaconBlock::Gloas(block) => Self::Other(block.into()),
+            BeaconBlock::Pq(block) => Self::Other(block.into()),
         }
     }
 }
@@ -252,6 +254,9 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
                 }),
                 // TODO(gloas): there is no blinded block in Gloas
                 BeaconBlock::Gloas(block) => {
+                    Self::Other(ValidatorBlindedBlock::BeaconBlock(block.into()))
+                }
+                BeaconBlock::Pq(block) => {
                     Self::Other(ValidatorBlindedBlock::BeaconBlock(block.into()))
                 }
             },
@@ -307,6 +312,8 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
+                // TODO(PQ): Accept PQ aggregates.
+                Phase::Pq => return Err(D::Error::custom("PQ aggregates are not supported yet")),
             };
 
         Ok(result)
@@ -377,6 +384,8 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SingleApiAttestationListPhaseDeser
                 P::MaxAttestersPerSlot,
             >::deserialize(deserializer)?
             .map(Into::into),
+            // TODO(PQ): Accept PQ single attestations.
+            Phase::Pq => return Err(D::Error::custom("PQ attestations are not supported yet")),
         };
 
         Ok(result)
@@ -404,6 +413,7 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedExecutionPayloadBidPhaseDese
     where
         D: serde::Deserializer<'de>,
     {
+        // TODO(PQ): PQ bids carry XMSS signatures.
         if self.phase >= Phase::Gloas {
             SignedExecutionPayloadBid::deserialize(deserializer).map(Arc::new)
         } else {
@@ -471,7 +481,7 @@ pub enum SingleApiAttestation<P: Preset> {
 impl<P: Preset> SszSize for SingleApiAttestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 7 }>([
         Phase0Attestation::<P>::SIZE,
         SingleAttestation::SIZE,
     ]);
@@ -485,6 +495,12 @@ impl<P: Preset> SszRead<Phase> for SingleApiAttestation<P> {
             }
             Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 Self::Electra(SszReadDefault::from_ssz_default(bytes)?)
+            }
+            // TODO(PQ): Accept PQ single attestations.
+            Phase::Pq => {
+                return Err(ReadError::Custom {
+                    message: "PQ attestations are not supported yet",
+                });
             }
         };
 
@@ -548,6 +564,12 @@ impl<'de, P: Preset> DeserializeSeed<'de> for PayloadAttestationMessageListPhase
                 ContiguousList::<PayloadAttestationMessage, P::PtcSize>::deserialize(deserializer)?
                     .map(Arc::new)
             }
+            // TODO(PQ): Accept PQ payload attestation messages.
+            Phase::Pq => {
+                return Err(D::Error::custom(
+                    "PQ payload attestations are not supported yet",
+                ));
+            }
         };
 
         Ok(result)
@@ -570,8 +592,10 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedBlindedBeaconPhaseDeserializ
             Phase::Deneb => DenebSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
             Phase::Electra => ElectraSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
             Phase::Fulu => FuluSignedBlindedBeaconBlock::deserialize(deserializer)?.into(),
-            Phase::Gloas => {
-                return Err(D::Error::custom("there is no blinded block in Gloas"));
+            Phase::Gloas | Phase::Pq => {
+                return Err(D::Error::custom(
+                    "there is no blinded block in Gloas or later",
+                ));
             }
         };
 
@@ -608,6 +632,7 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAPIBlockPhaseDeserializer<P>
             Phase::Electra => SignedElectraBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Fulu => SignedFuluBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Gloas => GloasSignedBeaconBlock::deserialize(deserializer)?.into(),
+            Phase::Pq => PqSignedBeaconBlock::deserialize(deserializer)?.into(),
         };
 
         Ok(Box::new(result))
@@ -628,6 +653,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Electra(SignedElectraBlockWithBlobs<P>),
     Fulu(SignedFuluBlockWithBlobs<P>),
     Gloas(GloasSignedBeaconBlock<P>),
+    Pq(PqSignedBeaconBlock<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -641,6 +667,7 @@ impl<P: Preset> SignedAPIBlock<P> {
             Self::Electra(block) => block.signed_block.message.slot,
             Self::Fulu(block) => block.signed_block.message.slot,
             Self::Gloas(block) => block.message.slot,
+            Self::Pq(block) => block.message.slot,
         }
     }
 
@@ -690,6 +717,7 @@ impl<P: Preset> SignedAPIBlock<P> {
                 )
             }
             Self::Gloas(block) => (block.into(), None, None),
+            Self::Pq(block) => (block.into(), None, None),
         }
     }
 }
@@ -706,6 +734,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         SignedElectraBlockWithBlobs::<P>::SIZE,
         SignedFuluBlockWithBlobs::<P>::SIZE,
         GloasSignedBeaconBlock::<P>::SIZE,
+        PqSignedBeaconBlock::<P>::SIZE,
     ]);
 }
 
@@ -720,6 +749,7 @@ impl<P: Preset> SszRead<Phase> for SignedAPIBlock<P> {
             Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Pq => Self::Pq(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(api_block)

@@ -3834,10 +3834,7 @@ where
         // > - If `execution_payload` verification of block's execution payload parent by an execution node **is complete**:
         // >   - [REJECT] The block's execution payload parent (defined by `bid.parent_block_hash`) passes all validation.
         if let Some(body) = block.message().body().with_payload_bid() {
-            let parent_block_hash = body
-                .signed_execution_payload_bid()
-                .message
-                .parent_block_hash;
+            let parent_block_hash = body.execution_payload_bid().parent_block_hash;
 
             // Request payload envelope if fork choice hasn't accepted yet.
             if !origin.is_own() && !self.store.is_payload_verified(block_root) {

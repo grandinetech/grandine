@@ -615,6 +615,8 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
+            // PQ voluntary exits are execution layer requests.
+            BeaconState::Pq(_) => Err(anyhow!("signed voluntary exits are not used after PQ")),
         };
 
         let outcome = match result {
@@ -1221,6 +1223,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     blob_kzg_commitments: ContiguousList::default(),
                 },
             })),
+            // TODO(PQ): Build PQ blocks.
+            Phase::Pq => return Err(anyhow!("building PQ blocks is not implemented yet")),
             Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
@@ -1955,6 +1959,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     state,
                     *voluntary_exit,
                 ),
+                BeaconState::Pq(_) => Err(anyhow!("signed voluntary exits are not used after PQ")),
             }
             .is_ok()
         });
@@ -2227,6 +2232,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     withdrawals,
                     parent_beacon_block_root,
                 })
+            }
+            // TODO(PQ): Prepare payload attributes for PQ.
+            BeaconState::Pq(_) => {
+                return Err(anyhow!("PQ payload attributes are not implemented yet"));
             }
             BeaconState::Gloas(state) => {
                 let head_root = self.head_block_root;

@@ -78,6 +78,10 @@ use crate::{
         primitives::{Gwei, H256, ValidatorIndex},
         validator_list_patch::ValidatorListPatch,
     },
+    pq::storage::{
+        BeaconStateFrame as PqBeaconStateFrame, BeaconStateFrameCursor as PqBeaconStateFrameCursor,
+        BeaconStatePatch as PqBeaconStatePatch, BeaconStatePatchCursor as PqBeaconStatePatchCursor,
+    },
     preset::Preset,
     traits::BeaconState as BeaconStateTrait,
 };
@@ -91,6 +95,7 @@ pub enum BeaconStateFrame<P: Preset> {
     Electra(ElectraBeaconStateFrame<P>),
     Fulu(FuluBeaconStateFrame<P>),
     Gloas(GloasBeaconStateFrame<P>),
+    Pq(PqBeaconStateFrame<P>),
 }
 
 impl<P: Preset> BeaconStateFrame<P> {
@@ -139,6 +144,9 @@ impl<P: Preset> BeaconStateFrame<P> {
                 finalized_validators,
                 level,
             )),
+            BeaconState::Pq(state) => {
+                Self::Pq(PqBeaconStateFrame::new(state, finalized_validators, level))
+            }
         }
     }
 
@@ -152,6 +160,7 @@ impl<P: Preset> BeaconStateFrame<P> {
             Self::Electra(frame) => frame.into_state(finalized_pubkeys)?.into(),
             Self::Fulu(frame) => frame.into_state(finalized_pubkeys)?.into(),
             Self::Gloas(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Pq(frame) => frame.into_state(finalized_pubkeys)?.into(),
         };
 
         Ok(state)
@@ -168,6 +177,7 @@ impl<P: Preset> SszSize for BeaconStateFrame<P> {
         ElectraBeaconStateFrame::<P>::SIZE,
         FuluBeaconStateFrame::<P>::SIZE,
         GloasBeaconStateFrame::<P>::SIZE,
+        PqBeaconStateFrame::<P>::SIZE,
     ]);
 }
 
@@ -185,6 +195,7 @@ impl<P: Preset> SszRead<Config> for BeaconStateFrame<P> {
             Phase::Electra => Self::Electra(SszRead::from_ssz(config, bytes)?),
             Phase::Fulu => Self::Fulu(SszRead::from_ssz(config, bytes)?),
             Phase::Gloas => Self::Gloas(SszRead::from_ssz(config, bytes)?),
+            Phase::Pq => Self::Pq(SszRead::from_ssz(config, bytes)?),
         };
 
         Ok(frame)
@@ -202,6 +213,7 @@ impl<P: Preset> SszWrite for BeaconStateFrame<P> {
             Self::Electra(frame) => frame.write_variable(bytes),
             Self::Fulu(frame) => frame.write_variable(bytes),
             Self::Gloas(frame) => frame.write_variable(bytes),
+            Self::Pq(frame) => frame.write_variable(bytes),
         }
     }
 }
@@ -215,6 +227,7 @@ pub enum BeaconStateFrameCursor<'cursor, P: Preset> {
     Electra(ElectraBeaconStateFrameCursor<'cursor, P>),
     Fulu(FuluBeaconStateFrameCursor<'cursor, P>),
     Gloas(GloasBeaconStateFrameCursor<'cursor, P>),
+    Pq(PqBeaconStateFrameCursor<'cursor, P>),
 }
 
 impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
@@ -230,6 +243,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Phase::Electra => Self::Electra(ElectraBeaconStateFrame::cursor(bytes)),
             Phase::Fulu => Self::Fulu(FuluBeaconStateFrame::cursor(bytes)),
             Phase::Gloas => Self::Gloas(GloasBeaconStateFrame::cursor(bytes)),
+            Phase::Pq => Self::Pq(PqBeaconStateFrame::cursor(bytes)),
         };
 
         Ok(cursor)
@@ -245,6 +259,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
             Self::Fulu(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
             Self::Gloas(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
+            Self::Pq(frame) => frame.get_previous_justified_checkpoint()?.read(&())?,
         };
 
         Ok(value)
@@ -260,6 +275,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
             Self::Fulu(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
             Self::Gloas(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
+            Self::Pq(frame) => frame.get_current_justified_checkpoint()?.read(&())?,
         };
 
         Ok(value)
@@ -275,6 +291,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => frame.get_finalized_checkpoint()?.read(&())?,
             Self::Fulu(frame) => frame.get_finalized_checkpoint()?.read(&())?,
             Self::Gloas(frame) => frame.get_finalized_checkpoint()?.read(&())?,
+            Self::Pq(frame) => frame.get_finalized_checkpoint()?.read(&())?,
         };
 
         Ok(value)
@@ -282,7 +299,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
 
     pub fn current_sync_committee(&self) -> Result<Option<Arc<Hc<SyncCommittee<P>>>>, ReadError> {
         let value = match self {
-            Self::Phase0(_) => return Ok(None),
+            Self::Phase0(_) | Self::Pq(_) => return Ok(None),
             Self::Altair(frame) => {
                 Arc::new(Hc::from(frame.get_current_sync_committee()?.read(&())?))
             }
@@ -309,7 +326,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
 
     pub fn next_sync_committee(&self) -> Result<Option<Arc<Hc<SyncCommittee<P>>>>, ReadError> {
         let value = match self {
-            Self::Phase0(_) => return Ok(None),
+            Self::Phase0(_) | Self::Pq(_) => return Ok(None),
             Self::Altair(frame) => Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?)),
             Self::Bellatrix(frame) => {
                 Arc::new(Hc::from(frame.get_next_sync_committee()?.read(&())?))
@@ -334,6 +351,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_) => return Ok(None),
             Self::Fulu(frame) => frame.get_proposer_lookahead()?.into_inner(),
             Self::Gloas(frame) => frame.get_proposer_lookahead()?.into_inner(),
+            Self::Pq(frame) => frame.get_proposer_lookahead()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -349,6 +367,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(frame) => frame.get_ptc_window()?.into_inner(),
+            Self::Pq(frame) => frame.get_ptc_window()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -364,6 +383,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(frame) => frame.get_builders()?.into_inner(),
+            Self::Pq(frame) => frame.get_builders()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -379,6 +399,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(frame) => frame.get_builder_pending_payments()?.into_inner(),
+            Self::Pq(frame) => frame.get_builder_pending_payments()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -396,6 +417,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(frame) => frame.get_builder_pending_withdrawals()?.into_inner(),
+            Self::Pq(frame) => frame.get_builder_pending_withdrawals()?.into_inner(),
         };
 
         Ok(Some(value))
@@ -411,6 +433,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => frame.get_randao_mixes()?,
             Self::Fulu(frame) => frame.get_randao_mixes()?,
             Self::Gloas(frame) => frame.get_randao_mixes()?,
+            Self::Pq(frame) => frame.get_randao_mixes()?,
         };
 
         Ok(value)
@@ -461,6 +484,12 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
                 .into_iter()
                 .collect(),
             Self::Gloas(frame) => frame
+                .get_validators()?
+                .get_partial_validators()?
+                .into_inner()
+                .into_iter()
+                .collect(),
+            Self::Pq(frame) => frame
                 .get_validators()?
                 .get_partial_validators()?
                 .into_inner()
@@ -521,6 +550,12 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
                 .into_inner()
                 .into_iter()
                 .collect(),
+            Self::Pq(frame) => frame
+                .get_validators()?
+                .get_effective_balances()?
+                .into_inner()
+                .into_iter()
+                .collect(),
         };
 
         Ok(value)
@@ -536,6 +571,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => Box::new(frame.get_balances()?.into_inner()),
             Self::Fulu(frame) => Box::new(frame.get_balances()?.into_inner()),
             Self::Gloas(frame) => Box::new(frame.get_balances()?.into_inner()),
+            Self::Pq(frame) => Box::new(frame.get_balances()?.into_inner()),
         };
 
         Ok(value)
@@ -559,6 +595,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             }
             Self::Fulu(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
             Self::Gloas(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
+            Self::Pq(frame) => Box::new(frame.get_previous_epoch_participation()?.into_inner()),
         };
 
         Ok(Some(value))
@@ -576,6 +613,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
             Self::Fulu(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
             Self::Gloas(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
+            Self::Pq(frame) => Box::new(frame.get_pending_deposits()?.into_inner()),
         };
 
         Ok(Some(value))
@@ -593,6 +631,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
             Self::Fulu(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
             Self::Gloas(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
+            Self::Pq(frame) => Box::new(frame.get_pending_partial_withdrawals()?.into_inner()),
         };
 
         Ok(Some(value))
@@ -610,6 +649,7 @@ impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
             Self::Electra(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
             Self::Fulu(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
             Self::Gloas(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
+            Self::Pq(frame) => Box::new(frame.get_pending_consolidations()?.into_inner()),
         };
 
         Ok(Some(value))
@@ -674,11 +714,6 @@ impl<P: Preset, C> SszRead<C> for BeaconStatePatchInternal<P> {
 }
 
 #[derive(Clone, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "patches are short-lived objects, built and consumed one at a time, so the enum \
-              variant difference gap is not worth an allocation"
-)]
 enum BeaconStatePatchV1<P: Preset> {
     Phase0(Phase0BeaconStatePatch<P>),
     Altair(AltairBeaconStatePatch<P>),
@@ -688,6 +723,7 @@ enum BeaconStatePatchV1<P: Preset> {
     Electra(ElectraBeaconStatePatch<P>),
     Fulu(FuluBeaconStatePatch<P>),
     Gloas(GloasBeaconStatePatch<P>),
+    Pq(PqBeaconStatePatch<P>),
 }
 
 impl<P: Preset> SszSize for BeaconStatePatchV1<P> {
@@ -729,6 +765,10 @@ impl<P: Preset> SszWrite for BeaconStatePatchV1<P> {
                 bytes.push(8);
                 patch.write_variable(bytes)
             }
+            Self::Pq(patch) => {
+                bytes.push(9);
+                patch.write_variable(bytes)
+            }
         }
     }
 }
@@ -748,6 +788,7 @@ impl<P: Preset, C> SszRead<C> for BeaconStatePatchV1<P> {
             6 => SszRead::from_ssz(context, payload).map(Self::Electra),
             7 => SszRead::from_ssz(context, payload).map(Self::Fulu),
             8 => SszRead::from_ssz(context, payload).map(Self::Gloas),
+            9 => SszRead::from_ssz(context, payload).map(Self::Pq),
             _ => Err(ReadError::Custom {
                 message: "unsupported beacon state patch selector",
             }),
@@ -786,6 +827,9 @@ impl<P: Preset> Patch<Arc<BeaconState<P>>> for BeaconStatePatchV1<P> {
             (BeaconState::Gloas(base), BeaconState::Gloas(changed)) => {
                 Patch::diff(config, base.as_ref(), changed.as_ref()).map(Self::Gloas)
             }
+            (BeaconState::Pq(base), BeaconState::Pq(changed)) => {
+                Patch::diff(config, base.as_ref(), changed.as_ref()).map(Self::Pq)
+            }
             (_, _) => Err(PatchError::CrossPhaseDiff),
         }
     }
@@ -802,6 +846,7 @@ impl<P: Preset> Patch<Arc<BeaconState<P>>> for BeaconStatePatchV1<P> {
             (Self::Electra(patch), BeaconState::Electra(base)) => patch.apply(reset_cache(base)),
             (Self::Fulu(patch), BeaconState::Fulu(base)) => patch.apply(reset_cache(base)),
             (Self::Gloas(patch), BeaconState::Gloas(base)) => patch.apply(reset_cache(base)),
+            (Self::Pq(patch), BeaconState::Pq(base)) => patch.apply(reset_cache(base)),
             // Nothing is being diffed here: a stored patch is being applied to a base of another
             // phase, which means the chain it was read from is inconsistent.
             (_, _) => Err(PatchError::PatchPhaseMismatch),
@@ -826,6 +871,7 @@ pub enum BeaconStatePatchCursor<'cursor, P: Preset> {
     Electra(ElectraBeaconStatePatchCursor<'cursor, P>),
     Fulu(FuluBeaconStatePatchCursor<'cursor, P>),
     Gloas(GloasBeaconStatePatchCursor<'cursor, P>),
+    Pq(PqBeaconStatePatchCursor<'cursor, P>),
 }
 
 impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
@@ -849,6 +895,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             6 => patch.try_into().map(Self::Electra),
             7 => patch.try_into().map(Self::Fulu),
             8 => patch.try_into().map(Self::Gloas),
+            9 => patch.try_into().map(Self::Pq),
             _ => Err(ReadError::Custom {
                 message: "unsupported beacon state patch selector",
             }),
@@ -865,6 +912,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_previous_justified_checkpoint()?,
             Self::Fulu(patch) => patch.get_previous_justified_checkpoint()?,
             Self::Gloas(patch) => patch.get_previous_justified_checkpoint()?,
+            Self::Pq(patch) => patch.get_previous_justified_checkpoint()?,
         };
 
         Ok(value)
@@ -880,6 +928,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_current_justified_checkpoint()?,
             Self::Fulu(patch) => patch.get_current_justified_checkpoint()?,
             Self::Gloas(patch) => patch.get_current_justified_checkpoint()?,
+            Self::Pq(patch) => patch.get_current_justified_checkpoint()?,
         };
 
         Ok(value)
@@ -895,6 +944,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_finalized_checkpoint()?,
             Self::Fulu(patch) => patch.get_finalized_checkpoint()?,
             Self::Gloas(patch) => patch.get_finalized_checkpoint()?,
+            Self::Pq(patch) => patch.get_finalized_checkpoint()?,
         };
 
         Ok(value)
@@ -905,7 +955,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
         &self,
     ) -> Result<Option<ReplacePatch<Arc<Hc<SyncCommittee<P>>>>>, ReadError> {
         let value = match self {
-            Self::Phase0(_) => return Ok(None),
+            Self::Phase0(_) | Self::Pq(_) => return Ok(None),
             Self::Altair(patch) => patch.get_current_sync_committee()?,
             Self::Bellatrix(patch) => patch.get_current_sync_committee()?,
             Self::Capella(patch) => patch.get_current_sync_committee()?,
@@ -923,7 +973,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
         &self,
     ) -> Result<Option<ReplacePatch<Arc<Hc<SyncCommittee<P>>>>>, ReadError> {
         let value = match self {
-            Self::Phase0(_) => return Ok(None),
+            Self::Phase0(_) | Self::Pq(_) => return Ok(None),
             Self::Altair(patch) => patch.get_next_sync_committee()?,
             Self::Bellatrix(patch) => patch.get_next_sync_committee()?,
             Self::Capella(patch) => patch.get_next_sync_committee()?,
@@ -948,6 +998,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_) => return Ok(None),
             Self::Fulu(patch) => patch.get_proposer_lookahead()?,
             Self::Gloas(patch) => patch.get_proposer_lookahead()?,
+            Self::Pq(patch) => patch.get_proposer_lookahead()?,
         };
 
         Ok(Some(value))
@@ -963,6 +1014,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(patch) => patch.get_ptc_window()?,
+            Self::Pq(patch) => patch.get_ptc_window()?,
         };
 
         Ok(Some(value))
@@ -978,6 +1030,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(patch) => patch.get_builders()?,
+            Self::Pq(patch) => patch.get_builders()?,
         };
 
         Ok(Some(value))
@@ -995,6 +1048,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(patch) => patch.get_builder_pending_payments()?,
+            Self::Pq(patch) => patch.get_builder_pending_payments()?,
         };
 
         Ok(Some(value))
@@ -1012,6 +1066,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             | Self::Electra(_)
             | Self::Fulu(_) => return Ok(None),
             Self::Gloas(patch) => patch.get_builder_pending_withdrawals()?,
+            Self::Pq(patch) => patch.get_builder_pending_withdrawals()?,
         };
 
         Ok(Some(value))
@@ -1027,6 +1082,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_randao_mixes()?,
             Self::Fulu(patch) => patch.get_randao_mixes()?,
             Self::Gloas(patch) => patch.get_randao_mixes()?,
+            Self::Pq(patch) => patch.get_randao_mixes()?,
         };
 
         Ok(value)
@@ -1042,6 +1098,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_validators()?,
             Self::Fulu(patch) => patch.get_validators()?,
             Self::Gloas(patch) => patch.get_validators()?,
+            Self::Pq(patch) => patch.get_validators()?,
         };
 
         Ok(value)
@@ -1057,6 +1114,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_balances()?,
             Self::Fulu(patch) => patch.get_balances()?,
             Self::Gloas(patch) => patch.get_balances()?,
+            Self::Pq(patch) => patch.get_balances()?,
         };
 
         Ok(value)
@@ -1074,6 +1132,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_previous_epoch_participation()?,
             Self::Fulu(patch) => patch.get_previous_epoch_participation()?,
             Self::Gloas(patch) => patch.get_previous_epoch_participation()?,
+            Self::Pq(patch) => patch.get_previous_epoch_participation()?,
         };
 
         Ok(Some(value))
@@ -1091,6 +1150,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_pending_deposits()?,
             Self::Fulu(patch) => patch.get_pending_deposits()?,
             Self::Gloas(patch) => patch.get_pending_deposits()?,
+            Self::Pq(patch) => patch.get_pending_deposits()?,
         };
 
         Ok(Some(value))
@@ -1108,6 +1168,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_pending_partial_withdrawals()?,
             Self::Fulu(patch) => patch.get_pending_partial_withdrawals()?,
             Self::Gloas(patch) => patch.get_pending_partial_withdrawals()?,
+            Self::Pq(patch) => patch.get_pending_partial_withdrawals()?,
         };
 
         Ok(Some(value))
@@ -1125,6 +1186,7 @@ impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
             Self::Electra(patch) => patch.get_pending_consolidations()?,
             Self::Fulu(patch) => patch.get_pending_consolidations()?,
             Self::Gloas(patch) => patch.get_pending_consolidations()?,
+            Self::Pq(patch) => patch.get_pending_consolidations()?,
         };
 
         Ok(Some(value))
@@ -1147,6 +1209,7 @@ mod tests {
         fulu::beacon_state::BeaconState as FuluBeaconState,
         gloas::beacon_state::BeaconState as GloasBeaconState,
         phase0::{beacon_state::BeaconState as Phase0BeaconState, containers::Fork},
+        pq::beacon_state::BeaconState as PqBeaconState,
         preset::Minimal,
     };
 
@@ -1212,6 +1275,10 @@ mod tests {
             state.deposit_requests_start_index = 11;
         });
         pair!("gloas", Gloas, GloasBeaconState<Minimal>, |state| {
+            state.latest_block_hash = H256::repeat_byte(3);
+            state.next_withdrawal_builder_index = 5;
+        });
+        pair!("pq", Pq, PqBeaconState<Minimal>, |state| {
             state.latest_block_hash = H256::repeat_byte(3);
             state.next_withdrawal_builder_index = 5;
         });
@@ -1348,6 +1415,7 @@ mod tests {
                 [1, 6],
                 [1, 7],
                 [1, 8],
+                [1, 9],
             ],
         );
     }
@@ -1368,8 +1436,8 @@ mod tests {
         BeaconStatePatch::<Minimal>::from_ssz(&config, [1, 0])
             .expect_err("0 is not a known phase selector");
 
-        BeaconStatePatch::<Minimal>::from_ssz(&config, [1, 9])
-            .expect_err("9 is not a known phase selector");
+        BeaconStatePatch::<Minimal>::from_ssz(&config, [1, 10])
+            .expect_err("10 is not a known phase selector");
     }
 
     #[test]
@@ -1419,6 +1487,11 @@ mod tests {
                     ),
                     BeaconStateFrameCursor::Gloas(frame) => (
                         Phase::Gloas,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Pq(frame) => (
+                        Phase::Pq,
                         frame.get_slot()?,
                         frame.get_latest_block_header()?.get_body_root()?,
                     ),
@@ -1487,6 +1560,11 @@ mod tests {
                     patch.get_slot()?.to_ssz()?,
                     patch.get_latest_block_header()?.to_ssz()?,
                 ),
+                BeaconStatePatchCursor::Pq(patch) => (
+                    Phase::Pq,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
             };
 
             assert_eq!(
@@ -1511,7 +1589,7 @@ mod tests {
 
     #[test]
     fn a_patch_cursor_rejects_an_empty_patch_and_an_unknown_selector() {
-        for bytes in [&[][..], &[2, 1], &[1], &[1, 0], &[1, 9]] {
+        for bytes in [&[][..], &[2, 1], &[1], &[1, 0], &[1, 10]] {
             assert!(BeaconStatePatchCursor::<Minimal>::new(bytes).is_err());
         }
     }

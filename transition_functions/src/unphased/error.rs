@@ -132,6 +132,10 @@ pub enum Error<P: Preset> {
         in_attestation: Slot,
         state_slot: Slot,
     },
+    #[error("deposit data cannot be processed after PQ")]
+    PqDepositDataUnsupported,
+    #[error("the PQ fork transition is not supported")]
+    PqForkTransitionUnsupported,
     #[error("proposer (validator {index}) is slashed")]
     ProposerSlashed { index: ValidatorIndex },
     #[error("proposer index is incorrect (in_block: {in_block}, computed: {computed})")]

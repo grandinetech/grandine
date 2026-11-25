@@ -173,6 +173,11 @@ impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<
             CombinedBeaconBlock::Electra(block) => block.into(),
             CombinedBeaconBlock::Fulu(block) => block.into(),
             CombinedBeaconBlock::Gloas(block) => block.into(),
+            // TODO(PQ): PQ blocks are signed with XMSS, not through this BLS signer.
+            CombinedBeaconBlock::Pq(block) => {
+                let block_header = block.to_header();
+                Self::BeaconBlock(SigningBlock::Gloas { block_header })
+            }
         }
     }
 }

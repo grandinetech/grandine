@@ -2609,11 +2609,11 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let phase = controller.chain_config().phase_at_slot::<P>(slot);
     let signed_beacon_block = Arc::new(signed_beacon_block);
 
-    if let Some(signed_payload_bid) = signed_beacon_block
+    if let Some(payload_bid) = signed_beacon_block
         .message()
         .body()
         .with_payload_bid()
-        .map(BlockBodyWithPayloadBid::signed_execution_payload_bid)
+        .map(BlockBodyWithPayloadBid::execution_payload_bid)
     {
         // Only publish signed beacon block for post-Gloas
         let status_code = publish_signed_block_v2(
@@ -2627,7 +2627,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         .await?;
 
         if let Some(builder_url) = builder_url_from_headers(&headers)
-            && signed_payload_bid.message.builder_index != BUILDER_INDEX_SELF_BUILD
+            && payload_bid.builder_index != BUILDER_INDEX_SELF_BUILD
         {
             tokio::spawn(async move {
                 if let Err(error) = payload_builder_api
@@ -3435,6 +3435,8 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
             .filter_map(AttesterSlashing::post_gloas)
             .map(|slashing| AttesterSlashing::Gloas(slashing))
             .collect(),
+        // TODO(PQ): Pool PQ attester slashings.
+        Phase::Pq => vec![],
     };
 
     Ok(EthResponse::json(data).version(phase))

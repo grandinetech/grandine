@@ -252,6 +252,8 @@ impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P
                 .extract()
                 .await
                 .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Gloas(slashing)))),
+            // TODO(PQ): Accept PQ attester slashings.
+            Phase::Pq => return Err(Error::EndpointNotImplemented),
         }
         .map_err(Error::InvalidJsonBody)
     }

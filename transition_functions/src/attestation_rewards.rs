@@ -9,7 +9,7 @@
 
 use core::marker::PhantomData;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use arithmetic::U64Ext as _;
 use helper_functions::{
     accessors::{compute_base_reward, compute_base_reward_per_increment, get_current_epoch},
@@ -258,6 +258,8 @@ pub fn attestation_rewards<P: Preset>(
         BeaconState::Electra(state) => post_altair_rewards(config, phase, state),
         BeaconState::Fulu(state) => post_altair_rewards(config, phase, state),
         BeaconState::Gloas(state) => post_altair_rewards(config, phase, state),
+        // TODO(PQ): PQ epoch deltas match Gloas but take the PQ state.
+        BeaconState::Pq(_) => bail!("attestation rewards are not implemented for PQ yet"),
     }
 }
 
