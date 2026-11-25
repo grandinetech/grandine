@@ -414,6 +414,7 @@ rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'b
 rust-kzg-constantine = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-mcl = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-zkcrypto = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
+rustix = { version = '1', features = ['time'] }
 scc = '3.7'
 scrypt = '0.11'
 semver = '1'
