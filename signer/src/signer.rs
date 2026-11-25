@@ -196,10 +196,11 @@ impl Signer {
         Ok(())
     }
 
-    /// The leaves [`Self::prepare_pq_keys_serially`] builds the trees of at `slot`: the
-    /// attestation and duty leaves of `slot`, then the first duty leaf of the next tree and the
-    /// attestation leaf of the epoch of its last slot. The trees in use come first so that they
-    /// stay among the most recently used when the next ones fill the key's tree cache.
+    /// The first leaves of the trees [`Self::prepare_pq_keys_serially`] builds at `slot`: those of
+    /// the attestation and duty leaves of `slot`, then the next duty tree and the attestation tree
+    /// of the epoch of its last slot. They change only when `slot` enters another duty tree. The
+    /// trees in use come first so that they stay among the most recently used when the next ones
+    /// fill the key's tree cache.
     pub fn pq_leaves_to_prepare<P: Preset>(slot: Slot) -> Result<[LeafIndex; 4]> {
         let tree_leaves = xmss::LEAVES_PER_TREE;
         let duty_leaf = helper_functions::pq::compute_xmss_leaf_index(slot, 0)?;
@@ -226,7 +227,8 @@ impl Signer {
             next_duty_leaf,
         ];
 
-        let [first, second, third, fourth] = leaves.map(LeafIndex::try_from);
+        let [first, second, third, fourth] =
+            leaves.map(|leaf| LeafIndex::try_from(leaf.prev_multiple_of(tree_leaves)));
 
         Ok([first?, second?, third?, fourth?])
     }
@@ -953,15 +955,20 @@ mod tests {
     // On Mainnet the duty trees change at slot 4096 and then every 8192 slots.
     #[test]
     fn pq_leaves_to_prepare_are_those_of_the_current_and_next_duty_trees() -> Result<()> {
+        use arithmetic::U64Ext as _;
         use helper_functions::pq::{compute_xmss_attestation_leaf_index, compute_xmss_leaf_index};
         use types::preset::Mainnet;
 
+        let tree = |leaf: u64| -> Result<LeafIndex> {
+            Ok(leaf.prev_multiple_of(xmss::LEAVES_PER_TREE).try_into()?)
+        };
+
         let leaves = |epoch, slot, next_epoch, next_slot| -> Result<[LeafIndex; 4]> {
             Ok([
-                compute_xmss_attestation_leaf_index(epoch)?.try_into()?,
-                compute_xmss_leaf_index(slot, 0)?.try_into()?,
-                compute_xmss_attestation_leaf_index(next_epoch)?.try_into()?,
-                compute_xmss_leaf_index(next_slot, 0)?.try_into()?,
+                tree(compute_xmss_attestation_leaf_index(epoch)?)?,
+                tree(compute_xmss_leaf_index(slot, 0)?)?,
+                tree(compute_xmss_attestation_leaf_index(next_epoch)?)?,
+                tree(compute_xmss_leaf_index(next_slot, 0)?)?,
             ])
         };
 
@@ -970,16 +977,21 @@ mod tests {
             leaves(0, 0, 383, 4096)?,
         );
         assert_eq!(
-            Signer::pq_leaves_to_prepare::<Mainnet>(4095)?,
-            leaves(127, 4095, 383, 4096)?,
-        );
-        assert_eq!(
             Signer::pq_leaves_to_prepare::<Mainnet>(4096)?,
             leaves(128, 4096, 639, 12288)?,
         );
-        assert_eq!(
+
+        // The leaves stay the same within a duty tree, so the trees are built once per tree.
+        for (first, last) in [(0, 4095), (4096, 12287), (12288, 20479)] {
+            assert_eq!(
+                Signer::pq_leaves_to_prepare::<Mainnet>(first)?,
+                Signer::pq_leaves_to_prepare::<Mainnet>(last)?,
+            );
+        }
+
+        assert_ne!(
             Signer::pq_leaves_to_prepare::<Mainnet>(12287)?,
-            leaves(383, 12287, 639, 12288)?,
+            Signer::pq_leaves_to_prepare::<Mainnet>(12288)?,
         );
 
         Ok(())
