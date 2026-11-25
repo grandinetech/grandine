@@ -32,6 +32,7 @@ num-integer = { workspace = true }
 openssl = { workspace = true }
 operation_pools = { workspace = true }
 pubkey_cache = { workspace = true }
+rustix = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -73,6 +74,10 @@ harness = false
 
 [[bench]]
 name = 'lookup_in_collection'
+harness = false
+
+[[bench]]
+name = 'multi_verify'
 harness = false
 
 [[bench]]
