@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use clock::Tick;
 use duplicate::duplicate_item;
@@ -301,9 +304,9 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
     // `consensus-specs` has no notion of optimistic sync, so every imported payload is valid.
     // The Fast Confirmation Rule only confirms blocks with valid payloads.
-    let mark_payloads_valid = case
-        .case_path_relative_to_workspace_root
-        .contains("/fast_confirmation/");
+    let mark_payloads_valid = Path::new(case.case_path_relative_to_workspace_root)
+        .components()
+        .any(|component| component.as_os_str() == "fast_confirmation");
 
     let tick_at_time = |time| {
         Tick::at_time::<P>(config, time, genesis_time)
