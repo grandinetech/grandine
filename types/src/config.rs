@@ -321,9 +321,10 @@ impl Default for Config {
 
             // PQ
             unregistered_validator_withdrawability_delay: 0x4000, // 16_384
-            aggregation_cutoff_bps: 4000,
-            aggregate_due_bps_pq: 6000,
-            aggregator_delay_bps: 500,
+            // pq-devnet-0 has no staggered aggregators: every aggregate is due with the Gloas ones.
+            aggregation_cutoff_bps: 3500,
+            aggregate_due_bps_pq: 5000,
+            aggregator_delay_bps: 0,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
