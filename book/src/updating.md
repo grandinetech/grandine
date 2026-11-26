@@ -137,6 +137,13 @@ Upgrades within the same schema series need no migration and no resync. Grandine
 by older versions and writes new data in the current format. The slashing protection database
 (`validator/slashing_protection.sqlite`) is migrated forward automatically on start.
 
+Grandine stores blob and data column sidecars in a separate `blobs` database. Sidecars
+stored by earlier versions stay in `beacon_fork_choice`: Grandine logs
+`found sidecars stored by an earlier version in beacon_fork_choice database` on start, keeps
+serving them from there and prunes them when they leave the retention window. Once none are left,
+it logs `pruned all … sidecars stored in beacon_fork_choice database`. Archive nodes do not prune
+sidecars, so they keep serving older sidecars from `beacon_fork_choice`.
+
 If a release ever needs a resync or a manual migration, its release notes say so.
 
 ## Downgrading

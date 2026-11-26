@@ -251,6 +251,10 @@ validator data. Combine it with `--checkpoint-sync-url`. See
 updates the file and logs `using schema version … for new data`. Check the release notes before you downgrade, and see
 [Updating Grandine](./updating.md).
 
+Blob and data column sidecars stored by versions without the `blobs` database stay in `beacon_fork_choice`.
+Grandine serves them from there and prunes them like sidecars in the `blobs` database. See
+[Database compatibility](./updating.md#database-compatibility).
+
 ## Command line options
 
 See [Command line reference](./cli_options.md) for the full list.

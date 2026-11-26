@@ -1,7 +1,7 @@
 use core::{
     fmt, mem,
     ops::Range,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::{borrow::Cow, collections::HashSet, sync::Arc, thread::Builder};
 
@@ -93,6 +93,7 @@ pub struct Storage<P: Preset> {
     config: Arc<Config>,
     pub(crate) database: Arc<Database>,
     pub(crate) blobs_database: Arc<Database>,
+    legacy_sidecars: Arc<LegacySidecars>,
     storage_mode: StorageMode,
     store_execution_payloads: bool,
     zstd_compression_level: i32,
@@ -168,12 +169,14 @@ impl<P: Preset> Storage<P> {
         ));
 
         let frame_cache = FrameCache::new(cache_sizes)?;
+        let legacy_sidecars = Arc::new(LegacySidecars::detect(&database)?);
 
         Ok(Self {
             config,
             pubkey_cache,
             database: Arc::new(database),
             blobs_database: Arc::new(blobs_database),
+            legacy_sidecars,
             storage_mode,
             store_execution_payloads,
             zstd_compression_level,
@@ -1085,29 +1088,33 @@ impl<P: Preset> Storage<P> {
         blob_id: BlobIdentifier,
     ) -> Result<Option<Arc<BlobSidecar<P>>>> {
         let BlobIdentifier { block_root, index } = blob_id;
+        let key = BlobSidecarByBlobId(block_root, index);
 
-        self.get_from_blobs_db(BlobSidecarByBlobId(block_root, index))
+        if let Some(blob_sidecar) = self.get_from_blobs_db(&key)? {
+            return Ok(Some(blob_sidecar));
+        }
+
+        if self.legacy_sidecars.blobs.load(Ordering::Relaxed) {
+            return self.get(key);
+        }
+
+        Ok(None)
     }
 
     pub(crate) fn prune_old_blob_sidecars(&self, up_to_slot: Slot) -> Result<()> {
-        let results = self
-            .blobs_database
-            .iterator_descending_raw(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
+        prune_old_blob_sidecars_in(&self.blobs_database, up_to_slot)?;
 
-        let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
-            itertools::process_results(results, |iter| {
-                iter.take_while(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
-                    .unzip()
-            })?;
+        if self.legacy_sidecars.blobs.load(Ordering::Relaxed) {
+            prune_old_blob_sidecars_in(&self.database, up_to_slot)?;
 
-        for blob_bytes in blobs_to_remove {
-            let BlobIdentifier { block_root, index } =
-                BlobIdentifier::from_ssz_default(decompress(&blob_bytes)?)?;
+            if !contains_slot_indexed_key::<SlotBlobId>(&self.database)? {
+                self.legacy_sidecars.blobs.store(false, Ordering::Relaxed);
 
-            keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
+                info_with_peers!("pruned all blob sidecars stored in beacon_fork_choice database");
+            }
         }
 
-        self.blobs_database.delete_batch(keys_to_remove)
+        Ok(())
     }
 
     fn retained_prune_slots(&self, up_to_slot: Slot) -> Vec<Slot> {
@@ -1323,8 +1330,17 @@ impl<P: Preset> Storage<P> {
         data_column_id: DataColumnIdentifier,
     ) -> Result<Option<Arc<DataColumnSidecar<P>>>> {
         let DataColumnIdentifier { block_root, index } = data_column_id;
+        let key = DataColumnSidecarByColumnId(block_root, index);
 
-        self.get_from_blobs_db(DataColumnSidecarByColumnId(block_root, index))
+        if let Some(data_column_sidecar) = self.get_from_blobs_db(&key)? {
+            return Ok(Some(data_column_sidecar));
+        }
+
+        if self.legacy_sidecars.data_columns.load(Ordering::Relaxed) {
+            return self.get(key);
+        }
+
+        Ok(None)
     }
 
     pub(crate) fn envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
@@ -1370,34 +1386,23 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
-        let results = self
-            .blobs_database
-            .iterator_descending_raw(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
+        prune_old_data_column_sidecars_in::<P>(&self.blobs_database, up_to_slot)?;
 
-        let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
-            itertools::process_results(results, |iter| {
-                iter.take_while(|(key_bytes, _)| SlotColumnId::has_prefix(key_bytes))
-                    .take(
-                        // Limit number of entries to prune per single transaction
-                        MAX_DATA_COLUMN_EPOCHS_TO_PRUNE
-                            .saturating_mul(P::SlotsPerEpoch::USIZE)
-                            .saturating_mul(P::NumberOfColumns::USIZE),
-                    )
-                    .unzip()
-            })?;
+        if self.legacy_sidecars.data_columns.load(Ordering::Relaxed) {
+            prune_old_data_column_sidecars_in::<P>(&self.database, up_to_slot)?;
 
-        for column_bytes in columns_to_remove {
-            let DataColumnIdentifier { block_root, index } =
-                DataColumnIdentifier::from_ssz_default(decompress(&column_bytes)?)?;
+            if !contains_slot_indexed_key::<SlotColumnId>(&self.database)? {
+                self.legacy_sidecars
+                    .data_columns
+                    .store(false, Ordering::Relaxed);
 
-            keys_to_remove.push(
-                DataColumnSidecarByColumnId(block_root, index)
-                    .to_string()
-                    .into(),
-            )
+                info_with_peers!(
+                    "pruned all data column sidecars stored in beacon_fork_choice database"
+                );
+            }
         }
 
-        self.blobs_database.delete_batch(keys_to_remove)
+        Ok(())
     }
 
     pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
@@ -3155,6 +3160,104 @@ pub fn serialize(key: impl fmt::Display, value: impl SszWrite) -> Result<(String
     Ok((serialize_key(key), compressed))
 }
 
+// Versions before the separate blobs database stored blob and data column sidecars in
+// `beacon_fork_choice`. Those sidecars are not moved. They are read from `beacon_fork_choice`
+// when missing from the blobs database and pruned from both until none are left.
+struct LegacySidecars {
+    blobs: AtomicBool,
+    data_columns: AtomicBool,
+}
+
+impl LegacySidecars {
+    fn detect(database: &Database) -> Result<Self> {
+        let blobs = contains_slot_indexed_key::<SlotBlobId>(database)?;
+        let data_columns = contains_slot_indexed_key::<SlotColumnId>(database)?;
+
+        if blobs || data_columns {
+            info_with_peers!(
+                "found sidecars stored by an earlier version in beacon_fork_choice database \
+                 (blob sidecars: {blobs}, data column sidecars: {data_columns}); \
+                 they will be served from there until pruned",
+            );
+        }
+
+        Ok(Self {
+            blobs: AtomicBool::new(blobs),
+            data_columns: AtomicBool::new(data_columns),
+        })
+    }
+}
+
+// `SlotColumnId` shares its prefix with `BlockCheckpoint` and `StateCheckpoint`,
+// so checking the prefix alone is not enough. Slot-indexed keys continue with the slot.
+fn is_slot_indexed_key<K: PrefixableKey>(key_bytes: &[u8]) -> bool {
+    key_bytes
+        .strip_prefix(K::PREFIX.as_bytes())
+        .and_then(<[u8]>::first)
+        .is_some_and(u8::is_ascii_digit)
+}
+
+fn contains_slot_indexed_key<K: PrefixableKey>(database: &Database) -> Result<bool> {
+    let start = format!("{}{:020}", K::PREFIX, GENESIS_SLOT);
+
+    Ok(database
+        .next_key(start)?
+        .is_some_and(|key_bytes| is_slot_indexed_key::<K>(&key_bytes)))
+}
+
+fn prune_old_blob_sidecars_in(database: &Database, up_to_slot: Slot) -> Result<()> {
+    let results =
+        database.iterator_descending_raw(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
+
+    let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
+        itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| is_slot_indexed_key::<SlotBlobId>(key_bytes))
+                .unzip()
+        })?;
+
+    for blob_bytes in blobs_to_remove {
+        let BlobIdentifier { block_root, index } =
+            BlobIdentifier::from_ssz_default(decompress(&blob_bytes)?)?;
+
+        keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
+    }
+
+    database.delete_batch(keys_to_remove)
+}
+
+fn prune_old_data_column_sidecars_in<P: Preset>(
+    database: &Database,
+    up_to_slot: Slot,
+) -> Result<()> {
+    let results = database
+        .iterator_descending_raw(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
+
+    let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
+        itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| is_slot_indexed_key::<SlotColumnId>(key_bytes))
+                .take(
+                    // Limit number of entries to prune per single transaction
+                    MAX_DATA_COLUMN_EPOCHS_TO_PRUNE
+                        .saturating_mul(P::SlotsPerEpoch::USIZE)
+                        .saturating_mul(P::NumberOfColumns::USIZE),
+                )
+                .unzip()
+        })?;
+
+    for column_bytes in columns_to_remove {
+        let DataColumnIdentifier { block_root, index } =
+            DataColumnIdentifier::from_ssz_default(decompress(&column_bytes)?)?;
+
+        keys_to_remove.push(
+            DataColumnSidecarByColumnId(block_root, index)
+                .to_string()
+                .into(),
+        )
+    }
+
+    database.delete_batch(keys_to_remove)
+}
+
 // Add more info when needed
 pub fn print_beacon_database_info(database: &Database) -> Result<()> {
     info!("beacon_fork_choice database info:");
@@ -4057,6 +4160,217 @@ mod tests {
             storage.envelope_by_root(H256::repeat_byte(10))?,
             Some(StoredEnvelope::Full(envelope)) if *envelope == kept_envelope,
         ));
+
+        Ok(())
+    }
+
+    fn storage_with_legacy_database(database: Database) -> Result<Storage<Mainnet>> {
+        Storage::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            database,
+            Database::persistent(
+                "test_blobs_db",
+                TempDir::new()?,
+                ByteSize::mib(10),
+                DatabaseMode::ReadWrite,
+                None,
+            )?,
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )
+    }
+
+    fn legacy_database() -> Result<Database> {
+        Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )
+    }
+
+    #[test]
+    fn test_legacy_blob_sidecars() -> Result<()> {
+        let blob_sidecar = |slot| {
+            let mut blob_sidecar = BlobSidecar::<Mainnet>::default();
+            blob_sidecar.signed_block_header.message.slot = slot;
+            blob_sidecar
+        };
+
+        let blob_id = |byte| BlobIdentifier {
+            block_root: H256::repeat_byte(byte),
+            index: 0,
+        };
+
+        let legacy_pruned = blob_sidecar(1);
+        let legacy_kept = blob_sidecar(10);
+        let new_pruned = blob_sidecar(3);
+
+        let database = legacy_database()?;
+
+        database.put_batch_raw(vec![
+            serialize(BlobSidecarByBlobId(H256::repeat_byte(1), 0), &legacy_pruned)?,
+            serialize(SlotBlobId(1, H256::repeat_byte(1), 0), blob_id(1))?,
+            serialize(BlobSidecarByBlobId(H256::repeat_byte(10), 0), &legacy_kept)?,
+            serialize(SlotBlobId(10, H256::repeat_byte(10), 0), blob_id(10))?,
+        ])?;
+
+        let storage = storage_with_legacy_database(database)?;
+
+        assert!(storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
+        assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        storage.append_blob_sidecars([BlobSidecarWithId {
+            blob_sidecar: Arc::new(new_pruned.clone()),
+            blob_id: blob_id(3),
+        }])?;
+
+        assert_eq!(
+            storage.blob_sidecar_by_id(blob_id(1))?.as_deref(),
+            Some(&legacy_pruned),
+        );
+        assert_eq!(
+            storage.blob_sidecar_by_id(blob_id(3))?.as_deref(),
+            Some(&new_pruned),
+        );
+
+        storage.prune_old_blob_sidecars(5)?;
+
+        assert_eq!(storage.blob_sidecar_by_id(blob_id(1))?, None);
+        assert_eq!(storage.blob_sidecar_by_id(blob_id(3))?, None);
+        assert_eq!(
+            storage.blob_sidecar_by_id(blob_id(10))?.as_deref(),
+            Some(&legacy_kept),
+        );
+        assert!(storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
+
+        storage.prune_old_blob_sidecars(11)?;
+
+        assert_eq!(storage.blob_sidecar_by_id(blob_id(10))?, None);
+        assert!(!storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
+        assert!(
+            storage
+                .database
+                .next_key(BlobSidecarByBlobId(H256::zero(), 0).to_string())?
+                .is_none_or(|key| !BlobSidecarByBlobId::has_prefix(&key)),
+            "all legacy blob sidecars should be deleted from beacon_fork_choice",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_data_column_sidecars() -> Result<()> {
+        let data_column_sidecar = |slot, byte| {
+            Arc::new(DataColumnSidecar::<Mainnet>::Gloas(
+                types::gloas::containers::DataColumnSidecar {
+                    slot,
+                    beacon_block_root: H256::repeat_byte(byte),
+                    ..Default::default()
+                },
+            ))
+        };
+
+        let data_column_id = |byte| DataColumnIdentifier {
+            block_root: H256::repeat_byte(byte),
+            index: 0,
+        };
+
+        let legacy_pruned = data_column_sidecar(1, 1);
+        let legacy_kept = data_column_sidecar(10, 10);
+        let new_pruned = data_column_sidecar(3, 3);
+
+        let database = legacy_database()?;
+
+        database.put_batch_raw(vec![
+            serialize(
+                DataColumnSidecarByColumnId(H256::repeat_byte(1), 0),
+                &*legacy_pruned,
+            )?,
+            serialize(SlotColumnId(1, H256::repeat_byte(1), 0), data_column_id(1))?,
+            serialize(
+                DataColumnSidecarByColumnId(H256::repeat_byte(10), 0),
+                &*legacy_kept,
+            )?,
+            serialize(
+                SlotColumnId(10, H256::repeat_byte(10), 0),
+                data_column_id(10),
+            )?,
+        ])?;
+
+        let storage = storage_with_legacy_database(database)?;
+
+        assert!(!storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
+        assert!(storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        storage.append_data_column_sidecars([DataColumnSidecarWithId {
+            data_column_sidecar: new_pruned.clone_arc(),
+            data_column_id: data_column_id(3),
+        }])?;
+
+        assert_eq!(
+            storage.data_column_sidecar_by_id(data_column_id(1))?,
+            Some(legacy_pruned)
+        );
+        assert_eq!(
+            storage.data_column_sidecar_by_id(data_column_id(3))?,
+            Some(new_pruned)
+        );
+
+        storage.prune_old_data_column_sidecars(5)?;
+
+        assert!(
+            storage
+                .data_column_sidecar_by_id(data_column_id(1))?
+                .is_none()
+        );
+        assert!(
+            storage
+                .data_column_sidecar_by_id(data_column_id(3))?
+                .is_none()
+        );
+        assert_eq!(
+            storage.data_column_sidecar_by_id(data_column_id(10))?,
+            Some(legacy_kept)
+        );
+        assert!(storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        storage.prune_old_data_column_sidecars(11)?;
+
+        assert!(
+            storage
+                .data_column_sidecar_by_id(data_column_id(10))?
+                .is_none()
+        );
+        assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_sidecar_detection_ignores_checkpoint_keys() -> Result<()> {
+        let database = legacy_database()?;
+
+        // `cblock…` and `cstate2…` share the `c` prefix with `SlotColumnId`.
+        database.put_batch_raw(vec![
+            (b"cblock".to_vec(), vec![]),
+            (b"cstate2".to_vec(), vec![]),
+        ])?;
+
+        let storage = storage_with_legacy_database(database)?;
+
+        assert!(!storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
+        assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        // Pruning must not delete checkpoint keys.
+        storage.prune_old_data_column_sidecars(u64::MAX)?;
+
+        assert!(storage.database.contains_key("cblock")?);
+        assert!(storage.database.contains_key("cstate2")?);
 
         Ok(())
     }
