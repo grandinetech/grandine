@@ -144,6 +144,14 @@ serving them from there and prunes them when they leave the retention window. On
 it logs `pruned all … sidecars stored in beacon_fork_choice database`. Archive nodes do not prune
 sidecars, so they keep serving older sidecars from `beacon_fork_choice`.
 
+Pruning the old sidecars does not make `beacon_fork_choice` smaller on disk. The freed space stays
+inside that database and is reused only by its own later writes, while the `blobs` database grows
+to hold a full retention window of new sidecars. Keep free disk space for about one extra retention
+window of sidecars, which is much larger on a node that custodies all data columns. The space stays
+in use after the `pruned all …` message. To get it back, resync with `--force-reset-beacon-db` and
+`--checkpoint-sync-url`. See
+[Checkpoint sync](./checkpoint_sync.md#re-sync-from-a-new-checkpoint).
+
 If a release ever needs a resync or a manual migration, its release notes say so.
 
 ## Downgrading

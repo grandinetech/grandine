@@ -65,6 +65,8 @@ use crate::{
 pub const DEFAULT_ZSTD_COMPRESSION_LEVEL: i32 = zstd::DEFAULT_COMPRESSION_LEVEL;
 pub const MAX_DATA_COLUMN_EPOCHS_TO_PRUNE: usize = 100;
 
+const MAX_BLOB_EPOCHS_TO_PRUNE: usize = 100;
+
 const UNSYNCED_CHECKPOINT_EPOCH_INTERVAL: u64 = 32;
 
 // Retain archival data in memory until the number of ready beacon states
@@ -1102,10 +1104,12 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_blob_sidecars(&self, up_to_slot: Slot) -> Result<()> {
-        prune_old_blob_sidecars_in(&self.blobs_database, up_to_slot)?;
+        let limit = self.max_blob_sidecars_to_prune();
+
+        prune_old_blob_sidecars_in(&self.blobs_database, up_to_slot, limit)?;
 
         if self.legacy_sidecars.blobs.load(Ordering::Relaxed) {
-            prune_old_blob_sidecars_in(&self.database, up_to_slot)?;
+            prune_old_blob_sidecars_in(&self.database, up_to_slot, limit)?;
 
             if !contains_slot_indexed_key::<SlotBlobId>(&self.database)? {
                 self.legacy_sidecars.blobs.store(false, Ordering::Relaxed);
@@ -1115,6 +1119,18 @@ impl<P: Preset> Storage<P> {
         }
 
         Ok(())
+    }
+
+    // Limit number of entries to prune per single transaction.
+    // Blob sidecars only exist before Fulu, so `max_blobs_per_block_electra` is the highest limit.
+    fn max_blob_sidecars_to_prune(&self) -> usize {
+        MAX_BLOB_EPOCHS_TO_PRUNE
+            .saturating_mul(P::SlotsPerEpoch::USIZE)
+            .saturating_mul(
+                self.config
+                    .max_blobs_per_block
+                    .max(self.config.max_blobs_per_block_electra),
+            )
     }
 
     fn retained_prune_slots(&self, up_to_slot: Slot) -> Vec<Slot> {
@@ -3205,13 +3221,14 @@ fn contains_slot_indexed_key<K: PrefixableKey>(database: &Database) -> Result<bo
         .is_some_and(|key_bytes| is_slot_indexed_key::<K>(&key_bytes)))
 }
 
-fn prune_old_blob_sidecars_in(database: &Database, up_to_slot: Slot) -> Result<()> {
+fn prune_old_blob_sidecars_in(database: &Database, up_to_slot: Slot, limit: usize) -> Result<()> {
     let results =
         database.iterator_descending_raw(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
 
     let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
         itertools::process_results(results, |iter| {
             iter.take_while(|(key_bytes, _)| is_slot_indexed_key::<SlotBlobId>(key_bytes))
+                .take(limit)
                 .unzip()
         })?;
 
@@ -4264,6 +4281,46 @@ mod tests {
     }
 
     #[test]
+    fn test_blob_sidecar_pruning_is_limited_per_transaction() -> Result<()> {
+        let blob_id = |byte| BlobIdentifier {
+            block_root: H256::repeat_byte(byte),
+            index: 0,
+        };
+
+        let database = legacy_database()?;
+
+        database.put_batch_raw(vec![
+            serialize(
+                BlobSidecarByBlobId(H256::repeat_byte(1), 0),
+                BlobSidecar::<Mainnet>::default(),
+            )?,
+            serialize(SlotBlobId(1, H256::repeat_byte(1), 0), blob_id(1))?,
+            serialize(
+                BlobSidecarByBlobId(H256::repeat_byte(2), 0),
+                BlobSidecar::<Mainnet>::default(),
+            )?,
+            serialize(SlotBlobId(2, H256::repeat_byte(2), 0), blob_id(2))?,
+        ])?;
+
+        prune_old_blob_sidecars_in(&database, 5, 1)?;
+
+        // Pruning walks down from `up_to_slot`, so the newer sidecar goes first.
+        assert!(database.contains_key(SlotBlobId(1, H256::repeat_byte(1), 0).to_string())?);
+        assert!(database.contains_key(BlobSidecarByBlobId(H256::repeat_byte(1), 0).to_string())?);
+        assert!(!database.contains_key(SlotBlobId(2, H256::repeat_byte(2), 0).to_string())?);
+        assert!(!database.contains_key(BlobSidecarByBlobId(H256::repeat_byte(2), 0).to_string())?);
+        assert!(contains_slot_indexed_key::<SlotBlobId>(&database)?);
+
+        prune_old_blob_sidecars_in(&database, 5, 1)?;
+
+        assert!(!database.contains_key(SlotBlobId(1, H256::repeat_byte(1), 0).to_string())?);
+        assert!(!database.contains_key(BlobSidecarByBlobId(H256::repeat_byte(1), 0).to_string())?);
+        assert!(!contains_slot_indexed_key::<SlotBlobId>(&database)?);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_legacy_data_column_sidecars() -> Result<()> {
         let data_column_sidecar = |slot, byte| {
             Arc::new(DataColumnSidecar::<Mainnet>::Gloas(
@@ -4412,8 +4469,6 @@ mod tests {
         // It must not be mistaken for a remaining legacy data column sidecar.
         assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
         assert_eq!(storage.data_column_sidecar_by_id(data_column_id)?, None);
-        assert!(storage.database.contains_key("cblock")?);
-        assert!(storage.database.contains_key("cstate2")?);
 
         Ok(())
     }

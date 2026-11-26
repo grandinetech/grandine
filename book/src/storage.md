@@ -252,8 +252,9 @@ updates the file and logs `using schema version … for new data`. Check the rel
 [Updating Grandine](./updating.md).
 
 Blob and data column sidecars stored by versions without the `blobs` database stay in `beacon_fork_choice`.
-Grandine serves them from there and prunes them like sidecars in the `blobs` database. See
-[Database compatibility](./updating.md#database-compatibility).
+Grandine serves them from there and prunes them like sidecars in the `blobs` database. Pruning
+them does not shrink `beacon_fork_choice` on disk, so plan free space for an extra retention window
+of sidecars. See [Database compatibility](./updating.md#database-compatibility).
 
 ## Command line options
 
