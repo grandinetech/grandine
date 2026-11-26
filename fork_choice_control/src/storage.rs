@@ -4347,28 +4347,71 @@ mod tests {
                 .is_none()
         );
         assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+        assert!(
+            storage
+                .database
+                .next_key(DataColumnSidecarByColumnId(H256::zero(), 0).to_string())?
+                .is_none_or(|key| !DataColumnSidecarByColumnId::has_prefix(&key)),
+            "all legacy data column sidecars should be deleted from beacon_fork_choice",
+        );
 
         Ok(())
+    }
+
+    // `cblock` and `cstate2` share the `c` prefix with `SlotColumnId`.
+    fn checkpoint_keys() -> Vec<(Vec<u8>, Vec<u8>)> {
+        vec![(b"cblock".to_vec(), vec![]), (b"cstate2".to_vec(), vec![])]
     }
 
     #[test]
     fn test_legacy_sidecar_detection_ignores_checkpoint_keys() -> Result<()> {
         let database = legacy_database()?;
 
-        // `cblock…` and `cstate2…` share the `c` prefix with `SlotColumnId`.
-        database.put_batch_raw(vec![
-            (b"cblock".to_vec(), vec![]),
-            (b"cstate2".to_vec(), vec![]),
-        ])?;
+        database.put_batch_raw(checkpoint_keys())?;
 
         let storage = storage_with_legacy_database(database)?;
 
         assert!(!storage.legacy_sidecars.blobs.load(Ordering::Relaxed));
         assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
 
-        // Pruning must not delete checkpoint keys.
-        storage.prune_old_data_column_sidecars(u64::MAX)?;
+        Ok(())
+    }
 
+    #[test]
+    fn test_legacy_data_column_pruning_with_checkpoint_keys() -> Result<()> {
+        let data_column_sidecar =
+            DataColumnSidecar::<Mainnet>::Gloas(types::gloas::containers::DataColumnSidecar {
+                slot: 1,
+                beacon_block_root: H256::repeat_byte(1),
+                ..Default::default()
+            });
+
+        let data_column_id = DataColumnIdentifier {
+            block_root: H256::repeat_byte(1),
+            index: 0,
+        };
+
+        let database = legacy_database()?;
+
+        database.put_batch_raw(checkpoint_keys())?;
+        database.put_batch_raw(vec![
+            serialize(
+                DataColumnSidecarByColumnId(H256::repeat_byte(1), 0),
+                &data_column_sidecar,
+            )?,
+            serialize(SlotColumnId(1, H256::repeat_byte(1), 0), data_column_id)?,
+        ])?;
+
+        let storage = storage_with_legacy_database(database)?;
+
+        assert!(storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+
+        storage.prune_old_data_column_sidecars(2)?;
+
+        // The key after the pruned `SlotColumnId` is `cblock`.
+        // It must not be mistaken for a remaining legacy data column sidecar.
+        assert!(!storage.legacy_sidecars.data_columns.load(Ordering::Relaxed));
+        assert_eq!(storage.data_column_sidecar_by_id(data_column_id)?, None);
         assert!(storage.database.contains_key("cblock")?);
         assert!(storage.database.contains_key("cstate2")?);
 
