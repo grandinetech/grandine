@@ -140,19 +140,20 @@ Database and directory options of the beacon node. See [Storage and database](./
 | Option | Default | Description | Available in |
 |---|---|---|---|
 | `--store-directory <STORE_DIRECTORY>` | `DATA_DIR/NETWORK/beacon` | Directory for the beacon node databases. | grandine, bn |
+| `--blobs-dir <BLOBS_DIR>` | `--store-directory` | Directory for the blobs database (blob and data column sidecars). The database is stored in its `blobs` subdirectory. | grandine, bn |
 | `--network-dir <NETWORK_DIR>` | `DATA_DIR/NETWORK/network` | Directory for networking files (node key, ENR). | grandine, bn |
 | `--archive-storage` | disabled | Archive mode: store all blocks, blobs, and a state every `--archival-epoch-interval` epochs. Conflicts with `--prune-storage`. | grandine, bn |
 | `--prune-storage` | disabled | Prune mode: keep only a single checkpoint state and block. Conflicts with `--archive-storage` and `--back-sync`. | grandine, bn |
 | `--archival-epoch-interval <ARCHIVAL_EPOCH_INTERVAL>` | `32` | Number of epochs between stored states. Must be greater than 0. | grandine, bn |
 | `--store-payloads` | disabled | Keep execution payloads of finalized blocks in the database. | grandine, bn |
 | `--zstd-compression-level <ZSTD_COMPRESSION_LEVEL>` | `3` | zstd compression level for finalized blocks and execution payloads in the database. Other data is compressed with Snappy. Negative values are allowed; the value must be within the range zstd supports (at most 22). | grandine, bn |
-| `--database-size <DATABASE_SIZE>` | `1 TiB` | Maximum size of the beacon (Eth2) database map. If it fills up, Grandine restarts with a doubled limit. | grandine, bn |
+| `--database-size <DATABASE_SIZE>` | `1 TiB` | Maximum size of each beacon (Eth2) database map, including the blobs database. If it fills up, Grandine restarts with a doubled limit. | grandine, bn |
 | `--eth1-database-size <ETH1_DATABASE_SIZE>` | `16 GiB` | Maximum size of the Eth1 (deposit) database map. | grandine, bn |
 | `--unfinalized-states-in-memory <UNFINALIZED_STATES_IN_MEMORY>` | `128` | Number of unfinalized states to keep in memory. Must be at least 2 epochs of slots (64 on mainnet presets). | grandine, bn |
 | `--max-epochs-to-retain-states-in-cache <MAX_EPOCHS_TO_RETAIN_STATES_IN_CACHE>` | `8` | Maximum number of epochs to keep beacon states in the state cache. | grandine, bn |
 | `--state-cache-lock-timeout <STATE_CACHE_LOCK_TIMEOUT>` | `1500` | State cache lock timeout in milliseconds. | grandine, bn |
 | `--data-availability-window <DATA_AVAILABILITY_WINDOW>` | from chain config | Number of epochs to keep blob and data column sidecars available for peer requests. Overrides `MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS` and `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS`. Intended for testing. Conflicts with `--archive-storage` and `--prune-storage`. | grandine, bn |
-| `--force-reset-beacon-db` | disabled | Delete the local `eth1`, `beacon_fork_choice`, `sync` and `pubkey_cache` databases on startup for a fresh sync. Destructive. | grandine, bn |
+| `--force-reset-beacon-db` | disabled | Delete the local `eth1`, `beacon_fork_choice`, `blobs`, `sync` and `pubkey_cache` databases on startup for a fresh sync. Destructive. | grandine, bn |
 
 ## HTTP API
 
@@ -354,8 +355,8 @@ The tool subcommands and their own arguments are described in
 |---|---|
 | `bn` | Run only the beacon node. |
 | `vc` | Run only the validator client against remote beacon nodes. |
-| `db-info --database <beacon\|sync> [--path DIR]` | Show information about database records. |
-| `db-stats [--path DIR]` | Show `beacon_fork_choice` database element sizes. |
+| `db-info --database <beacon\|blobs\|sync> [--path DIR]` | Show information about database records. |
+| `db-stats [--path DIR] [--blobs-path DIR]` | Show `beacon_fork_choice` and `blobs` database element sizes. |
 | `export --from SLOT --to SLOT [--output-dir DIR]` | Export blocks and states in a slot range to SSZ files. |
 | `replay --from SLOT --to SLOT [--input-dir DIR]` | Replay blocks in a slot range. |
 | `interchange import FILE` / `interchange export FILE` | Import or export an EIP-3076 slashing protection interchange file. |

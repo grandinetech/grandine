@@ -5837,6 +5837,8 @@ where
             .store
             .min_checked_data_availability_epoch(self.store.slot());
         let data_up_to_slot = misc::compute_start_slot_at_epoch::<P>(data_up_to_epoch);
+        let blobs_up_to_epoch = self.store.min_checked_blob_availability_epoch();
+        let blobs_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blobs_up_to_epoch);
         let blocks_up_to_epoch = self.store.min_checked_block_availability_epoch();
         let blocks_up_to_slot = misc::compute_start_slot_at_epoch::<P>(blocks_up_to_epoch);
         let data_phase = self
@@ -5860,18 +5862,20 @@ where
                             error_with_peers!("pruning old data column sidecars from storage failed: {error:?}")
                         }
                     }
-                } else {
-                    debug_with_peers!("pruning old blob sidecars from storage up to slot {data_up_to_slot}…");
+                }
 
-                    match storage.prune_old_blob_sidecars(data_up_to_slot) {
-                        Ok(()) => {
-                            debug_with_peers!(
-                                "pruned old blob sidecars from storage up to slot {data_up_to_slot}"
-                            );
-                        }
-                        Err(error) => {
-                            error_with_peers!("pruning old blob sidecars from storage failed: {error:?}")
-                        }
+                // Blob sidecars stored before PeerDAS activation remain in storage after it.
+                // Prune them in every phase so that they leave storage with their retention period.
+                debug_with_peers!("pruning old blob sidecars from storage up to slot {blobs_up_to_slot}…");
+
+                match storage.prune_old_blob_sidecars(blobs_up_to_slot) {
+                    Ok(()) => {
+                        debug_with_peers!(
+                            "pruned old blob sidecars from storage up to slot {blobs_up_to_slot}"
+                        );
+                    }
+                    Err(error) => {
+                        error_with_peers!("pruning old blob sidecars from storage failed: {error:?}")
                     }
                 }
 

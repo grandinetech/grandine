@@ -366,14 +366,21 @@ async fn build_local_node<P: Preset>(
         storage_config.beacon_fork_choice_database(
             None,
             DatabaseMode::ReadWrite,
-            Some(restart_tx),
+            Some(restart_tx.clone()),
         )?
+    };
+
+    let blobs_database = if in_memory {
+        Database::in_memory()
+    } else {
+        storage_config.blobs_database(None, DatabaseMode::ReadWrite, Some(restart_tx))?
     };
 
     let storage = Arc::new(Storage::new(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
         storage_database,
+        blobs_database,
         storage_mode,
         store_execution_payloads,
         zstd_compression_level,
@@ -1284,6 +1291,11 @@ impl Context {
                 Err(error) => warn!("failed to remove beacon_fork_choice database: {error:?}"),
             }
 
+            match remove_database_dir(storage_config.blobs_database_path().as_path()) {
+                Ok(()) => info!("successfully removed blobs database"),
+                Err(error) => warn!("failed to remove blobs database: {error:?}"),
+            }
+
             match remove_database_dir(storage_config.pubkey_cache_database_path().as_path()) {
                 Ok(()) => info!("successfully removed pubkey_cache database"),
                 Err(error) => warn!("failed to remove pubkey_cache database: {error:?}"),
@@ -2076,7 +2088,9 @@ where
         GrandineCommand::DbInfo { database, path } => {
             db_info::print(storage_config, database, path)?
         }
-        GrandineCommand::DbStats { path } => db_stats::print::<P>(storage_config, path)?,
+        GrandineCommand::DbStats { path, blobs_path } => {
+            db_stats::print::<P>(storage_config, path, blobs_path)?
+        }
         GrandineCommand::Export {
             from,
             to,
@@ -2085,10 +2099,14 @@ where
             let storage_database =
                 storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadOnly, None)?;
 
+            // `export_state_and_blocks` does not read blob or data column sidecars.
+            let blobs_database = Database::in_memory();
+
             let storage = Storage::new(
                 chain_config,
                 pubkey_cache.clone_arc(),
                 storage_database,
+                blobs_database,
                 *storage_mode,
                 *store_execution_payloads,
                 *zstd_compression_level,

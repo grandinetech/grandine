@@ -137,6 +137,21 @@ Upgrades within the same schema series need no migration and no resync. Grandine
 by older versions and writes new data in the current format. The slashing protection database
 (`validator/slashing_protection.sqlite`) is migrated forward automatically on start.
 
+Grandine stores blob and data column sidecars in a separate `blobs` database. Sidecars
+stored by earlier versions stay in `beacon_fork_choice`: Grandine logs
+`found sidecars stored by an earlier version in beacon_fork_choice database` on start, keeps
+serving them from there and prunes them when they leave the retention window. Once none are left,
+it logs `pruned all … sidecars stored in beacon_fork_choice database`. Archive nodes do not prune
+sidecars, so they keep serving older sidecars from `beacon_fork_choice`.
+
+Pruning the old sidecars does not make `beacon_fork_choice` smaller on disk. The freed space stays
+inside that database and is reused only by its own later writes, while the `blobs` database grows
+to hold a full retention window of new sidecars. Keep free disk space for about one extra retention
+window of sidecars, which is much larger on a node that custodies all data columns. The space stays
+in use after the `pruned all …` message. To get it back, resync with `--force-reset-beacon-db` and
+`--checkpoint-sync-url`. See
+[Checkpoint sync](./checkpoint_sync.md#re-sync-from-a-new-checkpoint).
+
 If a release ever needs a resync or a manual migration, its release notes say so.
 
 ## Downgrading
@@ -172,6 +187,11 @@ version wrote. Plan for it:
    `--force-reset-beacon-db` deletes the `eth1_cache`, `beacon_fork_choice`, `pubkey_cache` and `sync`
    databases on startup. It does not touch the validator directory or the slashing protection
    database. Remove the option after this start, or Grandine resets the database on every start.
+
+   Versions that store blob and data column sidecars in a separate `blobs` database also delete it.
+   An older version that predates it does not, and never reads or prunes it. When you downgrade to
+   such a version, delete the `blobs` directory by hand while Grandine is stopped: `beacon/blobs`,
+   or the `blobs` directory inside `--blobs-dir`.
 
 4. **If the slashing protection database cannot be opened** by the older version, move it aside and
    import the export from step 1 before you start validating. The slashing protection database has

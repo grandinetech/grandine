@@ -619,6 +619,7 @@ mod tests {
             Arc::new(P::default_config()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,

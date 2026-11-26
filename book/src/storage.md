@@ -30,7 +30,8 @@ network:
 └── mainnet/                     # one directory per network
     ├── meta.json                # database schema version
     ├── beacon/                  # --store-directory
-    │   ├── beacon_fork_choice/  # blocks, states, blobs, data columns
+    │   ├── beacon_fork_choice/  # blocks, states
+    │   ├── blobs/               # blob and data column sidecars (moved by --blobs-dir)
     │   ├── pubkey_cache/        # decompressed validator public keys
     │   ├── sync/                # back-sync progress
     │   ├── eth1_cache/          # deposit cache (custom genesis only)
@@ -58,9 +59,15 @@ grandine --network mainnet \
   ...
 ```
 
-`beacon/` can be deleted to re-sync. `network/key` holds the node's peer ID; deleting it gives the
-node a new identity. `validator/` holds the slashing protection database and must never be
-deleted while you run validators. See [Validator definitions](./validator_definitions.md) and
+Blob and data column sidecars are stored in a separate `blobs` database. They are the largest part
+of the data on a pruning node. By default the database is in `beacon/blobs` and moves with
+`--store-directory`. `--blobs-dir` puts it on another disk: Grandine creates the `blobs` database
+directory inside the given directory, so `--blobs-dir /mnt/hdd` stores sidecars in
+`/mnt/hdd/blobs`.
+
+`beacon/` can be deleted to re-sync. With `--blobs-dir`, delete its `blobs` directory as well.
+`network/key` holds the node's peer ID; deleting it gives the node a new identity. `validator/`
+holds the slashing protection database and must never be deleted while you run validators. See [Validator definitions](./validator_definitions.md) and
 [Slashing protection](./slashing_protection.md) for what lives there.
 
 Grandine creates its libmdbx database files with permissions `0600`. Run Grandine as a dedicated user that owns
@@ -122,7 +129,7 @@ libmdbx needs an upper limit for the size of each database file. The file grows 
 256 MiB as data is added, up to the limit. The limit does not reserve disk space.
 
 - `--database-size` (default: 1024 GiB) is the limit for each beacon database
-  (`beacon_fork_choice`, `pubkey_cache`, `sync`).
+  (`beacon_fork_choice`, `blobs`, `pubkey_cache`, `sync`).
 - `--eth1-database-size` (default: 16 GiB) is the limit for the deposit cache.
 
 Sizes accept units such as `512GiB` or `2TiB`. The startup log shows the limits in use
@@ -160,7 +167,9 @@ once, and these subcommands only read it. While Grandine is writing, a subcomman
 before it starts. A long `db-stats` run keeps Grandine from reusing freed database pages until it
 finishes, so the database files can grow a little in the meantime.
 
-`db-stats` lists every record type in `beacon_fork_choice` with its count and size:
+`db-stats` lists every record type in `beacon_fork_choice` and in the `blobs` database with its
+count and size. Blob and data column sidecars listed under `beacon_fork_choice` were stored by a
+version of Grandine that did not yet have a separate blobs database:
 
 ```bash
 grandine --network mainnet db-stats
@@ -170,17 +179,21 @@ grandine --network mainnet db-stats
 …: 1234 entries, key_size: …, value_size: …, total_size: …
 ```
 
-`db-info` prints information about the records in a database. `--database` is `beacon` or `sync`:
+`db-info` prints information about the records in a database. `--database` is `beacon`, `blobs`
+or `sync`:
 
 ```bash
 grandine --network mainnet db-info --database beacon
+grandine --network mainnet db-info --database blobs
 grandine --network mainnet db-info --database sync
 ```
 
-Both accept `--path` to read a database at a custom location:
+Both accept `--path` to read a database at a custom location. For `db-stats`, `--path` is the
+`beacon_fork_choice` database and `--blobs-path` is the blobs database:
 
 ```bash
 grandine --network hoodi db-stats --path ~/.grandine/hoodi/beacon/beacon_fork_choice
+grandine --network hoodi db-stats --blobs-path /mnt/hdd/blobs
 ```
 
 See [Subcommands and tools](./subcommands.md) for the other subcommands.
@@ -194,7 +207,7 @@ What to back up depends on what you would lose.
 | `validator/` and `secrets/` | **Yes**, regularly, and before every migration. | They hold the slashing protection database, `validators.yml` and keystores imported through the Keymanager API. Export slashing protection with `grandine interchange export` as well. See [Slashing protection](./slashing_protection.md). |
 | Validator keystores and passwords | **Yes**, offline. | You need them to recover the validators. See [Managing validator keys](./key_management.md). |
 | `network/key` | Optional. | Keeps the same peer ID after a restore. |
-| `beacon/` | Optional. | A checkpoint sync rebuilds it in minutes. Back it up only to avoid a long back-sync or archive rebuild. |
+| `beacon/` | Optional. | A checkpoint sync rebuilds it in minutes. Back it up only to avoid a long back-sync or archive rebuild. With `--blobs-dir`, back up its `blobs` directory together with `beacon/`. |
 
 To back up the beacon database:
 
@@ -226,9 +239,10 @@ since then.
 
 ### Resetting the database
 
-To start over, either delete the `beacon` directory while Grandine is stopped, or start once with
-`--force-reset-beacon-db`. That option deletes `beacon_fork_choice`, `eth1_cache`, `pubkey_cache`
-and `sync`, but not the validator data. Combine it with `--checkpoint-sync-url`. See
+To start over, either delete the `beacon` directory (and, with `--blobs-dir`, its `blobs`
+directory) while Grandine is stopped, or start once with `--force-reset-beacon-db`. That option
+deletes `beacon_fork_choice`, `blobs`, `eth1_cache`, `pubkey_cache` and `sync`, but not the
+validator data. Combine it with `--checkpoint-sync-url`. See
 [Checkpoint sync](./checkpoint_sync.md#re-sync-from-a-new-checkpoint).
 
 ## Upgrades and schema versions
@@ -237,6 +251,11 @@ and `sync`, but not the validator data. Combine it with `--checkpoint-sync-url`.
 updates the file and logs `using schema version … for new data`. Check the release notes before you downgrade, and see
 [Updating Grandine](./updating.md).
 
+Blob and data column sidecars stored by versions without the `blobs` database stay in `beacon_fork_choice`.
+Grandine serves them from there and prunes them like sidecars in the `blobs` database. Pruning
+them does not shrink `beacon_fork_choice` on disk, so plan free space for an extra retention window
+of sidecars. See [Database compatibility](./updating.md#database-compatibility).
+
 ## Command line options
 
 See [Command line reference](./cli_options.md) for the full list.
@@ -244,13 +263,15 @@ See [Command line reference](./cli_options.md) for the full list.
 - `--data-dir` (default: `$HOME/.grandine`): parent directory for all data. The network name is
   added below it.
 - `--store-directory` (default: `{data_dir}/{network}/beacon`): directory of the beacon databases.
+- `--blobs-dir` (default: `--store-directory`): parent directory of the `blobs` database (blob and
+  data column sidecars).
 - `--network-dir` (default: `{data_dir}/{network}/network`): directory of the network key and ENR.
 - `--prune-storage` (default: off): keep only the latest checkpoint block and state.
 - `--archive-storage` (default: off): keep all history.
 - `--archival-epoch-interval` (default: `32`): epochs between stored states.
 - `--store-payloads` (default: off): store execution payloads of finalized blocks.
 - `--zstd-compression-level` (default: `3`): zstd level for blocks and payloads.
-- `--database-size` (default: 1024 GiB): size limit of each beacon database.
+- `--database-size` (default: 1024 GiB): size limit of each beacon database, including `blobs`.
 - `--eth1-database-size` (default: 16 GiB): size limit of the deposit cache database.
 - `--data-availability-window` (default: network setting): epochs to keep sidecars. For testing.
 - `--unfinalized-states-in-memory` (default: `128`): number of the latest unfinalized slots that

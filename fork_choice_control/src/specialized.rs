@@ -107,6 +107,7 @@ where
         anchor_state: Arc<BeaconState<P>>,
         tick: Tick,
         database: Database,
+        blobs_database: Database,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
@@ -119,6 +120,7 @@ where
                 chain_config.clone_arc(),
                 pubkey_cache.clone_arc(),
                 database,
+                blobs_database,
                 StorageMode::Standard {
                     custom_data_availability_window: None,
                 },
@@ -157,6 +159,7 @@ where
 }
 
 impl<P: Preset> AdHocBenchController<P> {
+    #[expect(clippy::too_many_arguments)]
     pub fn with_p2p_tx(
         chain_config: Arc<ChainConfig>,
         pubkey_cache: Arc<PubkeyCache>,
@@ -164,6 +167,7 @@ impl<P: Preset> AdHocBenchController<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         database: Database,
+        blobs_database: Database,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
@@ -176,6 +180,7 @@ impl<P: Preset> AdHocBenchController<P> {
             anchor_state,
             tick,
             database,
+            blobs_database,
             NullExecutionEngine,
             None,
             p2p_tx,
@@ -204,6 +209,7 @@ impl<P: Preset> BenchController<P> {
             anchor_block,
             anchor_state,
             tick,
+            Database::in_memory(),
             Database::in_memory(),
             NullExecutionEngine,
             None,
@@ -261,6 +267,7 @@ impl<P: Preset> TestController<P> {
             anchor_block,
             anchor_state,
             tick,
+            Database::in_memory(),
             Database::in_memory(),
             execution_engine,
             None,

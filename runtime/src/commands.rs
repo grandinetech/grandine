@@ -8,6 +8,7 @@ use types::phase0::primitives::Slot;
 #[strum(serialize_all = "snake_case")]
 pub enum AppDatabase {
     Beacon,
+    Blobs,
     Sync,
 }
 
@@ -26,7 +27,7 @@ pub enum GrandineCommand {
         path: Option<PathBuf>,
     },
 
-    /// Show `beacon_fork_choice` database element sizes
+    /// Show `beacon_fork_choice` and `blobs` database element sizes
     /// (example: grandine db-stats)
     DbStats {
         /// Path to a custom directory where `beacon_fork_choice` database files are stored
@@ -34,6 +35,10 @@ pub enum GrandineCommand {
         /// (example: grandine --network holesky db-stats -p ~/.grandine/holesky/beacon/beacon_fork_choice)
         #[clap(short, long)]
         path: Option<PathBuf>,
+        /// Path to a custom directory where `blobs` database files are stored
+        /// (example: grandine --network holesky db-stats --blobs-path ~/.grandine/holesky/beacon/blobs)
+        #[clap(long)]
+        blobs_path: Option<PathBuf>,
     },
 
     /// Export blocks and state to ssz files within slot range for debugging

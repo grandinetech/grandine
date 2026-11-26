@@ -8,8 +8,8 @@ validator keys. Subcommands select a different mode or run a one-off tool and ex
 | `bn` | Run only the beacon node, without a validator client. |
 | `vc` | Run only the validator client against one or more remote beacon nodes. |
 | `interchange import` / `interchange export` | Import or export slashing protection data (EIP-3076). |
-| `db-info` | Show information about the records in the beacon or sync database. |
-| `db-stats` | Show the size of each kind of entry in the beacon database. |
+| `db-info` | Show information about the records in the beacon, blobs or sync database. |
+| `db-stats` | Show the size of each kind of entry in the beacon and blobs databases. |
 | `export` | Export finalized blocks and states in a slot range as SSZ files, for debugging. |
 | `replay` | Replay exported blocks and check the result against an exported state, for debugging. |
 | `help` | Print help for Grandine or for a subcommand. |
@@ -130,15 +130,16 @@ Prints information about the records in a beacon node database.
 
 ```bash
 grandine --network hoodi db-info --database beacon
+grandine --network hoodi db-info --database blobs
 grandine --network hoodi db-info --database sync
 ```
 
 Options:
 
-- `-d`, `--database`: required. `beacon` for the `beacon_fork_choice` database or `sync` for the
-  sync database.
+- `-d`, `--database`: required. `beacon` for the `beacon_fork_choice` database, `blobs` for the
+  blob and data column sidecar database, or `sync` for the sync database.
 - `-p`, `--path`: a custom directory that holds the database files. By default the database in the
-  store directory is used.
+  store directory is used, or the `blobs` directory inside `--blobs-dir` for `blobs`.
 
 ```bash
 grandine --network hoodi db-info -d sync -p ~/.grandine/hoodi/beacon/sync
@@ -147,8 +148,9 @@ grandine --network hoodi db-info -d sync -p ~/.grandine/hoodi/beacon/sync
 ## `db-stats`: database entry sizes
 
 Prints the number of entries and the total key and value sizes of each kind of entry in the
-`beacon_fork_choice` database: blocks, states, blob and data column sidecars, and the indexes. Use
-it to see what takes up disk space. See [Storage and database](./storage.md).
+`beacon_fork_choice` database (blocks, states and the indexes) and in the `blobs` database (blob
+and data column sidecars and their indexes). The default blobs database is skipped if it does not
+exist yet. A `--blobs-path` that does not exist is an error. Use it to see what takes up disk space. See [Storage and database](./storage.md).
 
 ```bash
 grandine --network hoodi db-stats
@@ -158,6 +160,8 @@ grandine --network hoodi db-stats -p ~/.grandine/hoodi/beacon/beacon_fork_choice
 Options:
 
 - `-p`, `--path`: a custom directory that holds the `beacon_fork_choice` database files.
+- `--blobs-path`: a custom directory that holds the `blobs` database files. Default: the `blobs`
+  directory inside `--blobs-dir`.
 
 ## `export`: dump blocks and states
 
@@ -180,7 +184,7 @@ nearest stored state. Only finalized blocks are exported, and they must be store
 execution payloads: the node must run with `--store-payloads`, otherwise the export fails with
 `block at slot N is stored blinded and cannot be exported`.
 
-The `beacon_fork_choice` database is only read. `export`, `db-info` and `db-stats` can run while
+Only the `beacon_fork_choice` database is read. `export`, `db-info` and `db-stats` can run while
 Grandine is running: the database supports access from several processes at once. While Grandine is
 writing, a subcommand may wait a moment before it starts.
 
@@ -207,4 +211,5 @@ The options of each tool are listed in its section. Grandine's general options a
 - `--network`: default `mainnet`. The network whose data directory and configuration to use.
 - `--data-dir`: default `$HOME/.grandine`. Parent directory of the per-network data directories.
 - `--store-directory`: default `{data-dir}/{network}/beacon`. Where the beacon node databases live.
+- `--blobs-dir`: default `--store-directory`. The blobs database lives in its `blobs` subdirectory.
 - `--slashing-protection-history-limit`: default `256`. Epochs of slashing protection history to keep.

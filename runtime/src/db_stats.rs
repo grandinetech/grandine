@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use bytesize::ByteSize;
-use database::{DatabaseMode, PrefixableKey as _};
+use database::{Database, DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
     EnvelopeByBlockRoot, EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FastConfirmedRoot,
     FinalizedBlockByRoot, FinalizedValidatorCount, FinalizedValidators, SlotBlobId,
     SlotByStateRoot, SlotColumnId, StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
+use fs_err::PathExt as _;
 use tracing::{info, warn};
 use types::preset::Preset;
 
@@ -57,11 +58,41 @@ impl EntriesInfo {
 pub fn print<P: Preset>(
     storage_config: &StorageConfig,
     custom_path: Option<PathBuf>,
+    custom_blobs_path: Option<PathBuf>,
 ) -> Result<()> {
     let storage_database =
         storage_config.beacon_fork_choice_database(custom_path, DatabaseMode::ReadOnly, None)?;
 
-    info!("collecting beacon_fork_choice database stats..");
+    // Open the blobs database before the long `beacon_fork_choice` scan
+    // so that a nonexistent `--blobs-path` is reported immediately.
+    // The default blobs database may not have been created yet, so it is skipped if missing.
+    let blobs_database = if custom_blobs_path.is_some()
+        || storage_config.blobs_database_path().fs_err_try_exists()?
+    {
+        Some(storage_config.blobs_database(custom_blobs_path, DatabaseMode::ReadOnly, None)?)
+    } else {
+        info!(
+            "skipping blobs database stats: path does not exist: {}",
+            storage_config.blobs_database_path().display(),
+        );
+
+        None
+    };
+
+    print_database_stats::<P>("beacon_fork_choice", &storage_database)?;
+
+    if let Some(blobs_database) = blobs_database {
+        print_database_stats::<P>("blobs", &blobs_database)?;
+    }
+
+    Ok(())
+}
+
+// Both databases are scanned for every key family.
+// Blob and data column sidecars found in `beacon_fork_choice` were stored
+// before sidecars were moved to the separate blobs database.
+fn print_database_stats<P: Preset>(title: &str, storage_database: &Database) -> Result<()> {
+    info!("collecting {title} database stats..");
 
     let mut total_size: usize = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
@@ -154,7 +185,7 @@ pub fn print<P: Preset>(
     }
 
     info!(
-        "total size: {}",
+        "{title} total size: {}",
         ByteSize(total_size.try_into()?).display().si()
     );
 
