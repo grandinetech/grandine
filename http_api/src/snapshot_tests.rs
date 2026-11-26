@@ -46,6 +46,13 @@ fn minimal_minimal_4_epochs(case: Case) {
     Context::minimal_minimal_4_epochs().run_case(case)
 }
 
+#[test_resources(
+    "grandine-snapshot-tests/minimal/minimal/quick-start/12-epochs-with-empty-slots/*"
+)]
+fn minimal_minimal_12_epochs_with_empty_slots(case: Case) {
+    Context::minimal_minimal_12_epochs_with_empty_slots().run_case(case)
+}
+
 #[test_resources("grandine-snapshot-tests/minimal/rapid-upgrade/quick-start/none/*")]
 fn minimal_rapid_upgrade_none(case: Case) {
     Context::minimal_rapid_upgrade_none().run_case(case)

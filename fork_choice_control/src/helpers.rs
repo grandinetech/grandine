@@ -20,7 +20,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use helper_functions::{misc, signing::SignForSingleFork as _};
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
-use ssz::BitVector;
+use ssz::{BitVector, SszHash as _};
 use std_ext::ArcExt as _;
 use tokio::sync::broadcast::Receiver;
 use typenum::Unsigned as _;
@@ -1262,6 +1262,37 @@ impl<P: Preset> Context<P> {
         self.controller().stored_blocks_by_range(range)
     }
 
+    // Checks that the state in `slot` can be found by its state root,
+    // like `GET /eth/v2/debug/beacon/states/{state_id}` does.
+    pub fn assert_state_found_by_state_root(&self, slot: Slot) {
+        let controller = self.controller();
+
+        let state_root = controller
+            .state_at_slot_blocking(slot)
+            .expect("no storage errors should occur")
+            .expect("state should be found by slot")
+            .value
+            .hash_tree_root();
+
+        let state = controller
+            .state_by_state_root_blocking(state_root)
+            .expect("no storage errors should occur")
+            .unwrap_or_else(|| panic!("state in slot {slot} should be found by its state root"))
+            .value;
+
+        assert_eq!(state.slot(), slot);
+        assert_eq!(state.hash_tree_root(), state_root);
+
+        // Most `/eth/v1/beacon/states/{state_id}/*` endpoints look up only the slot.
+        let state_slot = controller
+            .slot_by_state_root(state_root)
+            .expect("no storage errors should occur")
+            .unwrap_or_else(|| panic!("slot {slot} should be found by its state root"))
+            .value;
+
+        assert_eq!(state_slot, slot);
+    }
+
     pub fn assert_payload_envelope_needed(&mut self, block: &SignedBeaconBlock<P>) {
         assert!(matches!(
             self.next_p2p_message(),
@@ -1622,7 +1653,7 @@ impl<P: Preset> Context<P> {
                 .state_at_slot_blocking(head.slot())
                 .map(|state| state.map(|state| state.status)),
             controller
-                .state_by_state_root(head_state_root)
+                .state_by_state_root_blocking(head_state_root)
                 .map(|state| state.map(|state| state.status)),
         ];
 
