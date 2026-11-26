@@ -1823,9 +1823,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
         }
 
-        if let Err(error) = beacon_nodes
-            .publish_singular_attestations(own_singular_attestations)
-            .await
+        // PQ attestations are published one at a time after they are signed.
+        if slot_head.phase() != Phase::Pq
+            && let Err(error) = beacon_nodes
+                .publish_singular_attestations(own_singular_attestations)
+                .await
         {
             warn_with_peers!("failed to publish attestations: {error:?}");
         }
@@ -2849,7 +2851,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         if phase == Phase::Pq {
             let own_attestations = match self
-                .own_pq_singular_attestations(slot_head, own_members, &attestation_data)
+                .own_pq_singular_attestations(
+                    slot_head,
+                    own_members,
+                    &attestation_data,
+                    beacon_nodes,
+                )
                 .await
             {
                 Ok(own_attestations) => own_attestations,

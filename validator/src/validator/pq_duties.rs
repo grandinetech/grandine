@@ -61,6 +61,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         slot_head: &SlotHead<P>,
         own_members: &[BeaconCommitteeMember],
         attestation_data: &HashMap<CommitteeIndex, AttestationData>,
+        beacon_nodes: &BeaconNodes<P, W>,
     ) -> Result<Vec<OwnAttestation<P>>> {
         // From Electra on a single request covers every member.
         let Some(data) = attestation_data.get(&0).copied() else {
@@ -101,24 +102,27 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .filter_map(|(member, permitted)| permitted.map(|_| member))
             .collect::<Vec<_>>();
 
-        let signatures = self
-            .signer
-            .sign_pq(
-                members
-                    .iter()
-                    .map(|member| (member.public_key, leaf_index, signing_root))
-                    .collect(),
-                &self.slashing_protector,
-            )
-            .await?;
+        // Each attestation is published as soon as it is signed rather than after the slowest.
+        let (signed_tx, mut signed_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        Ok(members
-            .into_iter()
-            .zip(signatures)
-            .filter_map(|(member, signature)| {
-                let signature = signature?;
+        let signing = self.signer.sign_pq_streaming(
+            members
+                .iter()
+                .map(|member| (member.public_key, leaf_index, signing_root))
+                .collect(),
+            &self.slashing_protector,
+            move |index, signature| {
+                signed_tx.send((index, signature.clone())).ok();
+            },
+        );
 
-                Some(OwnAttestation {
+        let publishing = async {
+            let mut own_attestations = vec![];
+
+            while let Some((index, signature)) = signed_rx.recv().await {
+                let member = members[index];
+
+                let own_attestation = OwnAttestation {
                     validator_index: member.validator_index,
                     attestation: Attestation::PqSingle(PqSingleAttestation {
                         committee_index: member.committee_index,
@@ -128,9 +132,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }),
                     // Only BLS attestations carry this signature.
                     signature: Signature::default(),
-                })
-            })
-            .collect())
+                };
+
+                if let Err(error) = beacon_nodes
+                    .publish_singular_attestations(core::slice::from_ref(&own_attestation))
+                    .await
+                {
+                    warn_with_peers!("failed to publish PQ attestation: {error:?}");
+                }
+
+                own_attestations.push(own_attestation);
+            }
+
+            own_attestations
+        };
+
+        let (signed, own_attestations) = tokio::join!(signing, publishing);
+
+        signed?;
+
+        Ok(own_attestations)
     }
 
     /// Proposes with the VRF proof of the slot as the RANDAO reveal, signs the block at the
@@ -296,32 +317,35 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         );
         let leaf_index = pq::compute_xmss_leaf_index(data.slot, LEAF_OFFSET_PTC_ATTESTER)?;
 
-        let signatures = self
-            .signer
-            .sign_pq(
-                own_members
-                    .iter()
-                    .map(|member| (member.public_key, leaf_index, signing_root))
-                    .collect(),
-                &self.slashing_protector,
-            )
-            .await?;
+        // Each vote is published as soon as it is signed rather than after the slowest.
+        let (signed_tx, mut signed_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let messages = own_members
-            .iter()
-            .zip(signatures)
-            .filter_map(|(member, signature)| {
-                Some(Arc::new(PqPayloadAttestationMessage {
-                    validator_index: member.validator_index,
+        let signing = self.signer.sign_pq_streaming(
+            own_members
+                .iter()
+                .map(|member| (member.public_key, leaf_index, signing_root))
+                .collect(),
+            &self.slashing_protector,
+            move |index, signature| {
+                signed_tx.send((index, signature.clone())).ok();
+            },
+        );
+
+        let publishing = async {
+            while let Some((index, signature)) = signed_rx.recv().await {
+                let message = Arc::new(PqPayloadAttestationMessage {
+                    validator_index: own_members[index].validator_index,
                     data,
-                    signature: signature?,
-                }))
-            })
-            .collect::<Vec<_>>();
+                    signature,
+                });
 
-        local.publish_pq_payload_attestations(&messages);
+                local.publish_pq_payload_attestations(&[message]);
+            }
+        };
 
-        Ok(())
+        let (signed, ()) = tokio::join!(signing, publishing);
+
+        signed.map(|_| ())
     }
 
     /// [`get_signed_proposer_preferences`] at the preferences leaf of the proposal slot.

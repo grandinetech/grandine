@@ -26,7 +26,10 @@ use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use rayon::{
     ThreadPoolBuilder,
-    iter::{IntoParallelIterator as _, IntoParallelRefIterator as _, ParallelIterator as _},
+    iter::{
+        IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
+        ParallelIterator as _,
+    },
 };
 use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
@@ -427,6 +430,16 @@ impl Signer {
         requests: Vec<(PublicKeyBytes, u64, H256)>,
         slashing_protector: &Mutex<SlashingProtector>,
     ) -> Result<Vec<Option<XmssSignature>>> {
+        self.sign_pq_streaming(requests, slashing_protector, |_, _| {})
+            .await
+    }
+
+    pub async fn sign_pq_streaming(
+        &self,
+        requests: Vec<(PublicKeyBytes, u64, H256)>,
+        slashing_protector: &Mutex<SlashingProtector>,
+        on_signed: impl Fn(usize, &XmssSignature) + Send + Sync + 'static,
+    ) -> Result<Vec<Option<XmssSignature>>> {
         let reservations = slashing_protector
             .lock()
             .await
@@ -458,15 +471,21 @@ impl Signer {
         tokio::task::spawn_blocking(move || {
             to_sign
                 .into_par_iter()
-                .map(|request| {
-                    request
+                .enumerate()
+                .map(|(index, request)| {
+                    let signature = request
                         .map(|(pq_key, leaf_index, signing_root)| {
                             pq_key
                                 .xmss()
                                 .sign(signing_root.as_fixed_bytes(), leaf_index)
                         })
-                        .transpose()
-                        .map_err(Into::into)
+                        .transpose()?;
+
+                    if let Some(signature) = &signature {
+                        on_signed(index, signature);
+                    }
+
+                    Ok(signature)
                 })
                 .collect()
         })
