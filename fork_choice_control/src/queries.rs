@@ -1845,6 +1845,18 @@ where
     }
 
     #[must_use]
+    pub fn head_before_or_at(&self, slot: Slot) -> Option<ChainLink<P>> {
+        let store = self.store_snapshot();
+        let head = store.head();
+
+        if head.slot() <= slot {
+            return Some(head.clone());
+        }
+
+        store.chain_link_before_or_at(slot).cloned()
+    }
+
+    #[must_use]
     pub fn head_with_payload_status(&self) -> (ChainLink<P>, ExecutionPayloadStatus) {
         let store = self.store_snapshot();
         let (head, payload_status) = store.head_with_payload_status();

@@ -1249,7 +1249,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             bail!("the built-in beacon node does not serve duties");
         };
 
-        let head = controller.head().value;
+        let Some(head) = controller.head_before_or_at(slot) else {
+            bail!("fork choice has no block at or before slot {slot}");
+        };
 
         let head_slot = head.slot();
         let head_epoch = misc::compute_epoch_at_slot::<P>(head_slot);
