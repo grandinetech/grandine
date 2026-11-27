@@ -989,30 +989,29 @@ fn onboard_builders<P: Preset>(
     // Copied out because the loop below mutates `state`.
     let deposits = state.pending_deposits().iter().copied().collect::<Vec<_>>();
 
-    // Deposits for existing validators are never onboarded and never have their
-    // signature checked. Answered here rather than in the loop below, which would
-    // otherwise have to clone `validators.pubkeys()` along with its index map.
     let is_for_validator = deposits
         .iter()
         .map(|deposit| state.validators.pubkeys().contains(&deposit.pubkey))
         .collect::<Vec<_>>();
 
-    // Only a deposit for a pubkey that some builder deposit in the queue claims is
-    // ever signature checked, either to onboard that builder or to decide whether a
-    // valid deposit for a new validator with the same pubkey is queued ahead of it.
+    let is_builder_deposit = deposits
+        .iter()
+        .map(|deposit| predicates::is_builder_withdrawal_credential(deposit.withdrawal_credentials))
+        .collect::<Vec<_>>();
+
     let builder_pubkeys = deposits
         .iter()
-        .zip(&is_for_validator)
-        .filter(|(deposit, is_for_validator)| {
-            !**is_for_validator
-                && predicates::is_builder_withdrawal_credential(deposit.withdrawal_credentials)
-        })
+        .zip(&is_builder_deposit)
+        .filter(|(_, is_builder_deposit)| **is_builder_deposit)
         .map(|(deposit, _)| deposit.pubkey)
         .collect::<HashSet<_>>();
 
+    // Builder deposits are checked to onboard builders. Other deposits are checked only
+    // when they can make an invalid builder deposit for the same pubkey stay queued.
     let checked = (0..deposits.len())
         .filter(|index| {
-            !is_for_validator[*index] && builder_pubkeys.contains(&deposits[*index].pubkey)
+            builder_pubkeys.contains(&deposits[*index].pubkey)
+                && (is_builder_deposit[*index] || !is_for_validator[*index])
         })
         .collect::<Vec<_>>();
 
@@ -1035,8 +1034,7 @@ fn onboard_builders<P: Preset>(
 
     // The pubkeys that the spec's `is_pending_validator` would find in `pending_deposits`.
     // A set, because rescanning the queue for every builder deposit is quadratic.
-    // Pubkeys already in `validators` are left out: a builder deposit for one of those
-    // never reaches the check below.
+    // Pubkeys already in `validators` may be left out: `is_for_validator` covers them.
     let mut pending_validator_pubkeys = HashSet::new();
 
     for (index, deposit) in deposits.iter().enumerate() {
@@ -1048,17 +1046,7 @@ fn onboard_builders<P: Preset>(
             ..
         } = *deposit;
 
-        if let Some(builder_index) = builder_indices.get(&pubkey) {
-            increase_balance(builder_balance(state, *builder_index)?, amount)?;
-            continue;
-        }
-
-        if is_for_validator[index] {
-            pending_deposits.push(*deposit);
-            continue;
-        }
-
-        if !predicates::is_builder_withdrawal_credential(withdrawal_credentials) {
+        if !is_builder_deposit[index] {
             if signature_is_valid[index] {
                 pending_validator_pubkeys.insert(pubkey);
             }
@@ -1067,14 +1055,17 @@ fn onboard_builders<P: Preset>(
             continue;
         }
 
-        // A valid deposit for a new validator with this pubkey is queued ahead of this
-        // one, so this one is applied to that validator later instead.
-        if pending_validator_pubkeys.contains(&pubkey) {
-            pending_deposits.push(*deposit);
+        if let Some(builder_index) = builder_indices.get(&pubkey) {
+            increase_balance(builder_balance(state, *builder_index)?, amount)?;
             continue;
         }
 
         if !signature_is_valid[index] {
+            // Kept as a top-up for a validator with this pubkey, if there is one.
+            if is_for_validator[index] || pending_validator_pubkeys.contains(&pubkey) {
+                pending_deposits.push(*deposit);
+            }
+
             continue;
         }
 
