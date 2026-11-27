@@ -316,6 +316,9 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
 
         let singular_attestations = pool.singular_attestations(key).await;
         let aggregates = pool.aggregates(key).await;
+
+        pool.add_data_root_to_key_entry(key).await;
+
         let mut aggregates = aggregates.lock().await;
 
         if !is_singular || aggregates.is_empty() {
@@ -348,8 +351,6 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                     .insert(Arc::new(attestation));
             }
         }
-
-        pool.add_data_root_to_key_entry(key).await;
 
         drop(wait_group);
 

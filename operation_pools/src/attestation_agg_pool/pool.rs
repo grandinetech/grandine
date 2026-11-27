@@ -225,14 +225,17 @@ impl<P: Preset> Pool<P> {
         epoch: Epoch,
         committee_index: CommitteeIndex,
     ) -> Option<PoolAttestation<P>> {
-        self.aggregate_attestations_by_epoch(epoch)
+        let key = self
+            .data_root_to_key_map
+            .read()
             .await
-            .into_iter()
-            .filter(|attestation| {
-                attestation.committee_index == committee_index
-                    && attestation.data.hash_tree_root() == attestation_data_root
-            })
-            .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
+            .get(&epoch)?
+            .get(&attestation_data_root)?
+            .iter()
+            .find(|key| key.committee_index == committee_index)
+            .copied()?;
+
+        self.best_aggregate_attestation(key).await
     }
 
     pub async fn best_aggregate_attestation_by_data_root(
@@ -240,39 +243,30 @@ impl<P: Preset> Pool<P> {
         attestation_data_root: H256,
         epoch: Epoch,
     ) -> Option<PoolAttestation<P>> {
-        if let Some(keys) = self
+        let keys = self
             .data_root_to_key_map
             .read()
             .await
-            .get(&epoch)
-            .and_then(|key_map| key_map.get(&attestation_data_root))
-            .cloned()
-        {
-            let mut best_attestation = None;
+            .get(&epoch)?
+            .get(&attestation_data_root)?
+            .clone();
 
-            for key in keys {
-                if let Some(attestation) = self.best_aggregate_attestation(key).await
-                    && best_attestation
-                        .as_ref()
-                        .is_none_or(|best: &PoolAttestation<P>| {
-                            attestation.aggregation_bits.count_ones()
-                                > best.aggregation_bits.count_ones()
-                        })
-                {
-                    best_attestation = Some(attestation);
-                }
-            }
+        let mut best_attestation = None;
 
-            if best_attestation.is_some() {
-                return best_attestation;
+        for key in keys {
+            if let Some(attestation) = self.best_aggregate_attestation(key).await
+                && best_attestation
+                    .as_ref()
+                    .is_none_or(|best: &PoolAttestation<P>| {
+                        attestation.aggregation_bits.count_ones()
+                            > best.aggregation_bits.count_ones()
+                    })
+            {
+                best_attestation = Some(attestation);
             }
         }
 
-        self.aggregate_attestations_by_epoch(epoch)
-            .await
-            .into_iter()
-            .filter(|attestation| attestation.data.hash_tree_root() == attestation_data_root)
-            .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
+        best_attestation
     }
 
     // Packing depends on the parent, as attestations it includes are worth less.
