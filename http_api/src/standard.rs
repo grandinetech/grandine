@@ -4407,24 +4407,26 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
             finalized: head_state.finalized,
         }
     } else {
-        // A committee is known a period ahead, so the state at the current epoch serves the next
-        // period even while fork choice is still finishing the previous one.
         let current_epoch = current_epoch_with_clock_disparity(&controller)?;
-        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
+        let (state_epoch, committee_kind) = sync_committee_source::<P>(epoch, current_epoch)?;
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(state_epoch);
 
         if chain_config.phase_at_slot::<P>(start_slot) < Phase::Altair {
             return Err(Error::EpochNotInSyncCommitteePeriod);
         }
 
         let WithStatus {
-            value: (committee, _),
+            value: (current, next),
             status,
             finalized,
         } = tokio::task::block_in_place(|| controller.sync_committees_at_slot(start_slot))?
             .ok_or(Error::StateNotFound)?;
 
         WithStatus {
-            value: committee,
+            value: match committee_kind {
+                SyncCommitteeKind::Current => current,
+                SyncCommitteeKind::Next => next,
+            },
             status,
             finalized,
         }
@@ -4469,13 +4471,49 @@ fn state_sync_committee<P: Preset>(
     let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
     let state_period = misc::sync_committee_period::<P>(state_epoch);
 
-    if requested_period == state_period {
-        return Some(state.current_sync_committee().clone_arc());
-    } else if requested_period == state_period.saturating_add(1) {
-        return Some(state.next_sync_committee().clone_arc());
+    match sync_committee_kind(requested_period, state_period)? {
+        SyncCommitteeKind::Current => Some(state.current_sync_committee().clone_arc()),
+        SyncCommitteeKind::Next => Some(state.next_sync_committee().clone_arc()),
     }
+}
 
-    None
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SyncCommitteeKind {
+    Current,
+    Next,
+}
+
+// A state carries the committees of its own period and the next one.
+const fn sync_committee_kind(
+    requested_period: SyncCommitteePeriod,
+    state_period: SyncCommitteePeriod,
+) -> Option<SyncCommitteeKind> {
+    if requested_period == state_period {
+        Some(SyncCommitteeKind::Current)
+    } else if requested_period == state_period.saturating_add(1) {
+        Some(SyncCommitteeKind::Next)
+    } else {
+        None
+    }
+}
+
+// The epoch of the state to take the committee of `requested_period` from, used when the head
+// state does not carry it.
+// The head state lags behind the clock at the start of a period, until the period's first block
+// is imported. The next period is then two periods ahead of the head state, but the state at the
+// current epoch already carries its committee.
+// Committees of periods further ahead are not known yet.
+fn sync_committee_source<P: Preset>(
+    requested_epoch: Epoch,
+    current_epoch: Epoch,
+) -> Result<(Epoch, SyncCommitteeKind), Error> {
+    let requested_period = misc::sync_committee_period::<P>(requested_epoch);
+    let state_epoch = requested_epoch.min(current_epoch);
+    let state_period = misc::sync_committee_period::<P>(state_epoch);
+
+    sync_committee_kind(requested_period, state_period)
+        .map(|kind| (state_epoch, kind))
+        .ok_or(Error::EpochNotInSyncCommitteePeriod)
 }
 
 /// `GET /eth/v1/validator/aggregate_attestation`
@@ -7280,6 +7318,28 @@ mod tests {
     use types::{phase0::containers::Attestation as Phase0Attestation, preset::Mainnet};
 
     use super::*;
+
+    // `EPOCHS_PER_SYNC_COMMITTEE_PERIOD` is 256 under the mainnet preset.
+    #[test]
+    fn sync_committee_duties_are_taken_from_the_committees_of_the_requested_period() {
+        let source = |requested_epoch, current_epoch| {
+            sync_committee_source::<Mainnet>(requested_epoch, current_epoch).ok()
+        };
+
+        // Past and current periods come from a state in the requested period.
+        assert_eq!(source(100, 300), Some((100, SyncCommitteeKind::Current)));
+        assert_eq!(source(300, 300), Some((300, SyncCommitteeKind::Current)));
+        assert_eq!(source(400, 300), Some((300, SyncCommitteeKind::Current)));
+
+        // In the first slot of a period the head state is still in the previous one, so the next
+        // period is two periods ahead of it. It must still get the next committee, not the current.
+        assert_eq!(source(512, 256), Some((256, SyncCommitteeKind::Next)));
+        assert_eq!(source(600, 300), Some((300, SyncCommitteeKind::Next)));
+
+        // Committees further ahead are not known yet.
+        assert_eq!(source(768, 256), None);
+        assert_eq!(source(768, 511), None);
+    }
 
     // `produceBlockV4` takes the boost factor in the body, not the query.
     #[tokio::test]

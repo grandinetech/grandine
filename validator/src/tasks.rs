@@ -274,12 +274,28 @@ impl<P: Preset, W: Wait + Sync> PrefetchSyncCommitteeDutiesTask<P, W> {
 
         for period in OwnSyncCommitteeMembers::periods_to_prefetch::<P>(current_epoch) {
             if let Err(error) = own_sync_committee_members
-                .init_at_period(&chain_config, &beacon_nodes, period, &validator_indices)
+                .init_at_period(
+                    &chain_config,
+                    &beacon_nodes,
+                    period,
+                    current_epoch,
+                    &validator_indices,
+                )
                 .await
             {
-                warn_with_peers!(
-                    "failed to obtain sync committee duties for period {period}: {error:?}",
-                );
+                // Cached duties stay in use until a fetch succeeds.
+                if own_sync_committee_members
+                    .has_duties_for(period, &validator_indices)
+                    .await
+                {
+                    debug_with_peers!(
+                        "failed to refresh sync committee duties for period {period}: {error:?}",
+                    );
+                } else {
+                    warn_with_peers!(
+                        "failed to obtain sync committee duties for period {period}: {error:?}",
+                    );
+                }
             }
         }
 

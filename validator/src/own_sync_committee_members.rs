@@ -36,6 +36,8 @@ pub struct OwnSyncCommitteeMembers {
 struct PeriodDuties {
     /// The indices the duties were requested for; a key imported at runtime changes the set.
     requested: Arc<[ValidatorIndex]>,
+    /// The current epoch when the duties were fetched.
+    fetched_at: Epoch,
     members: Arc<[SyncCommitteeMember]>,
     /// Each with the epoch it is due at, drawn when the period was cached.
     subscriptions: Arc<[(Epoch, SyncCommitteeSubscription)]>,
@@ -70,6 +72,7 @@ impl OwnSyncCommitteeMembers {
             chain_config,
             beacon_nodes,
             period_at_slot::<P>(slot),
+            misc::compute_epoch_at_slot::<P>(slot),
             validator_indices,
         )
         .await?;
@@ -82,15 +85,16 @@ impl OwnSyncCommitteeMembers {
         chain_config: &ChainConfig,
         beacon_nodes: &BeaconNodes<P, W>,
         period: u64,
+        current_epoch: Epoch,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
-        let cached = self
-            .periods
-            .get_async(&period)
-            .await
-            .is_some_and(|entry| *entry.get().requested == *validator_indices);
+        let fresh = self.periods.get_async(&period).await.is_some_and(|entry| {
+            entry
+                .get()
+                .is_fresh::<P>(period, current_epoch, validator_indices)
+        });
 
-        if cached {
+        if fresh {
             return Ok(());
         }
 
@@ -102,12 +106,14 @@ impl OwnSyncCommitteeMembers {
             .sync_committee_duties(epoch, validator_indices)
             .await?;
 
-        self.record::<P>(period, validator_indices, duties).await
+        self.record::<P>(period, current_epoch, validator_indices, duties)
+            .await
     }
 
     async fn record<P: Preset>(
         &self,
         period: u64,
+        current_epoch: Epoch,
         validator_indices: &[ValidatorIndex],
         duties: Vec<ValidatorSyncDutyResponse>,
     ) -> Result<()> {
@@ -120,35 +126,14 @@ impl OwnSyncCommitteeMembers {
         let period_start = misc::start_of_sync_committee_period::<P>(period)?;
         let until_epoch = misc::start_of_sync_committee_period::<P>(period.saturating_add(1))?;
 
-        // Scoped because the generator is not `Send`, and the cache update below awaits.
-        let subscriptions = {
-            let mut rng = rand::thread_rng();
-
-            duties
-                .iter()
-                .map(|duty| {
-                    let subscription = SyncCommitteeSubscription {
-                        validator_index: duty.validator_index,
-                        sync_committee_indices: duty.validator_sync_committee_indices.clone(),
-                        until_epoch,
-                    };
-
-                    (
-                        sync_subnet_subscription_epoch(period_start, &mut rng),
-                        subscription,
-                    )
-                })
-                .collect::<Arc<[_]>>()
-        };
-
         let members = duties
-            .into_iter()
+            .iter()
             .map(|duty| {
                 Ok(SyncCommitteeMember {
                     validator_index: duty.validator_index,
                     public_key: duty.pubkey,
                     subnets: subnets_from_sync_committee_indices::<P>(
-                        duty.validator_sync_committee_indices,
+                        duty.validator_sync_committee_indices.iter().copied(),
                     )?,
                 })
             })
@@ -157,12 +142,51 @@ impl OwnSyncCommitteeMembers {
             .sorted_by_key(|member| member.validator_index)
             .collect::<Arc<[_]>>();
 
+        let new_subscriptions = duties
+            .iter()
+            .map(|duty| SyncCommitteeSubscription {
+                validator_index: duty.validator_index,
+                sync_committee_indices: duty.validator_sync_committee_indices.clone(),
+                until_epoch,
+            })
+            .sorted_by_key(|subscription| subscription.validator_index)
+            .collect_vec();
+
+        // Duties fetched again unchanged keep the epochs drawn for their subscriptions.
+        // They are compared by subscription, as members only record subnets, not the positions
+        // in the committee that subscriptions carry.
+        let unchanged_subscriptions = self.periods.get_async(&period).await.and_then(|entry| {
+            let cached = &entry.get().subscriptions;
+
+            cached
+                .iter()
+                .map(|(_, subscription)| subscription)
+                .eq(&new_subscriptions)
+                .then(|| cached.clone_arc())
+        });
+
+        // Scoped because the generator is not `Send`, and the cache update below awaits.
+        let subscriptions = unchanged_subscriptions.unwrap_or_else(|| {
+            let mut rng = rand::thread_rng();
+
+            new_subscriptions
+                .into_iter()
+                .map(|subscription| {
+                    (
+                        sync_subnet_subscription_epoch(period_start, &mut rng),
+                        subscription,
+                    )
+                })
+                .collect()
+        });
+
         // Cached even when empty, so the same question is not asked every slot of the period.
         self.periods
             .upsert_async(
                 period,
                 PeriodDuties {
                     requested: validator_indices.into(),
+                    fetched_at: current_epoch,
                     members,
                     subscriptions,
                 },
@@ -170,6 +194,15 @@ impl OwnSyncCommitteeMembers {
             .await;
 
         Ok(())
+    }
+
+    /// Whether duties of `period` were fetched for `validator_indices`, even if they are due to be
+    /// fetched again.
+    pub async fn has_duties_for(&self, period: u64, validator_indices: &[ValidatorIndex]) -> bool {
+        self.periods
+            .get_async(&period)
+            .await
+            .is_some_and(|entry| *entry.get().requested == *validator_indices)
     }
 
     pub async fn subscriptions_to_send<P: Preset>(
@@ -236,6 +269,22 @@ impl OwnSyncCommitteeMembers {
     }
 }
 
+impl PeriodDuties {
+    // A node whose head state is still in the previous period may answer with the wrong
+    // committee for a period that has not begun, so those duties are fetched again every epoch,
+    // and once more after the period begins.
+    fn is_fresh<P: Preset>(
+        &self,
+        period: u64,
+        current_epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> bool {
+        *self.requested == *validator_indices
+            && (self.fetched_at == current_epoch
+                || misc::sync_committee_period::<P>(self.fetched_at) >= period)
+    }
+}
+
 impl Default for OwnSyncCommitteeMembers {
     fn default() -> Self {
         Self::new()
@@ -298,6 +347,7 @@ mod tests {
                 period,
                 PeriodDuties {
                     requested: Arc::from([0]),
+                    fetched_at: 0,
                     members: Arc::from([]),
                     subscriptions: subscriptions.into_iter().collect(),
                 },
@@ -358,7 +408,7 @@ mod tests {
         };
 
         members
-            .record::<Minimal>(0, &[41], vec![duty.clone(), duty])
+            .record::<Minimal>(0, 0, &[41], vec![duty.clone(), duty])
             .await?;
 
         let members_at_slot_0 = members
@@ -367,6 +417,131 @@ mod tests {
             .expect("the duty should be kept");
 
         assert_eq!(members_at_slot_0.len(), 1);
+
+        Ok(())
+    }
+
+    fn period_duties(fetched_at: Epoch) -> PeriodDuties {
+        PeriodDuties {
+            requested: Arc::from([0]),
+            fetched_at,
+            members: Arc::from([]),
+            subscriptions: Arc::from([]),
+        }
+    }
+
+    // A node whose head is still in the previous period answers for the period after the current
+    // one with the current committee. Such an answer must not be kept for the whole period.
+    #[test]
+    fn duties_of_a_period_that_has_not_begun_are_fetched_again_every_epoch() {
+        // Period 2 starts at epoch 16 under the minimal preset.
+        let duties = period_duties(8);
+
+        assert!(duties.is_fresh::<Minimal>(2, 8, &[0]));
+        assert!(!duties.is_fresh::<Minimal>(2, 9, &[0]));
+        assert!(!duties.is_fresh::<Minimal>(2, 16, &[0]));
+    }
+
+    #[test]
+    fn duties_fetched_within_their_period_are_kept_for_the_period() {
+        let duties = period_duties(16);
+
+        assert!(duties.is_fresh::<Minimal>(2, 16, &[0]));
+        assert!(duties.is_fresh::<Minimal>(2, 23, &[0]));
+    }
+
+    #[test]
+    fn duties_are_fetched_again_for_a_changed_set_of_validators() {
+        assert!(!period_duties(16).is_fresh::<Minimal>(2, 16, &[0, 1]));
+    }
+
+    // Fetching the same duties every epoch must not move the epochs their subscriptions are due.
+    #[tokio::test]
+    async fn duties_fetched_again_unchanged_keep_their_subscriptions() -> Result<()> {
+        let members = OwnSyncCommitteeMembers::new();
+
+        let duty = |sync_committee_index| ValidatorSyncDutyResponse {
+            pubkey: PublicKeyBytes::default(),
+            validator_index: 41,
+            validator_sync_committee_indices: vec![sync_committee_index],
+        };
+
+        let subscriptions = || async {
+            members
+                .periods
+                .get_async(&1)
+                .await
+                .map(|entry| entry.get().subscriptions.clone_arc())
+                .expect("the period should be cached")
+        };
+
+        members
+            .record::<Minimal>(1, 0, &[41], vec![duty(0)])
+            .await?;
+        let first = subscriptions().await;
+
+        members
+            .record::<Minimal>(1, 1, &[41], vec![duty(0)])
+            .await?;
+        assert!(Arc::ptr_eq(&first, &subscriptions().await));
+
+        members
+            .record::<Minimal>(1, 2, &[41], vec![duty(8)])
+            .await?;
+        assert!(!Arc::ptr_eq(&first, &subscriptions().await));
+
+        Ok(())
+    }
+
+    // Positions 0 and 3 are both in subnet 0 under the minimal preset, so the members are the
+    // same, but the subscriptions must carry the new position.
+    #[tokio::test]
+    async fn duties_moved_within_a_subnet_get_new_subscriptions() -> Result<()> {
+        let members = OwnSyncCommitteeMembers::new();
+
+        let duty = |sync_committee_index| ValidatorSyncDutyResponse {
+            pubkey: PublicKeyBytes::default(),
+            validator_index: 41,
+            validator_sync_committee_indices: vec![sync_committee_index],
+        };
+
+        members
+            .record::<Minimal>(1, 0, &[41], vec![duty(0)])
+            .await?;
+
+        members
+            .record::<Minimal>(1, 1, &[41], vec![duty(3)])
+            .await?;
+
+        let sync_committee_indices = members
+            .periods
+            .get_async(&1)
+            .await
+            .map(|entry| {
+                entry
+                    .get()
+                    .subscriptions
+                    .iter()
+                    .map(|(_, subscription)| subscription.sync_committee_indices.clone())
+                    .collect_vec()
+            })
+            .expect("the period should be cached");
+
+        assert_eq!(sync_committee_indices, [vec![3]]);
+
+        Ok(())
+    }
+
+    // A failed refresh of cached duties is not reported as missing duties.
+    #[tokio::test]
+    async fn duties_are_known_for_the_set_they_were_fetched_for() -> Result<()> {
+        let members = OwnSyncCommitteeMembers::new();
+
+        members.record::<Minimal>(1, 0, &[41], vec![]).await?;
+
+        assert!(members.has_duties_for(1, &[41]).await);
+        assert!(!members.has_duties_for(1, &[41, 42]).await);
+        assert!(!members.has_duties_for(2, &[41]).await);
 
         Ok(())
     }
