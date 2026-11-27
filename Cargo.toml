@@ -369,8 +369,8 @@ jwt-simple = { version = '0.15', default-features = false, features = ['pure-rus
 keccak-hasher = '0.15'
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 # Proofs made with another leanVM revision do not verify, so every PQ client must be at this one.
-lean_vm = { git = 'https://github.com/leanEthereum/leanVM', rev = '1e997c9927d3e7fafa2b813734f56e25d7a4da69', features = ['cpu_tiers'] }
-lean_xmss = { git = 'https://github.com/leanEthereum/leanVM', rev = '1e997c9927d3e7fafa2b813734f56e25d7a4da69' }
+lean_vm = { git = 'https://github.com/leanEthereum/leanVM', rev = '351f7ae421529ce164ed747eee1f78bdeaec3e80', features = ['cpu_tiers'] }
+lean_xmss = { git = 'https://github.com/leanEthereum/leanVM', rev = '351f7ae421529ce164ed747eee1f78bdeaec3e80' }
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd6324d63e27ef6b7c49cdc9b1977c1b808234c7b' }
 libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
 libp2p-identity = { version = '0.3', features = ['peerid'] }
