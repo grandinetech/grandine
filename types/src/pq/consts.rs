@@ -9,6 +9,8 @@ pub const XMSS_LEAVES_PER_SLOT: u64 = 1 << 3;
 
 // VRF
 pub const VRF_TREE_DEPTH: u64 = 31;
+pub const VRF_LEAF_DOMAIN: &[u8] = b"VRF_LEAF";
+pub const VRF_SECRET_DOMAIN: &[u8] = b"VRF_SECRET";
 
 // XMSS leaf offsets
 pub const LEAF_OFFSET_BEACON_PROPOSER: u64 = 0;

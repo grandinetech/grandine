@@ -9,7 +9,7 @@ use std::{
 use anyhow::{Result, anyhow, ensure};
 use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use fs_err as fs;
-use helper_functions::vrf_tree::{VrfTree, compute_vrf_leaf};
+use helper_functions::vrf_tree::{VrfTree, compute_vrf_seed_leaf};
 use logging::warn_with_peers;
 use sha2::{Digest as _, Sha256};
 use ssz::H256;
@@ -161,7 +161,7 @@ impl PqKey {
             return Ok(());
         }
 
-        let (artifact_root, branch) = artifact.record(compute_vrf_leaf(self.vrf_seed, 1))?;
+        let (artifact_root, branch) = artifact.record(compute_vrf_seed_leaf(self.vrf_seed, 1))?;
         let root = state_vrf_root.unwrap_or(artifact_root);
         let vrf_tree = VrfTree::from_slot_zero_branch(self.vrf_seed, root, branch)?;
 

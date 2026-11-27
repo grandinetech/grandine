@@ -4,8 +4,8 @@
 //! [`VrfTree`] builds it once and keeps the nodes at [`CACHE_HEIGHT`]. A proof rebuilds only the
 //! subtree under the cached node above its leaf.
 //!
-//! [`compute_vrf_root`]: https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_root
-//! [`compute_vrf_proof`]: https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_proof
+//! [`compute_vrf_root`]: https://github.com/ethereum/consensus-specs/blob/b5d422b255db80c9bbc48f515370655ecc8bf6e5/specs/_features/pq/validator.md#new-compute_vrf_root
+//! [`compute_vrf_proof`]: https://github.com/ethereum/consensus-specs/blob/b5d422b255db80c9bbc48f515370655ecc8bf6e5/specs/_features/pq/validator.md#new-compute_vrf_proof
 
 use anyhow::{Result, ensure};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
@@ -13,19 +13,28 @@ use ssz::H256;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     phase0::primitives::Slot,
-    pq::{consts::VRF_TREE_DEPTH, primitives::VrfProof},
+    pq::{
+        consts::{VRF_SECRET_DOMAIN, VRF_TREE_DEPTH},
+        primitives::VrfProof,
+    },
 };
 
-use crate::pq::keccak256;
+use crate::pq::{compute_vrf_leaf, keccak256};
 
 /// The height of the nodes a [`VrfTree`] keeps. A proof rebuilds a subtree of `2^CACHE_HEIGHT`
 /// leaves, and a tree of depth `VRF_TREE_DEPTH` keeps `2^11` nodes (64 KiB).
 pub const CACHE_HEIGHT: u32 = 20;
 
-/// [`compute_vrf_leaf`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_leaf)
+/// [`compute_vrf_secret`](https://github.com/ethereum/consensus-specs/blob/b5d422b255db80c9bbc48f515370655ecc8bf6e5/specs/_features/pq/validator.md#new-compute_vrf_secret)
 #[must_use]
-pub fn compute_vrf_leaf(vrf_seed: H256, index: u64) -> H256 {
-    keccak256(&[vrf_seed.as_bytes(), &index.to_le_bytes()])
+pub fn compute_vrf_secret(vrf_seed: H256, index: u64) -> H256 {
+    keccak256(&[VRF_SECRET_DOMAIN, vrf_seed.as_bytes(), &index.to_le_bytes()])
+}
+
+/// The leaf at `index` of the VRF tree derived from `vrf_seed`.
+#[must_use]
+pub fn compute_vrf_seed_leaf(vrf_seed: H256, index: u64) -> H256 {
+    compute_vrf_leaf(compute_vrf_secret(vrf_seed, index), index)
 }
 
 pub struct VrfTree {
@@ -84,7 +93,7 @@ impl VrfTree {
         let (lower_branch, siblings) = branch.split_at(usize::try_from(cache_height)?);
 
         // Proofs rebuild the lower branch from the seed, so it only has to lead to `root`.
-        let subtree_root = fold_slot_zero_branch(compute_vrf_leaf(vrf_seed, 0), lower_branch);
+        let subtree_root = fold_slot_zero_branch(compute_vrf_seed_leaf(vrf_seed, 0), lower_branch);
 
         let tree = Self {
             vrf_seed,
@@ -153,7 +162,7 @@ impl VrfTree {
         }
     }
 
-    /// [`compute_vrf_root`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_root)
+    /// [`compute_vrf_root`](https://github.com/ethereum/consensus-specs/blob/b5d422b255db80c9bbc48f515370655ecc8bf6e5/specs/_features/pq/validator.md#new-compute_vrf_root)
     #[must_use]
     pub fn root(&self) -> H256 {
         match &self.upper {
@@ -173,12 +182,12 @@ impl VrfTree {
         }
     }
 
-    /// [`compute_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/2f43bc0f989f47af81df390a90bc1f78e2436323/specs/_features/pq/validator.md#new-compute_vrf_proof)
+    /// [`compute_vrf_proof`](https://github.com/ethereum/consensus-specs/blob/b5d422b255db80c9bbc48f515370655ecc8bf6e5/specs/_features/pq/validator.md#new-compute_vrf_proof)
     pub fn proof(&self, slot: Slot) -> Result<VrfProof> {
-        VrfProof::try_from_iter(self.leaf_and_branch(slot)?).map_err(Into::into)
+        VrfProof::try_from_iter(self.secret_and_branch(slot)?).map_err(Into::into)
     }
 
-    fn leaf_and_branch(&self, slot: Slot) -> Result<Vec<H256>> {
+    fn secret_and_branch(&self, slot: Slot) -> Result<Vec<H256>> {
         ensure!(
             slot >> self.depth == 0,
             "slot {slot} is past the VRF tree of depth {}",
@@ -222,7 +231,7 @@ impl VrfTree {
             }
         };
 
-        Ok(core::iter::once(compute_vrf_leaf(self.vrf_seed, slot))
+        Ok(core::iter::once(compute_vrf_secret(self.vrf_seed, slot))
             .chain(lower_branch)
             .chain(upper_branch)
             .collect())
@@ -259,7 +268,7 @@ fn compute_node(
     branch: &mut [H256],
 ) -> H256 {
     let Some(child_height) = height.checked_sub(1) else {
-        return compute_vrf_leaf(vrf_seed, index);
+        return compute_vrf_seed_leaf(vrf_seed, index);
     };
 
     let left_index = index << 1;
@@ -294,7 +303,7 @@ mod tests {
     // The spec's `compute_vrf_node`, transcribed.
     fn spec_compute_vrf_node(vrf_seed: H256, height: u32, index: u64) -> H256 {
         let Some(child_height) = height.checked_sub(1) else {
-            return compute_vrf_leaf(vrf_seed, index);
+            return compute_vrf_leaf(compute_vrf_secret(vrf_seed, index), index);
         };
 
         let left = spec_compute_vrf_node(vrf_seed, child_height, index << 1);
@@ -314,13 +323,13 @@ mod tests {
             assert_eq!(tree.root(), root);
 
             for slot in 0..1 << depth {
-                let proof = tree.leaf_and_branch(slot)?;
+                let proof = tree.secret_and_branch(slot)?;
 
                 let expected_branch = (0..depth)
                     .map(|height| spec_compute_vrf_node(vrf_seed, height, (slot >> height) ^ 1))
                     .collect::<Vec<_>>();
 
-                assert_eq!(proof[0], compute_vrf_leaf(vrf_seed, slot));
+                assert_eq!(proof[0], compute_vrf_secret(vrf_seed, slot));
                 assert_eq!(proof[1..], expected_branch);
                 assert_eq!(vrf_root_from_branch(proof[0], slot, &proof[1..]), root);
             }
@@ -340,18 +349,26 @@ mod tests {
         Ok(())
     }
 
-    // The vector pinned by the pq-devnet-0 genesis tool (`ethpandaops/eth-beacon-genesis@ff42fce`,
-    // `validators/vrf_test.go`), which built the VRF roots in the devnet genesis.
+    // Computed with a transcription of `compute_vrf_secret`, `compute_vrf_leaf` and
+    // `compute_vrf_node` at consensus-specs@b5d422b25, with the seed of the earlier genesis tool
+    // vector.
     #[test]
-    fn nodes_match_the_genesis_tool() {
+    fn nodes_match_the_spec_vector() {
         let vrf_seed = H256(hex!(
             "543fc5a4d86e79a434e9741770f7ee17c25bdc31be8d61436d7f9836538b03df"
         ));
 
         assert_eq!(
+            compute_vrf_secret(vrf_seed, 5),
+            H256(hex!(
+                "4cfd6dd35acc425d1e31274fa5600691873f37802bc3cd0fa1bc47ec8a0c4a7c"
+            )),
+        );
+
+        assert_eq!(
             compute_node(vrf_seed, 18, 1, None, &mut []),
             H256(hex!(
-                "a8e932e0dd6ec363635fdb0b30ea60d24cc1a861904c879e236c0e77f9efa562"
+                "7bfa822fd12d715cc63754b628b6c9f8009f02269aa8802a9706968ef67bd679"
             )),
         );
     }
@@ -361,7 +378,7 @@ mod tests {
         let vrf_seed = H256::repeat_byte(9);
         let (depth, cache_height) = (6, 3);
         let full = VrfTree::build_with_depth(vrf_seed, depth, cache_height);
-        let branch = full.leaf_and_branch(0)?[1..].to_vec();
+        let branch = full.secret_and_branch(0)?[1..].to_vec();
 
         let tree = VrfTree::from_slot_zero_branch_with_depth(
             vrf_seed,
@@ -375,10 +392,10 @@ mod tests {
         assert!(tree.cached_nodes().is_none());
 
         for slot in 0..1 << cache_height {
-            assert_eq!(tree.leaf_and_branch(slot)?, full.leaf_and_branch(slot)?);
+            assert_eq!(tree.secret_and_branch(slot)?, full.secret_and_branch(slot)?);
         }
 
-        tree.leaf_and_branch(1 << cache_height)
+        tree.secret_and_branch(1 << cache_height)
             .expect_err("the artifact covers only the leftmost subtree");
 
         VrfTree::from_slot_zero_branch_with_depth(
@@ -421,7 +438,7 @@ mod tests {
     fn proofs_past_the_tree_are_refused() {
         let tree = VrfTree::build_with_depth(H256::zero(), 4, 2);
 
-        tree.leaf_and_branch(16)
+        tree.secret_and_branch(16)
             .expect_err("a tree of depth 4 has 16 leaves");
     }
 }
