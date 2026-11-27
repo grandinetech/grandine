@@ -408,6 +408,17 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
     genesis_state: Arc<BeaconState<P>>,
     end_epoch: Epoch,
 ) -> Result<Vec<Arc<SignedBeaconBlock<P>>>> {
+    full_blocks_up_to_epoch_with_empty_slots(config, pubkey_cache, genesis_state, end_epoch, &[])
+}
+
+// Attestations from empty slots are included in the next block.
+pub fn full_blocks_up_to_epoch_with_empty_slots<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    genesis_state: Arc<BeaconState<P>>,
+    end_epoch: Epoch,
+    empty_slots: &[Slot],
+) -> Result<Vec<Arc<SignedBeaconBlock<P>>>> {
     let start_slot = GENESIS_SLOT + 1;
     let end_slot = misc::compute_start_slot_at_epoch::<P>(end_epoch);
 
@@ -415,12 +426,12 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
     let mut blocks = vec![];
 
     // This has to be a loop because it moves out of `pre_state`.
-    for slot in start_slot..=end_slot {
+    for slot in (start_slot..=end_slot).filter(|slot| !empty_slots.contains(slot)) {
+        let parent_slot = pre_state.slot();
         let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
-        let attestations =
-            full_block_attestations(config, &advanced_state, slot.saturating_sub(1)..slot)?;
+        let attestations = full_block_attestations(config, &advanced_state, parent_slot..slot)?;
 
         let deposits = ContiguousList::default();
         let sync_aggregate = full_sync_aggregate(config, &advanced_state);

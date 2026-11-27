@@ -742,7 +742,8 @@ impl<P: Preset> Storage<P> {
         let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
         let mut update_finalized_validators = false;
         let mut states_to_save = Vec::new();
-        let mut newer_finalized_slot = None;
+        let mut newer_finalized = None::<&ChainLink<P>>;
+        let mut empty_slot_state = None::<Arc<BeaconState<P>>>;
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -770,11 +771,48 @@ impl<P: Preset> Storage<P> {
             }
 
             if finalized {
+                let newer = newer_finalized.replace(chain_link);
+
                 if !self.prune_storage_enabled() {
                     batch.push(serialize(
                         SlotByStateRoot(block.message().state_root()),
                         state_slot,
                     )?);
+
+                    // Roots of states in empty slots are taken from `state.state_roots` of a later
+                    // state, filling the gap between this block and the newer one.
+                    // Batches overlap by one block, so gaps outside the batch are covered by others.
+                    if let Some(newer) = newer {
+                        for slot in state_slot.saturating_add(1)..newer.slot() {
+                            // The head state is always in memory. States of older blocks may have
+                            // been unloaded, and loading them may replay blocks.
+                            let state =
+                                empty_slot_state.get_or_insert_with(|| store.head().state(store));
+
+                            // Fall back to the next block's state if the head is too far ahead.
+                            // Gaps longer than `SLOTS_PER_HISTORICAL_ROOT` are partly skipped.
+                            let state_root = accessors::get_state_root_at_slot(&**state, slot)
+                                .or_else(|error| {
+                                    if state.slot() == newer.slot() {
+                                        return Err(error);
+                                    }
+
+                                    *state = newer.state(store);
+                                    accessors::get_state_root_at_slot(&**state, slot)
+                                });
+
+                            match state_root {
+                                Ok(state_root) => {
+                                    batch.push(serialize(SlotByStateRoot(state_root), slot)?);
+                                }
+                                Err(error) => debug_with_peers!(
+                                    "failed to get state root in empty slot {slot} from \
+                                     state in slot {}: {error}",
+                                    state.slot(),
+                                ),
+                            }
+                        }
+                    }
                 }
 
                 let is_epoch_start = misc::is_epoch_start::<P>(state_slot);
@@ -796,11 +834,10 @@ impl<P: Preset> Storage<P> {
                     update_finalized_validators = true;
                 }
 
-                let empty_hierarchy_slots = newer_finalized_slot
-                    .replace(state_slot)
+                let empty_hierarchy_slots = newer
                     .filter(|_| !self.prune_storage_enabled())
-                    .map(|newer_slot| {
-                        (state_slot.saturating_add(1)..newer_slot)
+                    .map(|newer| {
+                        (state_slot.saturating_add(1)..newer.slot())
                             .filter(|slot| {
                                 self.hierarchy
                                     .contains::<P>(&self.config, anchor_slot, *slot)

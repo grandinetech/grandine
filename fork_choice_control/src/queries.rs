@@ -23,7 +23,7 @@ use helper_functions::{accessors, misc};
 use itertools::{Either, Itertools as _};
 use pubkey_cache::PubkeyCache;
 use serde::Serialize;
-use ssz::{Hc, SszListMut};
+use ssz::{Hc, SszHash as _, SszListMut};
 use std_ext::ArcExt;
 use thiserror::Error;
 use tokio::time::{sleep, timeout};
@@ -56,7 +56,7 @@ use types::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot},
     traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
@@ -1670,7 +1670,8 @@ where
     }
 
     pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {
-        let store = self.store_snapshot();
+        let snapshot = self.snapshot();
+        let store = &snapshot.store_snapshot;
 
         if let Some(chain_link) = store.chain_link_by_state_root(state_root) {
             return Ok(Some(WithStatus {
@@ -1682,11 +1683,25 @@ where
 
         let pruned_up_to_slot = self.storage().pruned_up_to_slot()?;
 
-        Ok(self
+        if let Some(slot) = self
             .storage()
             .slot_by_state_root(state_root)?
             .filter(|slot| *slot >= pruned_up_to_slot)
-            .map(|slot| WithStatus::valid(slot, store.is_slot_finalized(slot))))
+        {
+            return Ok(Some(WithStatus::valid(slot, store.is_slot_finalized(slot))));
+        }
+
+        Ok(
+            slot_in_unarchived_state_roots(&snapshot, state_root)?.map(|slot| WithStatus {
+                value: slot,
+                status: store
+                    .chain_link_before_or_at(slot)
+                    .map_or(PayloadStatus::Valid, |chain_link| {
+                        store.reported_payload_status(chain_link)
+                    }),
+                finalized: store.is_slot_finalized(slot),
+            }),
+        )
     }
 
     #[must_use]
@@ -2040,11 +2055,12 @@ where
     //                      It will also only search the canonical chain.
     //                      `Store` used to have an index mapping state roots to block roots.
     //                      Consider bringing that back.
-    pub fn state_by_state_root(
+    pub fn state_by_state_root_blocking(
         &self,
         state_root: H256,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        let store = self.store_snapshot();
+        let snapshot = self.snapshot();
+        let store = &snapshot.store_snapshot;
 
         if let Some(with_status) = store.state_by_state_root(state_root) {
             return Ok(Some(with_status));
@@ -2056,6 +2072,10 @@ where
         {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));
+        }
+
+        if let Some(slot) = slot_in_unarchived_state_roots(&snapshot, state_root)? {
+            return snapshot.state_at_slot_blocking(slot);
         }
 
         Ok(None)
@@ -3565,6 +3585,64 @@ impl<P: Preset> From<Arc<BeaconState<P>>> for FinalityCheckpoints {
             finalized: state.finalized_checkpoint(),
         }
     }
+}
+
+// States in empty slots are not produced by any block, so their roots are only recorded in
+// `state.state_roots` of later states. Storage only indexes them once they are archived.
+// Each state holds the roots of the `SLOTS_PER_HISTORICAL_ROOT` slots before it, so this walks back
+// from the current slot one window at a time until it reaches the anchor.
+fn slot_in_unarchived_state_roots<P: Preset>(
+    snapshot: &Snapshot<P>,
+    state_root: H256,
+) -> Result<Option<Slot>> {
+    let store = &snapshot.store_snapshot;
+    let anchor_slot = store.anchor().slot();
+    let mut chain = store.canonical_chain().peekable();
+
+    // Slots after the head block are empty. The head state advanced to the current slot holds
+    // their roots, and is the state in the current slot itself.
+    let mut state = match snapshot.state_at_slot_blocking(store.slot())? {
+        Some(with_status) => with_status.value,
+        None => store.head().state(store),
+    };
+
+    if state.hash_tree_root() == state_root {
+        return Ok(Some(state.slot()));
+    }
+
+    loop {
+        if let Some(slot) = slot_in_state_roots(&state, state_root) {
+            return Ok(Some(slot));
+        }
+
+        let state_slot = state.slot();
+        let window_start = state_slot.saturating_sub(SlotsPerHistoricalRoot::<P>::U64);
+
+        if window_start <= anchor_slot {
+            return Ok(None);
+        }
+
+        // The oldest block in the window holds the roots of the slots before the window.
+        // If there is none, the gap before the window is longer than `SLOTS_PER_HISTORICAL_ROOT`.
+        let Some(chain_link) =
+            core::iter::from_fn(|| chain.next_if(|chain_link| chain_link.slot() >= window_start))
+                .filter(|chain_link| chain_link.slot() < state_slot)
+                .last()
+        else {
+            return Ok(None);
+        };
+
+        state = chain_link.state(store);
+    }
+}
+
+fn slot_in_state_roots<P: Preset>(state: &BeaconState<P>, state_root: H256) -> Option<Slot> {
+    let slot = state.slot();
+    let earliest_slot = slot.saturating_sub(SlotsPerHistoricalRoot::<P>::U64);
+
+    (earliest_slot..slot)
+        .rev()
+        .find(|slot| *state.state_roots().mod_index(*slot) == state_root)
 }
 
 #[derive(Debug, Error)]
