@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
-use arithmetic::U64Ext as _;
+use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
@@ -47,8 +47,11 @@ use types::{
         containers::{Fork, PendingAttestation},
         primitives::{ExecutionAddress, H256},
     },
-    preset::Preset,
-    traits::{BeaconState as _, PostElectraBeaconState as _, SszValidatorList as _},
+    preset::{Preset, SlotsPerHistoricalRoot},
+    traits::{
+        BeaconState as _, PostElectraBeaconState as _, PostGloasBeaconState as _,
+        SszValidatorList as _,
+    },
 };
 
 use crate::{
@@ -938,6 +941,14 @@ pub fn upgrade_to_gloas<P: Preset>(
         // Cache
         cache,
     };
+
+    // Unset the fork slot's payload availability, which `process_slot` would
+    // have done at the previous slot had it been processed with Gloas rules
+    let post_slot: usize = post_state.slot.try_into()?;
+    post_state.execution_payload_availability_mut().set(
+        post_slot % SlotsPerHistoricalRoot::<P>::non_zero_usize(),
+        false,
+    );
 
     // Applies any pending deposit for builders, effectively onboarding builders at the fork.
     onboard_builders(config, pubkey_cache, &mut post_state)?;
